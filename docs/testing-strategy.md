@@ -24,13 +24,18 @@ do not use real network access or `time.Sleep`-based waiting.
   long-line clip, `**` unsupported, real-directory root.
 - `run_command`: non-zero exit as data, timeout process-group kill, `WaitDelay`
   on inherited pipes, output cap, UTF-8 sanitization, cwd escape rejection,
-  environment allowlist (`HOME`/`TMPDIR`/token), nil stdin.
+  environment allowlist (`HOME`/`TMPDIR` under the state dir, token absent), nil
+  stdin.
+- Provider adapters: Chat Completions and Responses canonical mapping,
+  tool-call round trips, finish/usage/error normalization, strict JSON
+  decoding, and Responses `store:false` replay.
 - Context: budget invariants, pairing, compaction determinism, initial-task and
   recent-turn retention through `agent.Project`.
 - Session: JSONL round-trip, store-assigned `v`/`seq`/`ts`/`session`, valid final
   line without newline, torn/invalid line tolerance, append-only behavior,
   `Sync` durability, 0700/0600 modes, UUIDv7 IDs, secret redaction, `json/v2`
-  strictness.
+  strictness, and work-directory cleanup on normal, terminal-error, signal, and
+  partial-setup failure paths, with leftover-path reporting on failure.
 - Loop: scripted model sequences for all terminal states; every call paired;
   panic paired then `internal_error`; duplicate call IDs stop with
   `protocol_error`; code-based stuck detection with canonical-argument
@@ -40,7 +45,7 @@ do not use real network access or `time.Sleep`-based waiting.
 
 Tests follow the coding standard: table-driven where cases share logic; no
 assert or mock frameworks; fakes at consumer interfaces; `httptest` for the
-provider adapter; got-before-want failure messages with `t.Helper`; test error
+provider adapters; got-before-want failure messages with `t.Helper`; test error
 identity with `errors.Is`/`errors.As`, not strings; `t.Context`,
 `t.TempDir`, and the `t.Chdir`/`t.Setenv` parallel restrictions; no real network
 or `time.Sleep`-based waiting. Inside a `synctest` bubble, do not call `t.Run`,
@@ -52,11 +57,12 @@ diagnostic, not a gate.
 
 - Build the binary and run it against a fake `opencode-go` server in a temp
   workspace and temp state directory.
-- Assert the persisted log, stdout final text, stderr progress, and exit code.
-- Exercise both model IDs through the Chat Completions path and verify the
-  adapter sends the selected model, `x-opencode-session`, and a self-identifying
-  `User-Agent`; include a tool-call round trip for each model so translation
-  quirks surface.
+- Assert the persisted log, stdout final text, stderr progress, exit code, and
+  that the run removed `<state>/work/<session-id>`.
+- Exercise both model IDs through their assigned dialect path (Chat Completions
+  or Responses) and verify the adapter sends the selected model,
+  `x-opencode-session`, and a self-identifying `User-Agent`; include a
+  tool-call round trip for each dialect so translation quirks surface.
 - Cover 429→success, 401 fast-fail, malformed/duplicate-key/invalid-UTF-8 JSON,
   and context overflow.
 - Run the suite with `-race -count=1` and `govulncheck ./...`; no leaked
@@ -72,9 +78,10 @@ diagnostic, not a gate.
 Run the built binary against the real `opencode-go` provider with each model on a
 small temporary repository; set `AHARNESS_PROVIDER_TOKEN` if the endpoint
 requires auth, and set `-max-context-tokens` to the confirmed window. Verify one
-read, one edit, one search, and one test command, then inspect the raw session
-log. Optionally repeat the run inside an external sandbox to confirm the harness
-behaves the same with or without isolation.
+read, one edit, one search, and one test command, inspect the raw session log,
+and confirm the run removed `<state>/work/<session-id>`. Optionally repeat the
+run inside an external sandbox to confirm the harness behaves the same with or
+without isolation.
 
 This is a manual check, not a built-in eval suite. External benchmarking and
 eval infrastructure are out of scope for v0.

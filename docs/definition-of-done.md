@@ -18,13 +18,18 @@ v0 is complete when every item below holds.
       `encoding/json/v2` and `jsontext`, contains the complete event history for
       the run (payloads capped), and is written outside the workspace by
       default.
+- [ ] **Runtime cleanup.** A terminated run removes `<state>/work/<session-id>`;
+      cleanup is attempted on normal, error, and signal paths, and a failure
+      leaves the directory with its path reported.
 - [ ] **Limits.** Max turns, total tokens, and wall-clock limits stop the run
       with a typed status and a final summary event.
 - [ ] **Compaction.** A long synthetic history compacts below the context limit
       while preserving the task, the last turns, and tool-call/tool-result
       pairing.
-- [ ] **Models and credentials.** Both initial models complete the smoke task,
-      and provider credentials never appear in logs or child environments.
+- [ ] **Models and credentials.** Both initial models complete the smoke task
+      through their assigned dialect adapter, each implemented dialect is
+      exercised by at least one model, and provider credentials never appear in
+      logs or child environments.
 - [ ] **Testing strategy.** The unit, integration, and manual smoke checks in
       the [testing strategy](testing-strategy.md) pass.
 - [ ] **Tooling gates.** The [coding standard](coding-standard.md) §8 gates

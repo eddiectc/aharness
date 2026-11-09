@@ -85,8 +85,9 @@ repository's package structure. The rules below apply to every package.
   or two methods. Do not create an interface for a single implementation unless
   a real test or substitution need exists. Do not export a test double from a
   production package.
-- The concrete contracts (`model.OpenCode`, `tools.Registry`, `session.Store`,
-  `agent.Project`) are defined in [`architecture.md` §3.2](architecture.md).
+- The concrete contracts (`model.OpenAIChat`, `model.OpenAIResponses`,
+  `tools.Registry`, `session.Store`, `agent.Project`) are defined in
+  [`architecture.md` §3.2](architecture.md).
 - Avoid package-level mutable state. Wire dependencies in `main`; pass a
   logger, config, and store explicitly.
 - No `init()` for wiring or configuration. Initialization errors are returned

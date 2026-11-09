@@ -13,9 +13,9 @@ session log, and exits with a final answer or a typed stop reason.
 
 ## What v0 includes
 
-- One provider (`opencode-go`) behind provider-neutral types, speaking the
-  OpenAI Chat Completions dialect, with the `crouton-alpha-free` and
-  `deepseek-v4.1-flash` models.
+- One provider (`opencode-go`) behind a canonical model, with OpenAI Chat
+  Completions and Responses adapters, and the `crouton-alpha-free` and
+  `deepseek-v4.1-flash` models mapped to their dialects.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only JSONL session log; the model input is a projection rebuilt

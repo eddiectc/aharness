@@ -16,7 +16,7 @@ standard wins; on structure and runtime contracts, this document wins.
 ```mermaid
 flowchart LR
   cli["aharness CLI"] --> runner["agent runner"]
-  runner <--> model["opencode-go adapter"]
+  runner <--> model["dialect adapters"]
   runner <--> tools["tool registry"]
   runner --> session[("JSONL session log")]
   tools <--> workspace[("workspace (os.Root)")]
@@ -25,80 +25,123 @@ flowchart LR
 
 One process, one loop, no daemon, no worker pool. The runner owns turn state and
 is the only component that advances the loop. Tools do not call the model. The
-model adapter does not touch the workspace. The event log is append-only and is
+model adapters do not touch the workspace. The event log is append-only and is
 the only persisted truth.
 
 ## 2. Provider and model
 
-v0 supports one provider: `opencode-go`. The initial models are
-`crouton-alpha-free` and `deepseek-v4.1-flash`. `-model` (or
-`AHARNESS_MODEL`) is required; there is no automatic fallback, routing, or
+v0 supports one provider, `opencode-go`, through two OpenAI wire dialects:
+Chat Completions and Responses. The initial models are `crouton-alpha-free` and
+`deepseek-v4.1-flash`; the model registry assigns each to one dialect. `-model`
+(or `AHARNESS_MODEL`) is required; there is no automatic fallback, routing, or
 provider matrix.
 
-The harness opens network connections only through the `opencode-go` adapter;
-tools may use whatever network the host allows. Provider-specific request and
-response shapes stay behind the concrete `model.OpenCode` adapter. Provider
-credentials are read from `AHARNESS_PROVIDER_TOKEN` when set. The token is
-optional: when set, the adapter sends it as a Bearer token; when unset or
-empty, it omits `Authorization`, which supports local no-auth endpoints and
-`httptest` servers. An endpoint that requires auth surfaces a missing token as
-`provider_error` (401); local no-auth endpoints run without one. The token is
+The harness opens network connections only through the dialect adapters; tools
+may use whatever network the host allows. Provider-specific request and
+response shapes stay behind `model.OpenAIChat` and `model.OpenAIResponses`.
+Provider credentials are read from `AHARNESS_PROVIDER_TOKEN` when set. The token
+is optional: when set, the selected adapter sends it as a Bearer token; when
+unset or empty, it omits `Authorization`, which supports local no-auth endpoints
+and `httptest` servers. An endpoint that requires auth surfaces a missing token
+as `provider_error` (401); local no-auth endpoints run without one. The token is
 kept in memory, redacted from logs, and excluded from tool environments.
-Credential handling stays in this adapter; v0 does not scan unrelated host
+Credential handling stays in the adapters; v0 does not scan unrelated host
 configuration or discover credentials implicitly.
 
 ### 2.1 Wire format and SDKs
 
-The v0 adapter speaks the OpenAI Chat Completions dialect over plain HTTP:
-`POST https://opencode.ai/inference/go/openai/v1/chat/completions`. Both initial
-models use this endpoint even though their native APIs differ; Console
-translates every text model across every API, so v0 does not implement the
-Responses, Anthropic, or Gemini dialects. If a model misbehaves through
-translation, add its native endpoint behind the same adapter; do not change the
-loop. Chat Completions is the wire format, not the internal schema; the core
-`model` types remain provider-neutral (Section 2.2).
+v0 ships two dialect adapters over plain HTTP against the same `opencode-go`
+base URL:
+
+- **Chat Completions:** `POST <base>/chat/completions`.
+- **Responses:** `POST <base>/responses`.
+
+The model registry assigns each initial model to one dialect; the exact mapping
+is an open prerequisite. It is a small table in `cmd`, not user-configurable in
+v0. Anthropic and Gemini are deferred. If a model misbehaves through a dialect,
+fix that adapter or add its native dialect behind the same canonical model; do
+not change the loop. The wire dialect is not the internal schema; both adapters
+map into the canonical model (Section 2.2).
 
 Do not use an OpenCode SDK at this boundary. The published Go SDKs
 (`opencode-sdk-go` and its community forks) are generated clients for the
 OpenCode server REST API; adopting one would move the loop, tools, and session
 state into OpenCode, which is the architecture v0 rejects. There is no official
 Go SDK for the OpenCode Go inference endpoint: it is OpenAI-compatible HTTP, and
-the stdlib adapter is smaller than the mapping layer an SDK would require. An
+the stdlib adapters are smaller than the mapping layer an SDK would require. An
 inference SDK would also own retries, error bodies, and decoding, hiding the
 `model_retry` events and redaction the session log depends on. The available Go
 clients also fit poorly as dependencies: the Stainless-generated client targets
 an older server API, and the community fork that tracks upstream has no license.
 
-The adapter is constructed with the base URL, provider token, session ID, and
+Each adapter is constructed with the base URL, provider token, session ID, and
 harness version. It sends `Authorization: Bearer <token>`,
 `Content-Type: application/json`, `x-opencode-session: <session-id>`, and a
 self-identifying `User-Agent: aharness/<version>`. An empty token omits the
 `Authorization` header, supporting local no-auth endpoints and tests. OpenCode
 Go requires the session header; the value is the run's UUIDv7 session ID. The
 base URL is a constructor argument so tests and local deployments can point the
-adapter at another OpenAI-compatible server; the v0 CLI keeps the hosted URL.
+adapters at another OpenAI-compatible server; the v0 CLI keeps the hosted URL.
 
-### 2.2 Provider abstraction
+Both adapters send the full projected input on every call and keep no
+server-side conversation state. The Responses adapter sets `store: false` and
+never uses `previous_response_id`. If its model requires reasoning items or
+encrypted content across tool rounds, that continuation is adapter-owned and
+remains an open v0 prerequisite
+([v0-build.md §4.3](v0-build.md#43-open-prerequisites)); the canonical model
+never carries raw provider shapes.
 
-Support many providers through adapters, not a feature superset. The core
-`model.Request`/`model.Response` types cover only what the loop needs: text,
-tool calls and results, a normalized finish reason, usage, and normalized
-errors. The concrete adapter owns the wire format, authentication, tool-schema
-quirks, and the mapping of finish reasons, usage, and errors. It uses one
-`http.Client` with a timeout and `http.NewRequestWithContext`, always closes and
-caps the response body at 1 MiB, and never uses `http.DefaultClient`. Provider
-error bodies are capped and redacted before logging.
+### 2.2 Canonical model and dialect adapters
 
-Do not build one union schema for OpenAI Responses, OpenAI Chat, Anthropic, and
-Gemini. Their semantics differ in system prompts, tool-call correlation, content
-blocks, safety handling, and streaming events; a union would push
-provider-specific optional fields and invalid states into the loop. OpenAI Chat is
-a dialect, not a neutral standard, so it is not the internal schema either.
+The `model` package defines one internal canonical model. Every provider
+dialect is an adapter that maps its wire format into these types; the loop sees
+only the canonical model. The canonical model covers what the loop can act on:
+system and user text, assistant text, tool calls and results correlated by ID,
+a normalized finish reason, token usage, and normalized errors.
+
+Canonical does not mean lossless. Provider-specific material — reasoning or
+thinking blocks, citations, safety metadata, cache controls, opaque options,
+and streaming events — stays in the adapter and is dropped unless the loop or
+the dialect's continuation needs it. If a future feature needs one of those, add
+a typed canonical field when the loop consumes it; do not add a raw
+provider-shaped field. A lossless union schema for OpenAI Responses, OpenAI
+Chat, Anthropic, and Gemini would push provider-specific optional fields and
+invalid states into the loop; that is the thing to avoid. OpenAI Chat is a
+dialect, not a neutral standard, so it is not the canonical model either.
+
+Each adapter owns the wire format, authentication, tool-schema translation, and
+the mapping of finish reasons, usage, and errors. It uses one `http.Client` with
+a timeout and `http.NewRequestWithContext`, always closes and caps the response
+body at 1 MiB, and never uses `http.DefaultClient`. Provider error bodies are
+capped and redacted before logging.
 
 | Layer | Owns |
 |---|---|
-| Core `model` types | Text, tool calls/results, normalized finish reason, usage, normalized errors. |
-| `model.OpenCode` adapter | Wire format, auth, tool-schema translation, finish/usage/error mapping. |
+| Canonical `model` types | System/text messages, tool calls/results, normalized finish reason, usage, normalized errors. |
+| `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, prompt/completion usage. |
+| `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, input/output usage, `store: false` full replay. |
+| Shared `model` HTTP helper | Request execution, auth/session headers, 1 MiB body cap, typed error decoding. |
+
+Normalization rules:
+
+- The canonical system prompt is the first message. Adapters place it in the
+  dialect's system slot (`system` message, top-level `system`, or
+  `systemInstruction`).
+- Every canonical tool call has a non-empty ID and raw JSON arguments. If a
+  dialect omits call IDs (Gemini function calls may), the adapter synthesizes a
+  deterministic ID for that response and uses it for the matching result. For a
+  dialect that supplies IDs, a missing or duplicate wire ID is `protocol_error`;
+  the adapter does not repair it. The Responses adapter uses
+  `function_call.call_id` for correlation, not the output item `id`.
+- Canonical finish reasons are `stop`, `length`, `tool_calls`,
+  `content_filter`, and `other`; adapters map dialect-specific stop reasons.
+- Canonical usage is input and output tokens; adapters map dialect usage fields.
+- Canonical errors are typed (`HTTPError`, `TransportError`, `ProtocolError`,
+  and context overflow); adapters map HTTP statuses and provider error bodies.
+- Both adapters replay the canonical projection; the Responses adapter sets
+  `store: false` and never uses `previous_response_id`. A bounded
+  adapter-owned continuation for reasoning items is a v0 open prerequisite, not
+  a canonical message.
 
 Provider responses are decoded with `encoding/json/v2` defaults: duplicate
 object names and invalid UTF-8 are rejected and map to `protocol_error`; unknown
@@ -107,12 +150,13 @@ typed decoding uses `RejectUnknownMembers(true)` (Section 5). Do not set
 `RejectUnknownMembers(true)` for provider responses.
 
 v0 has no opaque provider options or capability flags. Add adapter-specific
-knobs only with the second adapter, and keep them out of the loop.
+knobs only when a dialect requires them, and keep them out of the loop.
 
-v0 ships only the `opencode-go` adapter. Add `openai-chat`,
-`openai-responses`, `anthropic`, or `gemini` adapters when a real provider
-requires them. Share HTTP, retry, and fixture plumbing; do not share a
-universal request/response schema beyond the small core.
+v0 ships `model.OpenAIChat` and `model.OpenAIResponses` over the `opencode-go`
+base URL. Add `anthropic` or `gemini` adapters when a real provider requires
+them; each maps into the same canonical model without changing the loop. Share
+HTTP, retry, and fixture plumbing; do not share a universal request/response
+schema beyond the canonical model.
 
 ## 3. Packages and contracts
 
@@ -122,7 +166,7 @@ universal request/response schema beyond the small core.
 |---|---|
 | `cmd/aharness/` | Flags, environment parsing, config validation, wiring, signal handling, exit codes. |
 | `internal/agent/` | Runner, turn execution, stop policy, retry policy, repeated-failure detection, projection/compaction. |
-| `internal/model/` | Provider-neutral types; concrete `opencode-go` adapter; typed transport errors. |
+| `internal/model/` | Canonical types; Chat Completions and Responses adapters; shared HTTP plumbing; typed transport errors. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
 | `internal/session/` | Event envelope, JSONL append-only store, session metadata, replay-ready reader. |
 
@@ -130,7 +174,7 @@ universal request/response schema beyond the small core.
 go.mod
 cmd/aharness/
   main.go        # flags/env, wiring, signals, exit codes
-  config.go      # parsing and validation
+  config.go      # parsing, validation, model-to-dialect registry
   config_test.go
 internal/agent/
   runner.go      # loop, stop policy, repeated-failure detection
@@ -138,8 +182,10 @@ internal/agent/
   retry.go
   stop.go
 internal/model/
-  types.go       # provider-neutral request/response/error types
-  opencode.go    # the one adapter
+  types.go            # canonical request/response/error types
+  openai_chat.go      # Chat Completions adapter
+  openai_responses.go # Responses adapter
+  http.go             # shared request, body cap, error decoding
   errors.go
 internal/tools/
   registry.go
@@ -164,20 +210,24 @@ only when a second consumer or a clear boundary justifies it; do not add `pkg/`,
 
 Dependencies stay deliberately small: Go standard library only at runtime. Typed
 structs and explicit checks validate tool arguments; a JSON Schema validator is
-not needed in v0. The provider adapter uses `net/http` with the OpenAI Chat
-Completions dialect; no provider SDK is used (Section 2.1). Dev tools
-(`goimports`, `golangci-lint`, `govulncheck`) are not runtime dependencies.
+not needed in v0. The provider adapters use `net/http` with the OpenAI Chat
+Completions and Responses dialects; no provider SDK is used (Section 2.1). Dev
+tools (`goimports`, `golangci-lint`, `govulncheck`) are not runtime dependencies.
 
 ### 3.2 Core contracts
 
-- `model.OpenCode` — concrete adapter with
-  `Complete(ctx, model.Request) (model.Response, error)`. `model.Request`
-  carries the projected messages, tool schemas, `max_output_tokens`, and model
-  name. `model.Response` carries assistant text, zero or more tool calls
-  (provider call ID, name, raw JSON arguments), a normalized finish reason
-  (`stop`, `length`, `tool_calls`, `content_filter`, or `other`), and usage.
-  Typed errors (`HTTPError`, `TransportError`, `ProtocolError`, and context
-  overflow) keep retry policy in `agent`.
+- `model.OpenAIChat` and `model.OpenAIResponses` — concrete dialect adapters
+  with `Complete(ctx, model.Request) (model.Response, error)`. `model.Request`
+  carries the projected messages with the versioned system prompt first, tool
+  schemas, `max_output_tokens`, and model name. `model.Response` carries
+  assistant text, zero or more tool calls (canonical call ID, name, raw JSON
+  arguments), a normalized finish reason (`stop`, `length`, `tool_calls`,
+  `content_filter`, or `other`), and usage. Adapters guarantee a non-empty call
+  ID; for a dialect that supplies IDs, a missing or duplicate ID is
+  `protocol_error` and is not repaired. Typed errors (`HTTPError`,
+  `TransportError`, `ProtocolError`, and context overflow) keep retry policy in
+  `agent`. `cmd` maps the configured model to its dialect and wires the
+  corresponding adapter.
 - `tools.Registry` — concrete registry with `Schemas() []tools.Schema` and
   `Execute(ctx, name string, args json.RawMessage) tools.Result`. The dispatcher
   validates arguments and converts errors into `tools.Result`; a panic is
@@ -195,14 +245,15 @@ Completions dialect; no provider SDK is used (Section 2.1). Dev tools
   per-call input budget, the next-output reserve, and the compaction target; the
   prompt and tool schemas are selected from the versions recorded in
   `session_start` using immutable package constants. The returned `Projection`
-  carries the provider-neutral messages, the input-token estimate, and the
+  carries the canonical messages, the input-token estimate, and the
   elided-result count; the runner logs `compaction` when the count changes.
 
 The agent MAY define unexported consumer interfaces (`completer`, `toolset`,
 `eventStore`) so loop tests use fakes. Keep each interface to one or two
 methods; split append/sync from read/close rather than defining one wide
-`eventStore`. Production wires the concrete `*model.OpenCode`,
-`*tools.Registry`, and `*session.Store`. Because the packages are `internal`, do
+`eventStore`. Production wires the selected dialect adapter
+(`*model.OpenAIChat` or `*model.OpenAIResponses`), `*tools.Registry`, and
+`*session.Store`. Because the packages are `internal`, do
 not export interfaces solely for tests.
 
 ## 4. Agent loop
@@ -210,12 +261,13 @@ not export interfaces solely for tests.
 ### 4.1 Turn sequence
 
 1. Create the harness-owned work directories and the session store, then append
-   `session_start` with the workspace, state directory, provider, model, limits,
-   prompt version, toolset version, and harness version. Secrets are redacted.
-   Append `user_message` with the task text and its source (`-task` or
+   `session_start` with the workspace, state directory, provider, dialect, model,
+   limits, prompt version, toolset version, and harness version. Secrets are
+   redacted. Append `user_message` with the task text and its source (`-task` or
    `-task-file`). Config/usage validation failures exit 2 before any session
    state is created; disk failures while creating the session state exit 1
-   (`internal_error`) without a `final` event.
+   (`internal_error`) without a `final` event. If setup fails after the work
+   directory is created, remove it before exiting.
 2. Check all limits: the turn count (`turns >= max_turns`), the session
    wall-clock deadline, and the cumulative token budget. A reached limit appends
    `limit` and terminates.
@@ -241,9 +293,12 @@ not export interfaces solely for tests.
    reached, a fatal error occurs, or a signal arrives.
 8. On termination of an initialized session, emit exactly one `final` event with
    the terminal status and the last assistant text emitted in the run, if any,
-   then append `session_end` with status, totals, and final usage. If the log
-   write itself fails, exit `internal_error` without claiming durability.
-   Best-effort, including on signal; see Section 8 for the shutdown budget.
+   then append `session_end` with status, totals, and final usage. Sync and close
+   the log, then remove `<state>/work/<session-id>` best-effort; a cleanup
+   failure is reported on stderr and does not change the terminal status. If the
+   log write itself fails, still attempt cleanup and exit `internal_error`
+   without claiming durability. Best-effort, including on signal; see Section 8
+   for the shutdown budget.
 
 The loop never batches multiple assistant turns, never skips a tool call, and
 never sends a tool result without a preceding call. If a model response contains
@@ -371,13 +426,23 @@ the open file (fchmod, not path-based `Chmod`), `f.Sync`, close, then
 `run_command` receives an explicit allowlist, never `os.Environ`: `PATH`,
 `LANG`, `LC_ALL`, `TERM`, and harness-set `HOME` and `TMPDIR`. `HOME` and
 `TMPDIR` point at harness-owned directories under the state dir, not the user's
-home: `<state>/work/<session-id>/home` and `<state>/work/<session-id>/tmp`,
-created with mode 0700 when the session starts. v0 does not remove them
-automatically. An explicit denylist rejects any allowlisted name matching
-`*_TOKEN`, `*_SECRET`, `*_KEY`, or `*_PASSWORD` (case-insensitive); this is
-defense in depth, not a boundary. The child never inherits provider credentials
-or unrelated host variables. This is hygiene, not isolation; a child process can
-still inspect the harness process. Use external isolation when that matters.
+home, so child commands do not pick up the user's dotfiles, caches, or
+credentials by default: `<state>/work/<session-id>/home` and
+`<state>/work/<session-id>/tmp`, created with mode 0700 when the session starts.
+They are session scratch, not durable storage: the runner removes
+`<state>/work/<session-id>` after the session log is synced and closed, on every
+terminal path including signal and internal error. Cleanup is best-effort; if
+removal fails, the run reports the leftover path on stderr and leaves it for
+inspection. The workspace is the intended place for durable task artifacts;
+child `HOME`/`TMPDIR` are ephemeral. An explicit denylist rejects any allowlisted
+name matching `*_TOKEN`, `*_SECRET`, `*_KEY`, or `*_PASSWORD`
+(case-insensitive); this is defense in depth, not a boundary. The child never
+inherits provider credentials or unrelated host variables. This is hygiene, not
+isolation; a child process can still inspect the harness process. Use external
+isolation when that matters. v0 deliberately does not use the host `/tmp` for
+these paths: `/tmp` may be mounted `noexec`, size-limited, or cleaned while a
+long session runs. The state dir is configurable; point it at fast local disk
+if needed.
 
 The tool descriptions and JSON schemas are versioned prompt material, not
 afterthoughts. Schemas are hand-written `json.RawMessage` constants. Arguments
@@ -435,7 +500,9 @@ it on every turn. Compaction never mutates the log.
   `<state>/sessions/<session-id>.jsonl`. `run_command` gets harness-owned `HOME`
   and `TMPDIR` at `<state>/work/<session-id>/home` and
   `<state>/work/<session-id>/tmp`, created with mode 0700 when the session
-  starts.
+  starts. The whole `<state>/work/<session-id>` subtree is removed on
+  termination; `sessions/` is the only durable record, and the empty `work/`
+  container remains for later runs.
 - **Creation:** create the state directory with mode 0700 and the session file
   with `O_CREATE|O_WRONLY|O_APPEND|O_EXCL`, mode 0600. If the state directory is
   not writable, start-up fails with a clear error (exit 2). The default is
@@ -467,7 +534,7 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Payload |
 |---|---|
-| `session_start` | Prompt version, toolset version, workspace, state dir, provider, model, limits, harness version. |
+| `session_start` | Prompt version, toolset version, workspace, state dir, provider, dialect, model, limits, harness version. |
 | `user_message` | Task text or corrective hint, plus source (`-task`, `-task-file`, `stuck-hint`, or `continuation-hint`). |
 | `model_request` | Debug only (`AHARNESS_LOG_REQUESTS=1`): exact projected messages, capped at 1 MiB. One per distinct projected request; transport retries reuse it, a compaction retry logs a new one. |
 | `model_response` | Assistant text, tool calls (ID, name, arguments), finish reason, token usage, latency, attempt number. Exactly one per successful model call. |
@@ -501,8 +568,9 @@ of scope for v0.
 | Model response with duplicate tool-call IDs | Append `error`; stop with `protocol_error`. Do not execute any call in that response. |
 | Repeated identical tool failure | Counts only `ok=false` results; "identical" means the same tool, canonical arguments, and stable result code. Canonical arguments are computed from the provider-supplied JSON by recursively sorting object members by name, preserving array order and numeric literals, and rejecting duplicate names; whitespace differences are ignored. The message is for display, not identity. After 3 consecutive identical failures, append a `user_message` event with source `stuck-hint` and include it in the next projection. After 5, stop with `stuck`. |
 | Session turn/token/time limit | Append `limit`, then terminate; the terminal path emits `final` and `session_end` with the corresponding status. |
-| SIGINT/SIGTERM | Kill the running child's process group; write final events and sync the log with a fresh 5-second shutdown budget; terminate with `interrupted`, exit 130. `Append`/`Sync` are not context-aware, so a hung filesystem may exceed the budget; the shutdown path is still best-effort. |
-| Disk write failure for the log | Fail fast with `internal_error`; the run cannot be made durable. |
+| SIGINT/SIGTERM | Kill the running child's process group; write final events and sync the log with a fresh 5-second shutdown budget; remove `<state>/work/<session-id>` best-effort; terminate with `interrupted`, exit 130. `Append`/`Sync` and cleanup are not context-aware, so a hung filesystem may exceed the budget; the shutdown path is still best-effort. |
+| Disk write failure for the log | Fail fast with `internal_error`; still attempt work-directory removal; the run cannot be made durable. |
+| Work-directory cleanup failure | Report the leftover path on stderr and leave it for inspection; the terminal status is unchanged. A surviving child or a read-only filesystem can cause this; use external isolation for hard containment. |
 
 Model requests are retried; tool executions are not. This distinction prevents
 duplicate file edits and commands after a transient failure.
@@ -518,8 +586,8 @@ aharness -task-file task.md -model crouton-alpha-free -workspace /tmp/repo
 ```
 
 The examples target the hosted `opencode-go` endpoint and assume
-`AHARNESS_PROVIDER_TOKEN` is exported. The adapter also accepts an empty token
-for local no-auth endpoints and tests (Section 2.1).
+`AHARNESS_PROVIDER_TOKEN` is exported. Both dialect adapters also accept an
+empty token for local no-auth endpoints and tests (Section 2.1).
 
 - Use the standard `flag` package; no CLI framework in v0.
 - Precedence: defaults, then environment, then flags. Parse environment errors
@@ -535,14 +603,17 @@ for local no-auth endpoints and tests (Section 2.1).
   it must be writable, or start-up fails with exit 2.
 - `-model` or `AHARNESS_MODEL` is required. Accepted values:
   `crouton-alpha-free`, `deepseek-v4.1-flash`. The provider is fixed to
-  `opencode-go` in v0.
+  `opencode-go` in v0. The model registry maps each accepted model ID to its
+  dialect (`openai-chat` or `openai-responses`); the selected dialect is
+  recorded in `session_start`. The exact mapping is an open prerequisite
+  ([v0-build.md §4.3](v0-build.md#43-open-prerequisites)).
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
-  optional. When set, the adapter sends it as a Bearer token; when unset or
-  empty, it omits `Authorization`, supporting local no-auth endpoints and
-  `httptest` adapters. An endpoint that requires auth surfaces a missing token
-  as `provider_error` (401); local no-auth endpoints run without one. Never
-  logged and never passed to tools. The adapter sends the run's session ID in
-  the required `x-opencode-session` header and identifies itself as
+  optional. When set, the selected adapter sends it as a Bearer token; when
+  unset or empty, it omits `Authorization`, supporting local no-auth endpoints
+  and `httptest` adapters. An endpoint that requires auth surfaces a missing
+  token as `provider_error` (401); local no-auth endpoints run without one.
+  Never logged and never passed to tools. The adapter sends the run's session ID
+  in the required `x-opencode-session` header and identifies itself as
   `aharness/<version>` in `User-Agent` (Section 2.1).
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
