@@ -11,8 +11,10 @@ in [docs/definition-of-done.md](docs/definition-of-done.md).
 
 Non-negotiables:
 
-- Runtime dependencies stay at zero. Use the standard library; do not add a
-  framework, UUID library, JSON Schema validator, or retry library.
+- Runtime dependencies stay at zero by default. Use the standard library;
+  exceptions MUST satisfy the justification requirements in the coding standard
+  §3. Do not add a framework, UUID library, JSON Schema validator, or retry
+  library without that justification.
 - Start with the five-package layout in `docs/architecture.md` §3.1. Do not
   create `pkg/`, `util`, `common`, or one-package-per-type.
 - Route workspace paths through `os.Root` and `filepath.IsLocal`; reject `.git`
