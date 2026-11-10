@@ -1,5 +1,6 @@
 // Package agent implements the bounded model/tool loop, context projection and
-// compaction, retry policy, and stop policy.
+// compaction, retry policy, streaming display, interactive control, and stop
+// policy.
 package agent
 
 import (
@@ -14,7 +15,8 @@ import (
 	"aharness/internal/tools"
 )
 
-// PromptVersion identifies the v0 system prompt and projection contract.
+// PromptVersion identifies the v1 system prompt and projection contract. v1
+// keeps prompt-v0 unchanged.
 const PromptVersion = "prompt-v0"
 
 // Limits is the per-call context budget contract.
@@ -32,13 +34,16 @@ func SafetyMargin(maxContextTokens int) int {
 	return margin
 }
 
-// Config is the runner's immutable session configuration.
+// Config is the runner's immutable effective configuration for one run.
 type Config struct {
 	Provider       string
 	Dialect        string
 	Model          string
+	BaseURL        string
 	Workspace      string
 	StateDir       string
+	PromptVersion  string
+	ToolsetVersion string
 	HarnessVersion string
 
 	MaxTurns       int
@@ -49,7 +54,45 @@ type Config struct {
 	ModelTimeout   time.Duration
 	LogRequests    bool
 
+	Interactive bool
+	Stream      bool
+	// EmitText receives assistant-text deltas and non-streamed response text
+	// when Stream is set. It is display-only and never transcript state.
+	EmitText func(string) error
+	// Steering delivers plain stdin lines consumed at turn boundaries. A nil
+	// channel disables steering.
+	Steering <-chan string
+	// Controller registers the in-flight operation so an interactive first
+	// SIGINT can cancel it. A nil controller disables interactivity.
+	Controller Controller
+
 	Logger *slog.Logger
+}
+
+// Controller mediates interactive interruption. BeginOperation returns a
+// context canceled only by an interactive interrupt and a cleanup that
+// unregisters the operation.
+type Controller interface {
+	BeginOperation(ctx context.Context) (context.Context, func())
+}
+
+// ParentRef identifies the parent session and fork point recorded in a new
+// forked session_start.
+type ParentRef struct {
+	Session string
+	Seq     uint64
+}
+
+// RunOptions describes one process run over a durable session.
+type RunOptions struct {
+	// Task is the text for this run. TaskSet distinguishes an intentionally
+	// omitted task (resume) from an empty task string.
+	Task     string
+	TaskSet  bool
+	TaskFrom string
+	// ResumedFromSeq is the last durable sequence number before this run.
+	// It is zero for a fresh session.
+	ResumedFromSeq uint64
 }
 
 // StopReason is a typed terminal status.
@@ -89,11 +132,13 @@ func (s StopReason) ExitCode() int {
 
 // Result is the outcome of one run.
 type Result struct {
-	Status    StopReason
-	FinalText string
-	Turns     int
-	Usage     model.Usage
-	Err       error
+	Status          StopReason
+	FinalText       string
+	RunTurns        int
+	RunUsage        model.Usage
+	CumulativeTurns int
+	CumulativeUsage model.Usage
+	Err             error
 }
 
 // Projection is the model input rebuilt from the event log.
@@ -107,6 +152,10 @@ type Projection struct {
 
 // ErrProjectionTooLarge means compaction could not fit the input budget.
 var ErrProjectionTooLarge = errors.New("projection exceeds input budget")
+
+// errStreamOutput marks a display write failure while streaming. It is an
+// internal failure, not a provider failure.
+var errStreamOutput = errors.New("stream output failed")
 
 // completer, toolset, and eventStore are consumer-side interfaces for loop
 // tests. Production wires the concrete adapters, registry, and store.

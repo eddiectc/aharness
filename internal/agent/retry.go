@@ -33,13 +33,16 @@ var errEventStore = errors.New("session event store failure")
 
 // completion is one successful model call.
 type completion struct {
-	resp    model.Response
-	attempt int
-	latency time.Duration
+	resp     model.Response
+	attempt  int
+	latency  time.Duration
+	streamed bool
+	emitted  bool
 }
 
 // callModel calls the completer with the transport retry budget. The request
-// event is logged once per distinct projection; retries reuse it.
+// event is logged once per distinct projection; retries reuse it. A retry is
+// allowed only before the first display delta.
 func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimatedInputTokens int) (completion, error) {
 	if err := r.recordModelRequest(req, turn, estimatedInputTokens); err != nil {
 		return completion{}, fmt.Errorf("%w: %w", errEventStore, err)
@@ -47,13 +50,19 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 
 	var lastErr error
 	for attempt := 1; attempt <= maxModelAttempts; attempt++ {
-		resp, latency, err := r.completeOnce(ctx, req)
+		resp, latency, emitted, err := r.completeOnce(ctx, req)
 		if err == nil {
-			return completion{resp: resp, attempt: attempt, latency: latency}, nil
+			return completion{resp: resp, attempt: attempt, latency: latency, streamed: resp.Streamed, emitted: emitted}, nil
 		}
-		// A canceled session is never retried. The caller maps the context
-		// error to interrupted or time_limit.
+		// A canceled operation is never retried. The caller classifies it as
+		// an interactive interrupt, a session timeout, or a run signal.
 		if ctx.Err() != nil {
+			return completion{}, err
+		}
+		// Display output began; a retry would duplicate stdout. Adapters also
+		// wrap this in PartialError, but the emitted flag is the loop's own
+		// guard.
+		if emitted {
 			return completion{}, err
 		}
 		if errors.Is(err, model.ErrContextOverflow) {
@@ -100,16 +109,16 @@ func (r *Runner) callModelOnce(ctx context.Context, req model.Request, turn, est
 	if err := r.recordModelRequest(req, turn, estimatedInputTokens); err != nil {
 		return completion{}, fmt.Errorf("%w: %w", errEventStore, err)
 	}
-	resp, latency, err := r.completeOnce(ctx, req)
+	resp, latency, emitted, err := r.completeOnce(ctx, req)
 	if err != nil {
 		return completion{}, err
 	}
-	return completion{resp: resp, attempt: 1, latency: latency}, nil
+	return completion{resp: resp, attempt: 1, latency: latency, streamed: resp.Streamed, emitted: emitted}, nil
 }
 
-// completeOnce performs one attempt with the per-call timeout. A timeout is a
-// retryable transport failure when the session context is still alive.
-func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Response, time.Duration, error) {
+// completeOnce performs one attempt with the per-call timeout. It prefers the
+// streaming adapter when -stream is set and falls back to Complete otherwise.
+func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Response, time.Duration, bool, error) {
 	callCtx := ctx
 	var cancel context.CancelFunc
 	if r.cfg.ModelTimeout > 0 {
@@ -117,12 +126,29 @@ func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Res
 		defer cancel()
 	}
 	start := time.Now()
+	if r.cfg.Stream {
+		if streamer, ok := r.model.(model.StreamCompleter); ok {
+			emitted := false
+			resp, err := streamer.CompleteStream(callCtx, req, func(delta string) error {
+				if delta == "" {
+					return nil
+				}
+				emitted = true
+				return r.emitText(delta)
+			})
+			return resp, time.Since(start), emitted, err
+		}
+	}
 	resp, err := r.model.Complete(callCtx, req)
-	latency := time.Since(start)
-	return resp, latency, err
+	return resp, time.Since(start), false, err
 }
 
 func retryableError(err error) bool {
+	// Once display output began, a retry would duplicate stdout and could
+	// duplicate tool calls. The adapter wraps those failures in PartialError.
+	if _, ok := errors.AsType[*model.PartialError](err); ok {
+		return false
+	}
 	if _, ok := errors.AsType[*model.ProtocolError](err); ok {
 		return false
 	}

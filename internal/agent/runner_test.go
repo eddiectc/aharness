@@ -34,11 +34,11 @@ func TestRunCompleted(t *testing.T) {
 	if res.FinalText != "all done" {
 		t.Fatalf("final text = %q, want %q", res.FinalText, "all done")
 	}
-	if res.Turns != 1 {
-		t.Fatalf("turns = %d, want 1", res.Turns)
+	if res.CumulativeTurns != 1 {
+		t.Fatalf("turns = %d, want 1", res.CumulativeTurns)
 	}
-	if res.Usage.Total() != 15 {
-		t.Fatalf("usage total = %d, want 15", res.Usage.Total())
+	if res.CumulativeUsage.Total() != 15 {
+		t.Fatalf("usage total = %d, want 15", res.CumulativeUsage.Total())
 	}
 	if comp.calls != 1 {
 		t.Fatalf("model calls = %d, want 1", comp.calls)
@@ -49,10 +49,11 @@ func TestRunCompleted(t *testing.T) {
 
 	wantTypes := []session.EventType{
 		session.TypeSessionStart,
+		session.TypeRunStart,
 		session.TypeUserMessage,
 		session.TypeModelResponse,
 		session.TypeFinal,
-		session.TypeSessionEnd,
+		session.TypeRunEnd,
 	}
 	if len(store.events) != len(wantTypes) {
 		t.Fatalf("event count = %d, want %d (%v)", len(store.events), len(wantTypes), wantTypes)
@@ -67,25 +68,29 @@ func TestRunCompleted(t *testing.T) {
 	if start.Workspace != cfg.Workspace || start.Model != cfg.Model || start.PromptVersion != PromptVersion || start.ToolsetVersion != tools.Version {
 		t.Fatalf("session_start = %+v", start)
 	}
-	user := decodePayload[userMessageData](t, store.events[1])
+	runStart := decodePayload[runStartData](t, store.events[1])
+	if runStart.Model != cfg.Model || runStart.BaseURL != cfg.BaseURL || runStart.ResumedFromSeq != 0 || runStart.PromptVersion != PromptVersion {
+		t.Fatalf("run_start = %+v", runStart)
+	}
+	user := decodePayload[userMessageData](t, store.events[2])
 	if user.Text != "do the task" || user.Source != "-task" {
 		t.Fatalf("user_message = %+v", user)
 	}
-	response := decodePayload[modelResponseData](t, store.events[2])
+	response := decodePayload[modelResponseData](t, store.events[3])
 	if response.Attempt != 1 || response.Text != "all done" || response.FinishReason != model.FinishStop || response.Usage.Total() != 15 {
 		t.Fatalf("model_response = %+v", response)
 	}
-	final := decodePayload[finalData](t, store.events[3])
+	final := decodePayload[finalData](t, store.events[4])
 	if final.Status != StopCompleted || final.Text != "all done" {
 		t.Fatalf("final = %+v", final)
 	}
-	end := decodePayload[sessionEndData](t, store.events[4])
-	if end.Status != StopCompleted || end.Turns != 1 || end.Usage.Total() != 15 || end.Reason == "" {
-		t.Fatalf("session_end = %+v", end)
+	end := decodePayload[runEndData](t, store.events[5])
+	if end.Status != StopCompleted || end.RunTurns != 1 || end.Turns != 1 || end.RunUsage.Total() != 15 || end.Usage.Total() != 15 || end.Reason == "" {
+		t.Fatalf("run_end = %+v", end)
 	}
-	if countEvents(store, session.TypeFinal) != 1 || countEvents(store, session.TypeSessionEnd) != 1 {
-		t.Fatalf("final/session_end counts = %d/%d",
-			countEvents(store, session.TypeFinal), countEvents(store, session.TypeSessionEnd))
+	if countEvents(store, session.TypeFinal) != 1 || countEvents(store, session.TypeRunEnd) != 1 {
+		t.Fatalf("final/run_end counts = %d/%d",
+			countEvents(store, session.TypeFinal), countEvents(store, session.TypeRunEnd))
 	}
 	if store.syncs == 0 {
 		t.Fatal("store was never synced")
@@ -121,7 +126,7 @@ func TestRunToolLoopPairsEveryCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopCompleted || res.Turns != 2 || res.FinalText != "done" {
+	if res.Status != StopCompleted || res.CumulativeTurns != 2 || res.FinalText != "done" {
 		t.Fatalf("result = %+v", res)
 	}
 	if len(ts.calls) != 2 || ts.calls[0].name != "read_file" || ts.calls[1].name != "search" {
@@ -160,8 +165,8 @@ func TestRunToolLoopPairsEveryCall(t *testing.T) {
 			t.Fatalf("tool replay[%d] = %+v", i, msg)
 		}
 	}
-	if res.Usage.Total() != 61 {
-		t.Fatalf("usage total = %d, want 61", res.Usage.Total())
+	if res.CumulativeUsage.Total() != 61 {
+		t.Fatalf("usage total = %d, want 61", res.CumulativeUsage.Total())
 	}
 }
 
@@ -184,7 +189,7 @@ func TestRunMaxTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopMaxTurns || res.Turns != 2 {
+	if res.Status != StopMaxTurns || res.CumulativeTurns != 2 {
 		t.Fatalf("result = %+v", res)
 	}
 	if comp.calls != 2 {
@@ -202,7 +207,7 @@ func TestRunMaxTurns(t *testing.T) {
 		t.Fatalf("limit = %+v", data)
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
-	assertExactlyOne(t, store, session.TypeSessionEnd)
+	assertExactlyOne(t, store, session.TypeRunEnd)
 }
 
 func TestRunTotalTokenLimit(t *testing.T) {
@@ -217,7 +222,7 @@ func TestRunTotalTokenLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopTokenLimit || res.Turns != 1 || res.Usage.Total() != 12 {
+	if res.Status != StopTokenLimit || res.CumulativeTurns != 1 || res.CumulativeUsage.Total() != 12 {
 		t.Fatalf("result = %+v", res)
 	}
 	limits := eventsByType(store, session.TypeLimit)
@@ -287,7 +292,7 @@ func TestRunTerminalFinishReasons(t *testing.T) {
 				t.Fatalf("error class = %q, want %q", data.Class, tt.wantClass)
 			}
 			assertExactlyOne(t, store, session.TypeFinal)
-			assertExactlyOne(t, store, session.TypeSessionEnd)
+			assertExactlyOne(t, store, session.TypeRunEnd)
 		})
 	}
 }
@@ -377,7 +382,7 @@ func TestRunPanicPairsRemainingCalls(t *testing.T) {
 		}
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
-	assertExactlyOne(t, store, session.TypeSessionEnd)
+	assertExactlyOne(t, store, session.TypeRunEnd)
 }
 
 func TestRunLengthContinuationThenTokenLimit(t *testing.T) {
@@ -390,7 +395,7 @@ func TestRunLengthContinuationThenTokenLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopTokenLimit || res.Turns != 2 {
+	if res.Status != StopTokenLimit || res.CumulativeTurns != 2 {
 		t.Fatalf("result = %+v", res)
 	}
 	users := eventsByType(store, session.TypeUserMessage)
@@ -431,7 +436,7 @@ func TestRunLengthThenStopCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopCompleted || res.Turns != 2 || res.FinalText != "done" {
+	if res.Status != StopCompleted || res.CumulativeTurns != 2 || res.FinalText != "done" {
 		t.Fatalf("result = %+v", res)
 	}
 	if got := len(eventsByType(store, session.TypeUserMessage)); got != 2 {
@@ -460,7 +465,7 @@ func TestRunRepeatedFailureHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopCompleted || res.Turns != 4 {
+	if res.Status != StopCompleted || res.CumulativeTurns != 4 {
 		t.Fatalf("result = %+v", res)
 	}
 	users := eventsByType(store, session.TypeUserMessage)
@@ -490,7 +495,8 @@ func TestRunModelEventLogFailureIsInternal(t *testing.T) {
 	comp := &fakeCompleter{steps: []scriptStep{{resp: model.Response{Text: "done", FinishReason: model.FinishStop}}}}
 	store := &fakeStore{appendErr: errors.New("disk full"), failAfter: 2}
 	runner := newRunner(cfg, comp, &fakeToolset{}, store)
-	res, err := runner.Run(t.Context(), "do the task", "-task")
+	startTestSession(t, runner)
+	res, err := runner.Run(t.Context(), defaultRunOptions())
 	if err == nil {
 		t.Fatal("Run error = nil, want the log failure")
 	}
@@ -525,8 +531,8 @@ func TestRunRepeatedFailureStuck(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run error = nil, want stuck error")
 	}
-	if res.Turns != 5 {
-		t.Fatalf("turns = %d, want 5", res.Turns)
+	if res.CumulativeTurns != 5 {
+		t.Fatalf("turns = %d, want 5", res.CumulativeTurns)
 	}
 	if len(ts.calls) != 5 {
 		t.Fatalf("tool calls = %d, want 5", len(ts.calls))
@@ -547,7 +553,7 @@ func TestRunRepeatedFailureStuck(t *testing.T) {
 		t.Fatalf("limit events = %d, want 0", got)
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
-	assertExactlyOne(t, store, session.TypeSessionEnd)
+	assertExactlyOne(t, store, session.TypeRunEnd)
 }
 
 func TestRunParentCanceledMapsToInterrupted(t *testing.T) {
@@ -557,11 +563,12 @@ func TestRunParentCanceledMapsToInterrupted(t *testing.T) {
 	store := &fakeStore{}
 	comp := &fakeCompleter{}
 	runner := newRunner(cfg, comp, &fakeToolset{}, store)
-	res, err := runner.Run(ctx, "do the task", "-task")
+	startTestSession(t, runner)
+	res, err := runner.Run(ctx, defaultRunOptions())
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopInterrupted || res.Turns != 0 {
+	if res.Status != StopInterrupted || res.CumulativeTurns != 0 {
 		t.Fatalf("result = %+v", res)
 	}
 	if comp.calls != 0 {
@@ -574,7 +581,7 @@ func TestRunParentCanceledMapsToInterrupted(t *testing.T) {
 		t.Fatalf("error events = %d, want 0", got)
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
-	assertExactlyOne(t, store, session.TypeSessionEnd)
+	assertExactlyOne(t, store, session.TypeRunEnd)
 }
 
 func TestRunSessionTimeoutMapsToTimeLimit(t *testing.T) {
@@ -585,16 +592,17 @@ func TestRunSessionTimeoutMapsToTimeLimit(t *testing.T) {
 		comp := &fakeCompleter{steps: []scriptStep{{blockOnContext: true}}}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(t.Context(), "do the task", "-task")
+			res, err := runner.Run(t.Context(), defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		got := <-outcome
 		if got.err != nil {
 			t.Fatalf("Run error = %v, want nil", got.err)
 		}
-		if got.res.Status != StopTimeLimit || got.res.Turns != 0 {
+		if got.res.Status != StopTimeLimit || got.res.CumulativeTurns != 0 {
 			t.Fatalf("result = %+v", got.res)
 		}
 		limits := eventsByType(store, session.TypeLimit)
@@ -606,7 +614,7 @@ func TestRunSessionTimeoutMapsToTimeLimit(t *testing.T) {
 			t.Fatalf("limit = %+v", data)
 		}
 		assertExactlyOne(t, store, session.TypeFinal)
-		assertExactlyOne(t, store, session.TypeSessionEnd)
+		assertExactlyOne(t, store, session.TypeRunEnd)
 	})
 }
 
@@ -618,11 +626,12 @@ func TestRunParentDeadlineMapsToTimeLimit(t *testing.T) {
 		comp := &fakeCompleter{steps: []scriptStep{{blockOnContext: true}}}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 		defer cancel()
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(ctx, "do the task", "-task")
+			res, err := runner.Run(ctx, defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		got := <-outcome
@@ -666,7 +675,7 @@ func TestRunContextOverflowCompactionRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopCompleted || res.Turns != 6 || res.FinalText != "finished" {
+	if res.Status != StopCompleted || res.CumulativeTurns != 6 || res.FinalText != "finished" {
 		t.Fatalf("result = %+v", res)
 	}
 	if comp.calls != 7 {
@@ -718,7 +727,7 @@ func TestRunContextOverflowWithoutElisionStops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error = %v, want nil", err)
 	}
-	if res.Status != StopTokenLimit || res.Turns != 0 {
+	if res.Status != StopTokenLimit || res.CumulativeTurns != 0 {
 		t.Fatalf("result = %+v", res)
 	}
 	if comp.calls != 1 {
@@ -767,8 +776,8 @@ func TestRunContextOverflowRetryFailureStopsWithTokenLimit(t *testing.T) {
 	if res.Status != StopTokenLimit {
 		t.Fatalf("status = %q, want %q", res.Status, StopTokenLimit)
 	}
-	if res.Turns != 5 {
-		t.Fatalf("turns = %d, want 5", res.Turns)
+	if res.CumulativeTurns != 5 {
+		t.Fatalf("turns = %d, want 5", res.CumulativeTurns)
 	}
 	errs := eventsByType(store, session.TypeError)
 	if len(errs) != 1 || decodePayload[errorData](t, errs[0]).Class != errorClassOverflow {

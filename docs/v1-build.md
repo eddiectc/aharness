@@ -1,7 +1,9 @@
 # aharness v1 build plan
 
 - **Date:** 2026-11-10
-- **Status:** draft; scope and contract deltas proposed, not started
+- **Status:** implemented (M0–M3); real-provider streamed smoke pending
+  credentials in this environment. Mock-provider, integration, fuzz, and gate
+  checks pass.
 - **Source:** [v0 build plan](v0-build.md); v0 is complete, including both
   dialect smoke runs.
 - **Research:** [Bare-Minimum Agent Harness](agent-harness-minimum.md). v1
@@ -65,30 +67,32 @@ stdin lines, v0 log migration or backward compatibility, or an interactive TUI.
 
 v1 is complete when every item below holds.
 
-- [ ] **Streaming.** The built binary streams assistant text from a fake SSE
-      server for both dialects, and a real streamed smoke passes for at least
-      one model per dialect. If a hosted model does not stream, the limitation
-      is recorded and the adapter still completes non-streamed.
-- [ ] **Interrupt/steering.** First `SIGINT` during a model call and during a
+- [x] **Streaming (local).** The built binary streams assistant text from a
+      fake SSE server for both dialects. The adapters fall back to non-streamed
+      completion when the endpoint returns JSON.
+- [ ] **Streaming (real provider).** A real streamed smoke passes for at least
+      one model per dialect. This requires provider credentials and was not run
+      in this environment; if a hosted model does not stream, record the
+      limitation and keep non-streamed completion.
+- [x] **Interrupt/steering.** First `SIGINT` during a model call and during a
       command interrupts the operation and continues the run; second `SIGINT`
       exits 130. A steering line becomes a `user_message` and is visible to the
       next model call. Non-interactive `SIGINT` remains terminal. No child
       process or process group survives.
-- [ ] **Resume.** A killed, interrupted, or limit-stopped run resumes under the
+- [x] **Resume.** A killed, interrupted, or limit-stopped run resumes under the
       same session ID, repairs any unpaired tool calls, reconstructs turns and
       usage, and honors the cumulative limits. A torn final line is repaired
       and recorded. A concurrent writer fails cleanly.
-- [ ] **Fork.** A v2 session forks into a new self-contained v2 log with
+- [x] **Fork.** A v2 session forks into a new self-contained v2 log with
       parent metadata. The parent log is unchanged. Unpaired calls are repaired
       in the copy, and the fork's transcript diverges from the new task.
-- [ ] **Schema handling.** A v2 session round-trips; a v0 or unknown schema
+- [x] **Schema handling.** A v2 session round-trips; a v0 or unknown schema
       version is rejected with a clear error; unknown fields and event types
       within the v2 schema are ignored.
-- [ ] **Documentation.** `README.md` links this plan. The repository
-      architecture and testing-strategy documents are updated during the v1
-      milestones and reflect the v1 contracts at completion; the v1 contract
-      deltas live here until they catch up.
-- [ ] **Gates.** The coding standard §8 checks pass: `goimports`, `go vet`,
+- [x] **Documentation.** `README.md` links this plan. The repository
+      architecture and testing-strategy documents reflect the v1 contracts;
+      `limits.md` reflects the current values.
+- [x] **Gates.** The coding standard §8 checks pass: `goimports`, `go vet`,
       `golangci-lint`, `go test -race -count=1`, `go build -trimpath`, and
       `govulncheck`.
 

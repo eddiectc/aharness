@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte(": comment\r\n\r\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n")

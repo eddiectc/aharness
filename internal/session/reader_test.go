@@ -75,28 +75,18 @@ func TestReadAcceptsFinalLineWithoutNewline(t *testing.T) {
 	assertEventsEqual(t, got, []Event{first, second})
 }
 
-func TestReadToleratesInvalidFinalLine(t *testing.T) {
+func TestReadToleratesTornFinalLine(t *testing.T) {
 	first := makeEvent(1, TypeSessionStart, validData)
 	firstLine := encodeEventLine(t, first)
-	badUTF8 := append([]byte(`{"v":1,"seq":2,"session":"`+testSession+`","type":"user_message","data":"`), 0xff)
+	badUTF8 := append([]byte(`{"v":2,"seq":2,"session":"`+testSession+`","type":"user_message","data":"`), 0xff)
 	badUTF8 = append(badUTF8, []byte(`"}`)...)
-	emptyType := encodeEventLine(t, Event{
-		V:       Version,
-		Seq:     2,
-		TS:      time.Unix(0, 0).UTC(),
-		Session: testSession,
-		Type:    "",
-		Data:    json.RawMessage(validData),
-	})
 	cases := []struct {
 		name string
 		tail []byte
 	}{
-		{name: "partial object", tail: []byte(`{"v":1,"seq":2`)},
-		{name: "partial data", tail: []byte(`{"v":1,"seq":2,"session":"` + testSession + `","type":"user_message","data":`)},
+		{name: "partial object", tail: []byte(`{"v":2,"seq":2`)},
+		{name: "partial data", tail: []byte(`{"v":2,"seq":2,"session":"` + testSession + `","type":"user_message","data":`)},
 		{name: "invalid utf8", tail: badUTF8},
-		{name: "wrong sequence", tail: trimLine(encodeEventLine(t, makeEvent(5, TypeUserMessage, validData)))},
-		{name: "empty type", tail: trimLine(emptyType)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,6 +101,29 @@ func TestReadToleratesInvalidFinalLine(t *testing.T) {
 	}
 }
 
+func TestReadRejectsDecodableInvalidFinalLine(t *testing.T) {
+	first := makeEvent(1, TypeSessionStart, validData)
+	cases := []struct {
+		name string
+		ev   Event
+	}{
+		{name: "wrong sequence", ev: makeEvent(5, TypeUserMessage, validData)},
+		{name: "repeat sequence", ev: makeEvent(1, TypeUserMessage, validData)},
+		{name: "other session", ev: Event{V: Version, Seq: 2, TS: time.Unix(0, 0).UTC(), Session: "other", Type: TypeUserMessage, Data: json.RawMessage(validData)}},
+		{name: "empty session", ev: Event{V: Version, Seq: 2, TS: time.Unix(0, 0).UTC(), Type: TypeUserMessage, Data: json.RawMessage(validData)}},
+		{name: "empty type", ev: Event{V: Version, Seq: 2, TS: time.Unix(0, 0).UTC(), Session: testSession, Data: json.RawMessage(validData)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte(encodeEventLine(t, first) + encodeEventLine(t, tc.ev))
+			path := writeLogFile(t, content)
+			if _, err := Read(path); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("Read: got %v, want ErrCorrupt", err)
+			}
+		})
+	}
+}
+
 func TestReadRejectsInvalidNonFinalLine(t *testing.T) {
 	valid1 := encodeEventLine(t, makeEvent(1, TypeSessionStart, validData))
 	valid2 := encodeEventLine(t, makeEvent(2, TypeUserMessage, validData))
@@ -119,22 +132,8 @@ func TestReadRejectsInvalidNonFinalLine(t *testing.T) {
 		out = append(out, '\n')
 		return append(out, valid2...)
 	}
-	badVersion := encodeEventLine(t, Event{
-		V:       2,
-		Seq:     2,
-		TS:      time.Unix(0, 0).UTC(),
-		Session: testSession,
-		Type:    TypeUserMessage,
-		Data:    json.RawMessage(validData),
-	})
-	badType := encodeEventLine(t, Event{
-		V:       Version,
-		Seq:     2,
-		TS:      time.Unix(0, 0).UTC(),
-		Session: testSession,
-		Type:    "",
-		Data:    json.RawMessage(validData),
-	})
+	badType := encodeEventLine(t, makeEvent(2, TypeUserMessage, validData))
+	badType = strings.Replace(badType, `"type":"user_message"`, `"type":""`, 1)
 	otherSession := encodeEventLine(t, Event{
 		V:       Version,
 		Seq:     2,
@@ -143,65 +142,63 @@ func TestReadRejectsInvalidNonFinalLine(t *testing.T) {
 		Type:    TypeUserMessage,
 		Data:    json.RawMessage(validData),
 	})
-	emptySession := encodeEventLine(t, Event{
-		V:       Version,
-		Seq:     2,
-		TS:      time.Unix(0, 0).UTC(),
-		Session: "",
-		Type:    TypeUserMessage,
-		Data:    json.RawMessage(validData),
-	})
-	badUTF8 := append([]byte(`{"v":1,"seq":2,"session":"`+testSession+`","type":"user_message","data":"`), 0xff)
-	badUTF8 = append(badUTF8, []byte(`"}`)...)
 	cases := []struct {
 		name    string
 		content []byte
 	}{
-		{name: "malformed json", content: nonFinal([]byte(`{"v":1`))},
-		{name: "duplicate envelope names", content: nonFinal([]byte(`{"v":1,"v":1,"seq":2,"session":"` + testSession + `","type":"user_message","data":{}}`))},
-		{name: "invalid utf8", content: nonFinal(badUTF8)},
-		{name: "wrong version", content: nonFinal(trimLine(badVersion))},
+		{name: "malformed json", content: nonFinal([]byte(`{"v":2`))},
+		{name: "duplicate envelope names", content: nonFinal([]byte(`{"v":2,"v":2,"seq":2,"session":"` + testSession + `","type":"user_message","data":{}}`))},
 		{name: "empty type", content: nonFinal(trimLine(badType))},
 		{name: "sequence starts at two", content: []byte(encodeEventLine(t, makeEvent(2, TypeSessionStart, validData)) + encodeEventLine(t, makeEvent(3, TypeUserMessage, validData)))},
 		{name: "sequence gap", content: nonFinal(trimLine(encodeEventLine(t, makeEvent(3, TypeUserMessage, validData))))},
 		{name: "sequence repeat", content: nonFinal(trimLine(encodeEventLine(t, makeEvent(1, TypeUserMessage, validData))))},
 		{name: "session mismatch", content: nonFinal(trimLine(otherSession))},
-		{name: "empty session", content: nonFinal(trimLine(emptySession))},
-		{name: "duplicate data names", content: nonFinal([]byte(`{"v":1,"seq":2,"session":"` + testSession + `","type":"user_message","data":{"a":1,"a":2}}`))},
+		{name: "duplicate data names", content: nonFinal([]byte(`{"v":2,"seq":2,"session":"` + testSession + `","type":"user_message","data":{"a":1,"a":2}}`))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeLogFile(t, tc.content)
-			if _, err := Read(path); !errors.Is(err, ErrInvalidEvent) {
-				t.Fatalf("Read: got %v, want ErrInvalidEvent", err)
+			if _, err := Read(path); !errors.Is(err, ErrCorrupt) {
+				t.Fatalf("Read: got %v, want ErrCorrupt", err)
 			}
 		})
 	}
 }
 
+func TestReadRejectsSchemaVersions(t *testing.T) {
+	v0 := `{"v":1,"seq":1,"ts":"1970-01-01T00:00:00Z","session":"` + testSession + `","type":"session_start","data":{}}` + "\n"
+	unknown := `{"v":3,"seq":1,"ts":"1970-01-01T00:00:00Z","session":"` + testSession + `","type":"session_start","data":{}}` + "\n"
+	mixed := encodeEventLine(t, makeEvent(1, TypeSessionStart, validData)) + v0
+	for _, content := range []string{v0, unknown, mixed} {
+		path := writeLogFile(t, []byte(content))
+		if _, err := Read(path); !errors.Is(err, ErrUnsupportedVersion) {
+			t.Fatalf("Read: got %v, want ErrUnsupportedVersion", err)
+		}
+	}
+}
+
 func TestReadOversizedLines(t *testing.T) {
-	first := makeEvent(1, TypeSessionStart, validData)
-	firstLine := encodeEventLine(t, first)
-	third := makeEvent(3, TypeUserMessage, validData)
+	first := encodeEventLine(t, makeEvent(1, TypeSessionStart, validData))
+	third := encodeEventLine(t, makeEvent(3, TypeUserMessage, validData))
 	huge := strings.Repeat("x", maxEventLine+2)
-	hugeLine := `{"v":1,"seq":2,"session":"` + testSession + `","type":"user_message","data":"` + huge + `"}`
+	hugeLine := `{"v":2,"seq":2,"session":"` + testSession + `","type":"user_message","data":"` + huge + `"}`
 
 	t.Run("non-final", func(t *testing.T) {
-		content := []byte(firstLine + hugeLine + "\n" + encodeEventLine(t, third))
+		content := []byte(first + hugeLine + "\n" + third)
 		path := writeLogFile(t, content)
-		if _, err := Read(path); !errors.Is(err, ErrInvalidEvent) {
-			t.Fatalf("Read: got %v, want ErrInvalidEvent", err)
+		if _, err := Read(path); !errors.Is(err, ErrCorrupt) {
+			t.Fatalf("Read: got %v, want ErrCorrupt", err)
 		}
 	})
 
 	t.Run("final tolerated", func(t *testing.T) {
-		content := []byte(firstLine + hugeLine)
+		content := []byte(first + hugeLine)
 		path := writeLogFile(t, content)
 		got, err := Read(path)
 		if err != nil {
 			t.Fatalf("Read: %v", err)
 		}
-		assertEventsEqual(t, got, []Event{first})
+		assertEventsEqual(t, got, []Event{makeEvent(1, TypeSessionStart, validData)})
 	})
 }
 
@@ -229,7 +226,7 @@ func TestReadEmptyLog(t *testing.T) {
 }
 
 func TestReadDoesNotRewrite(t *testing.T) {
-	content := []byte(encodeEventLine(t, makeEvent(1, TypeSessionStart, validData)) + `{"v":1,"seq":2`)
+	content := []byte(encodeEventLine(t, makeEvent(1, TypeSessionStart, validData)) + `{"v":2,"seq":2`)
 	path := writeLogFile(t, content)
 	before, err := os.ReadFile(path)
 	if err != nil {
@@ -247,13 +244,15 @@ func TestReadDoesNotRewrite(t *testing.T) {
 	}
 }
 
-func TestReadIgnoresUnknownFields(t *testing.T) {
-	line := `{"v":1,"seq":1,"ts":"1970-01-01T00:00:00Z","session":"` + testSession +
-		`","type":"user_message","data":{},"future":{"x":1}}`
-	path := writeLogFile(t, []byte(line))
+func TestReadIgnoresUnknownFieldsAndEvents(t *testing.T) {
+	line := `{"v":2,"seq":1,"ts":"1970-01-01T00:00:00Z","session":"` + testSession +
+		`","type":"future_event","data":{},"future":{"x":1}}`
+	path := writeLogFile(t, []byte(line+"\n"))
 	got, err := Read(path)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	assertEventsEqual(t, got, []Event{makeEvent(1, TypeUserMessage, validData)})
+	if len(got) != 1 || got[0].Type != "future_event" {
+		t.Fatalf("Read = %+v", got)
+	}
 }

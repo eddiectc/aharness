@@ -15,13 +15,14 @@ import (
 	"aharness/internal/tools"
 )
 
-// Runner owns one bounded model/tool loop.
+// Runner owns one bounded model/tool loop over a durable session.
 type Runner struct {
-	cfg    Config
-	model  completer
-	tools  toolset
-	store  eventStore
-	jitter func(time.Duration) time.Duration
+	cfg            Config
+	model          completer
+	tools          toolset
+	store          eventStore
+	jitter         func(time.Duration) time.Duration
+	steeringClosed bool
 }
 
 // New returns a runner wired to the production dialect adapter, tool
@@ -35,11 +36,80 @@ func newRunner(cfg Config, c completer, ts toolset, store eventStore) *Runner {
 	return &Runner{cfg: cfg, model: c, tools: ts, store: store, jitter: addJitter}
 }
 
+// errContinueRun tells executeTurn that an interactive interruption was
+// handled and the outer loop should rebuild the projection and continue.
+var errContinueRun = errors.New("continue run")
+
+// sessionWriter is the write side needed to start a session.
+type sessionWriter interface {
+	Append(session.Event) error
+	Sync() error
+	Events() []session.Event
+}
+
+// WriteSessionStart writes and syncs the once-per-session session_start event
+// for a new or forked session. The store must have no events.
+func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error {
+	if len(store.Events()) != 0 {
+		return errors.New("start session: session already has events")
+	}
+	data := sessionStartData{
+		PromptVersion:    promptVersion(cfg),
+		ToolsetVersion:   toolsetVersion(cfg),
+		Workspace:        cfg.Workspace,
+		StateDir:         cfg.StateDir,
+		Provider:         cfg.Provider,
+		Dialect:          cfg.Dialect,
+		Model:            cfg.Model,
+		Limits:           cfg.Limits,
+		MaxTurns:         cfg.MaxTurns,
+		MaxTotalTokens:   cfg.MaxTotalTokens,
+		SessionTimeoutMS: cfg.SessionTimeout.Milliseconds(),
+		ModelTimeoutMS:   cfg.ModelTimeout.Milliseconds(),
+		HarnessVersion:   cfg.HarnessVersion,
+	}
+	if parent != nil {
+		data.ParentSession = parent.Session
+		data.ParentSeq = parent.Seq
+	}
+	ev, err := session.NewEvent(session.TypeSessionStart, 0, "", data)
+	if err != nil {
+		return fmt.Errorf("build session_start event: %w", err)
+	}
+	if err := store.Append(ev); err != nil {
+		return fmt.Errorf("append session_start event: %w", err)
+	}
+	return store.Sync()
+}
+
+func promptVersion(cfg Config) string {
+	if cfg.PromptVersion != "" {
+		return cfg.PromptVersion
+	}
+	return PromptVersion
+}
+
+func toolsetVersion(cfg Config) string {
+	if cfg.ToolsetVersion != "" {
+		return cfg.ToolsetVersion
+	}
+	return tools.Version
+}
+
+// StartSession writes the once-per-session session_start event for a new or
+// forked session and syncs it. It must be called before Run and only when the
+// store has no events.
+func (r *Runner) StartSession(parent *ParentRef) error {
+	return WriteSessionStart(r.store, r.cfg, parent)
+}
+
 // runState is per-Run mutable state. It never escapes the loop.
 type runState struct {
 	start            time.Time
 	turns            int
 	usage            model.Usage
+	runTurns         int
+	runUsage         model.Usage
 	lastText         string
 	lastElided       int
 	compactionTarget int
@@ -49,9 +119,9 @@ type runState struct {
 	finalized        bool
 }
 
-// Run executes one task to a terminal state. Every initialized session emits
-// exactly one final event followed by one session_end event.
-func (r *Runner) Run(ctx context.Context, task, source string) (Result, error) {
+// Run executes one run to a terminal state. Every initialized run emits
+// exactly one final event followed by one run_end event.
+func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	st := &runState{start: time.Now()}
 	res := Result{Status: StopCompleted}
 
@@ -62,28 +132,39 @@ func (r *Runner) Run(ctx context.Context, task, source string) (Result, error) {
 		defer cancel()
 	}
 
-	startData := sessionStartData{
-		PromptVersion:  PromptVersion,
-		ToolsetVersion: tools.Version,
-		Workspace:      r.cfg.Workspace,
-		StateDir:       r.cfg.StateDir,
-		Provider:       r.cfg.Provider,
-		Dialect:        r.cfg.Dialect,
-		Model:          r.cfg.Model,
-		Limits:         r.cfg.Limits,
-		HarnessVersion: r.cfg.HarnessVersion,
-	}
-	if err := r.record(session.TypeSessionStart, 0, "", startData); err != nil {
+	state, err := Inspect(r.store.Events())
+	if err != nil {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
 	}
-	if err := r.record(session.TypeUserMessage, 0, string(model.RoleUser), userMessageData{
-		Text:   cleanText(task),
-		Source: capText(source, maxEventTextBytes),
-	}); err != nil {
+	st.turns = state.Turns
+	st.usage = state.Usage
+
+	// Repair every unpaired call before the new run starts so the pairing
+	// invariant holds even after a crash.
+	if err := r.repairPending(state.Pending); err != nil {
+		res.Status = StopInternalError
 		res.Err = err
-		return r.finishResult(&res, st, StopInternalError, "failed to record the task")
+		return res, err
+	}
+
+	if err := r.recordRunStart(opts.ResumedFromSeq); err != nil {
+		res.Status = StopInternalError
+		res.Err = err
+		return res, err
+	}
+	if err := r.sync(); err != nil {
+		res.Status = StopInternalError
+		res.Err = err
+		return res, err
+	}
+
+	if opts.TaskSet {
+		if err := r.recordUserMessage(0, opts.Task, opts.TaskFrom); err != nil {
+			res.Err = err
+			return r.finishResult(&res, st, StopInternalError, "failed to record the task")
+		}
 	}
 
 	for {
@@ -94,6 +175,10 @@ func (r *Runner) Run(ctx context.Context, task, source string) (Result, error) {
 		}
 		if status != "" {
 			return r.finishResult(&res, st, status, reason)
+		}
+		if _, err := r.consumeSteering(st); err != nil {
+			res.Err = err
+			return r.finishResult(&res, st, StopInternalError, "failed to record a steering message")
 		}
 
 		limits := r.currentLimits(st)
@@ -132,6 +217,45 @@ func (r *Runner) Run(ctx context.Context, task, source string) (Result, error) {
 	}
 }
 
+// repairPending pairs unpaired tool calls with a canceled result before a new
+// run starts. The message does not claim the side effect did not happen.
+func (r *Runner) repairPending(pending []PendingCall) error {
+	for _, call := range pending {
+		payload := toolResultData{
+			CallID: call.CallID,
+			Name:   call.Name,
+			OK:     false,
+			Code:   tools.CodeCanceled,
+			Error:  repairMessage,
+		}
+		if err := r.recordToolResult(call.Turn, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
+	data := runStartData{
+		RunID:            session.NewID(),
+		ResumedFromSeq:   resumedFromSeq,
+		Model:            r.cfg.Model,
+		Dialect:          r.cfg.Dialect,
+		BaseURL:          r.cfg.BaseURL,
+		Limits:           r.cfg.Limits,
+		MaxTurns:         r.cfg.MaxTurns,
+		MaxTotalTokens:   r.cfg.MaxTotalTokens,
+		SessionTimeoutMS: r.cfg.SessionTimeout.Milliseconds(),
+		ModelTimeoutMS:   r.cfg.ModelTimeout.Milliseconds(),
+		PromptVersion:    promptVersion(r.cfg),
+		ToolsetVersion:   toolsetVersion(r.cfg),
+		HarnessVersion:   r.cfg.HarnessVersion,
+		Interactive:      r.cfg.Interactive,
+		Stream:           r.cfg.Stream,
+	}
+	return r.record(session.TypeRunStart, 0, "", data)
+}
+
 // currentLimits applies a tightened compaction target after a provider
 // context-overflow retry, so elision remains monotonic for the session.
 func (r *Runner) currentLimits(st *runState) Limits {
@@ -142,8 +266,8 @@ func (r *Runner) currentLimits(st *runState) Limits {
 	return limits
 }
 
-// checkLimits enforces the turn, total-token, and wall-clock budgets before a
-// model call. A non-empty status means the run must terminate.
+// checkLimits enforces the cumulative turn/token and per-run wall-clock
+// budgets before a model call. A non-empty status means the run must terminate.
 func (r *Runner) checkLimits(ctx context.Context, st *runState) (StopReason, string, error) {
 	if err := ctx.Err(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -180,6 +304,54 @@ func (r *Runner) checkLimits(ctx context.Context, st *runState) (StopReason, str
 	return "", "", nil
 }
 
+// consumeSteering appends every already-pending stdin steering line as a
+// user_message. It never blocks and never interrupts a tool round.
+func (r *Runner) consumeSteering(st *runState) (int, error) {
+	if r.cfg.Steering == nil || r.steeringClosed {
+		return 0, nil
+	}
+	count := 0
+	for {
+		select {
+		case line, ok := <-r.cfg.Steering:
+			if !ok {
+				r.steeringClosed = true
+				return count, nil
+			}
+			text := cleanText(line)
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			if len(text) > maxSteeringBytes {
+				text = capText(text, maxSteeringBytes)
+			}
+			if err := r.recordUserMessage(st.turns, text, sourceSteer); err != nil {
+				return count, err
+			}
+			count++
+		default:
+			return count, nil
+		}
+	}
+}
+
+func (r *Runner) beginOperation(ctx context.Context) (context.Context, func()) {
+	if r.cfg.Controller == nil {
+		return ctx, func() {}
+	}
+	return r.cfg.Controller.BeginOperation(ctx)
+}
+
+func (r *Runner) emitText(text string) error {
+	if text == "" || r.cfg.EmitText == nil {
+		return nil
+	}
+	if err := r.cfg.EmitText(text); err != nil {
+		return fmt.Errorf("%w: %w", errStreamOutput, err)
+	}
+	return nil
+}
+
 // executeTurn performs one model call and any resulting tool calls. It reports
 // done when the run reached a terminal state and the final events were written.
 func (r *Runner) executeTurn(ctx context.Context, res *Result, st *runState, proj Projection, turn int) (bool, error) {
@@ -189,26 +361,79 @@ func (r *Runner) executeTurn(ctx context.Context, res *Result, st *runState, pro
 		Tools:           r.tools.Schemas(),
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
 	}
-	comp, err := r.callModel(ctx, req, turn, proj.EstimatedInputTokens)
+
+	opCtx, finish := r.beginOperation(ctx)
+	comp, err := r.callModel(opCtx, req, turn, proj.EstimatedInputTokens)
+	interrupted := err != nil && ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled)
+	finish()
+
 	if err != nil {
 		if errors.Is(err, errEventStore) {
 			res.Err = err
 			return r.finishTerminal(res, st, StopInternalError, "failed to record a model event")
 		}
+		if errors.Is(err, errStreamOutput) {
+			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+				res.Err = errors.Join(err, rerr)
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
+			}
+			res.Err = err
+			return r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
+		}
 		if ctx.Err() != nil {
 			return r.finishContext(res, st, ctx)
 		}
-		if errors.Is(err, model.ErrContextOverflow) {
-			var done bool
-			comp, done, err = r.overflowRetry(ctx, res, st, proj, turn)
-			if done {
-				return true, err
-			}
-		} else {
-			return r.failModel(res, st, err)
+		if interrupted {
+			return r.handleModelInterrupt(res, st, err)
 		}
+		if errors.Is(err, model.ErrContextOverflow) {
+			partialText, partialBytes := partialFromError(err)
+			if partialText == "" && partialBytes == 0 {
+				comp, done, retryErr := r.overflowRetry(ctx, res, st, proj, turn)
+				if done {
+					return true, retryErr
+				}
+				if errors.Is(retryErr, errContinueRun) {
+					return false, nil
+				}
+				if retryErr != nil {
+					return false, retryErr
+				}
+				return r.processCompletion(ctx, res, st, comp, turn)
+			}
+		}
+		return r.failModel(res, st, err)
 	}
 	return r.processCompletion(ctx, res, st, comp, turn)
+}
+
+// handleModelInterrupt records an interactive interruption of a model call
+// and the hint that tells the next call why no response was recorded.
+func (r *Runner) handleModelInterrupt(res *Result, st *runState, err error) (bool, error) {
+	partialText, _ := partialFromError(err)
+	reason := "interrupted by SIGINT"
+	if partialText != "" {
+		reason = "interrupted by SIGINT after partial output"
+	}
+	if rerr := r.record(session.TypeInterrupt, st.turns, "", interruptData{
+		Operation:   operationModel,
+		PartialText: partialText,
+		Reason:      reason,
+	}); rerr != nil {
+		res.Err = rerr
+		return r.finishTerminal(res, st, StopInternalError, "failed to record a model interrupt")
+	}
+	if rerr := r.sync(); rerr != nil {
+		res.Err = rerr
+		return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
+	}
+	if rerr := r.recordUserMessage(st.turns, interruptHint, sourceInterruptHint); rerr != nil {
+		res.Err = rerr
+		return r.finishTerminal(res, st, StopInternalError, "failed to record the interrupt hint")
+	}
+	st.failKey = ""
+	st.failCount = 0
+	return false, nil
 }
 
 // overflowRetry rebuilds the projection against a target 10% below the
@@ -256,18 +481,39 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 		Tools:           r.tools.Schemas(),
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
 	}
-	comp, err := r.callModelOnce(ctx, req, turn, next.EstimatedInputTokens)
+	opCtx, finish := r.beginOperation(ctx)
+	comp, err := r.callModelOnce(opCtx, req, turn, next.EstimatedInputTokens)
+	interrupted := err != nil && ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled)
+	finish()
 	if err != nil {
 		if errors.Is(err, errEventStore) {
 			res.Err = err
 			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a model event")
 			return completion{}, done, ferr
 		}
+		if errors.Is(err, errStreamOutput) {
+			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+				res.Err = errors.Join(err, rerr)
+				done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
+				return completion{}, done, ferr
+			}
+			res.Err = err
+			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
+			return completion{}, done, ferr
+		}
 		if ctx.Err() != nil {
 			done, ferr := r.finishContext(res, st, ctx)
 			return completion{}, done, ferr
 		}
-		if eerr := r.recordError(st.turns, errorClassOverflow, fmt.Sprintf("context overflow retry failed: %v", err)); eerr != nil {
+		if interrupted {
+			done, ferr := r.handleModelInterrupt(res, st, err)
+			if ferr != nil {
+				return completion{}, done, ferr
+			}
+			return completion{}, false, errContinueRun
+		}
+		partialText, partialBytes := partialFromError(err)
+		if eerr := r.recordErrorWithPartial(st.turns, errorClassOverflow, fmt.Sprintf("context overflow retry failed: %v", err), partialText, partialBytes); eerr != nil {
 			res.Err = eerr
 			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record an error event")
 			return completion{}, done, ferr
@@ -291,7 +537,8 @@ func (r *Runner) failModel(res *Result, st *runState, err error) (bool, error) {
 		status = StopProtocolError
 		class = errorClassProtocol
 	}
-	if rerr := r.recordError(st.turns, class, err.Error()); rerr != nil {
+	partialText, partialBytes := partialFromError(err)
+	if rerr := r.recordErrorWithPartial(st.turns, class, err.Error(), partialText, partialBytes); rerr != nil {
 		res.Err = rerr
 		return r.finishTerminal(res, st, StopInternalError, "failed to record an error event")
 	}
@@ -302,29 +549,63 @@ func (r *Runner) failModel(res *Result, st *runState, err error) (bool, error) {
 
 // processCompletion handles one successful model response.
 func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runState, comp completion, turn int) (bool, error) {
+	if bytes := responseBytes(comp.resp); bytes > maxModelResponseBytes {
+		message := fmt.Sprintf("model response is %d bytes, limit %d", bytes, maxModelResponseBytes)
+		if rerr := r.recordError(st.turns, errorClassProtocol, message); rerr != nil {
+			res.Err = rerr
+			return r.finishTerminal(res, st, StopInternalError, "failed to record an error event")
+		}
+		res.Err = errors.New(message)
+		return r.finishTerminal(res, st, StopProtocolError, message)
+	}
 	if err := r.recordResponse(comp, turn); err != nil {
 		res.Err = err
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the model response")
 	}
 	st.usage.InputTokens += comp.resp.Usage.InputTokens
 	st.usage.OutputTokens += comp.resp.Usage.OutputTokens
+	st.runUsage.InputTokens += comp.resp.Usage.InputTokens
+	st.runUsage.OutputTokens += comp.resp.Usage.OutputTokens
 	if comp.resp.Text != "" {
 		st.lastText = comp.resp.Text
 	}
 	st.turns++
+	st.runTurns++
 	if r.cfg.Logger != nil {
 		r.cfg.Logger.Info("model response",
 			"turn", st.turns,
 			"attempt", comp.attempt,
 			"finish_reason", comp.resp.FinishReason,
 			"tool_calls", len(comp.resp.ToolCalls),
+			"streamed", comp.streamed,
 			"latency_ms", comp.latency.Milliseconds(),
 		)
+	}
+
+	// When streaming was requested, a response that produced no deltas is
+	// printed once here. A fallback non-streaming adapter lands in this path.
+	if r.cfg.Stream && !comp.emitted && comp.resp.Text != "" {
+		if err := r.emitText(comp.resp.Text); err != nil {
+			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+				res.Err = errors.Join(err, rerr)
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
+			}
+			res.Err = err
+			return r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
+		}
 	}
 
 	if len(comp.resp.ToolCalls) == 0 {
 		switch comp.resp.FinishReason {
 		case model.FinishStop, model.FinishReason(""):
+			// A steering line already pending at completion changes the next
+			// call instead of ending the run.
+			if n, err := r.consumeSteering(st); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a steering message")
+			} else if n > 0 {
+				return false, nil
+			}
 			return r.finishTerminal(res, st, StopCompleted, "model completed the task")
 		case model.FinishLength:
 			st.lengthStreak++
@@ -335,16 +616,9 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 				}
 				return r.finishTerminal(res, st, StopTokenLimit, "repeated output length truncation")
 			}
-			if err := r.record(session.TypeUserMessage, turn, string(model.RoleUser), userMessageData{
-				Text:   continuationHint,
-				Source: sourceContinuationHint,
-			}); err != nil {
+			if err := r.recordUserMessage(turn, continuationHint, sourceContinuationHint); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record the continuation hint")
-			}
-			if err := r.sync(); err != nil {
-				res.Err = err
-				return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
 			}
 			return false, nil
 		case model.FinishContentFilter:
@@ -388,7 +662,7 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, calls []model.ToolCall, turn int) (bool, error) {
 	for i, call := range calls {
 		if ctx.Err() != nil {
-			if err := r.appendUnexecuted(calls[i:], turn, tools.CodeCanceled, "run canceled before tool execution"); err != nil {
+			if err := r.appendUnexecuted(calls[i:], turn, tools.CodeCanceled, canceledBeforeMessage); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
 			}
@@ -396,30 +670,75 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 
 		started := time.Now()
-		result, panicked := safeExecute(ctx, r.tools, call)
+		opCtx, finish := r.beginOperation(ctx)
+		result, panicked := safeExecute(opCtx, r.tools, call)
 		duration := time.Since(started)
-		normalizeResultCode(&result)
-		payload := toolResultEvent(call, result, duration)
-		if err := r.record(session.TypeToolResult, turn, string(model.RoleTool), payload); err != nil {
-			res.Err = err
-			return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
-		}
-		if r.cfg.Logger != nil {
-			r.cfg.Logger.Info("tool result",
-				"tool", call.Name,
-				"ok", result.OK,
-				"code", result.Code,
-				"duration_ms", payload.DurationMS,
-			)
-		}
+		interrupted := ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled)
+		finish()
 
 		if panicked || result.Code == tools.CodePanic {
+			normalizeResultCode(&result)
+			payload := toolResultEvent(call, result, duration)
+			if err := r.recordToolResult(turn, payload); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
+			}
+			r.logToolResult(call, result, payload)
 			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeInternal, "tool call not executed after a recovered panic"); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
 			}
 			res.Err = fmt.Errorf("tool %q panicked: %s", call.Name, result.Error)
 			return r.finishTerminal(res, st, StopInternalError, "recovered tool panic")
+		}
+
+		if interrupted && !result.OK {
+			result = tools.Result{
+				OK:         false,
+				Code:       tools.CodeCanceled,
+				Error:      toolInterruptMessage,
+				DurationMS: duration.Milliseconds(),
+			}
+		} else {
+			interrupted = false
+		}
+		normalizeResultCode(&result)
+		payload := toolResultEvent(call, result, duration)
+		if err := r.recordToolResult(turn, payload); err != nil {
+			res.Err = err
+			return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
+		}
+		r.logToolResult(call, result, payload)
+
+		if interrupted {
+			if err := r.record(session.TypeInterrupt, st.turns, "", interruptData{
+				Operation: operationTool,
+				CallID:    call.ID,
+				Name:      call.Name,
+				Reason:    "interrupted by SIGINT",
+			}); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool interrupt")
+			}
+			if err := r.sync(); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
+			}
+			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeCanceled, toolNotStartedMessage); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
+			}
+			st.failKey = ""
+			st.failCount = 0
+			return false, nil
+		}
+
+		if ctx.Err() != nil {
+			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeCanceled, canceledBeforeMessage); err != nil {
+				res.Err = err
+				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
+			}
+			return r.finishContext(res, st, ctx)
 		}
 
 		if result.OK {
@@ -438,7 +757,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 		if st.failCount == 3 {
 			hint := fmt.Sprintf("The tool %q has failed %d times with the same arguments and result code %q. Stop repeating the same call; change approach, or reply without a tool call if you are blocked.", call.Name, st.failCount, result.Code)
-			if err := r.recordStuckHint(turn, hint); err != nil {
+			if err := r.recordUserMessage(turn, hint, sourceStuckHint); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record the stuck hint")
 			}
@@ -452,12 +771,19 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			return r.finishTerminal(res, st, StopStuck, "repeated identical tool failures")
 		}
 	}
-
-	if err := r.sync(); err != nil {
-		res.Err = err
-		return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
-	}
 	return false, nil
+}
+
+func (r *Runner) logToolResult(call model.ToolCall, result tools.Result, payload toolResultData) {
+	if r.cfg.Logger == nil {
+		return
+	}
+	r.cfg.Logger.Info("tool result",
+		"tool", call.Name,
+		"ok", result.OK,
+		"code", result.Code,
+		"duration_ms", payload.DurationMS,
+	)
 }
 
 // finishContext maps context cancellation after an in-flight operation.
@@ -487,12 +813,14 @@ func (r *Runner) finishContext(res *Result, st *runState, ctx context.Context) (
 }
 
 // finishResult sets the terminal fields, emits exactly one final event
-// followed by one session_end event, and syncs the log.
+// followed by one run_end event, and syncs the log.
 func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reason string) (Result, error) {
 	res.Status = status
-	res.Turns = st.turns
-	res.Usage = st.usage
 	res.FinalText = st.lastText
+	res.RunTurns = st.runTurns
+	res.RunUsage = st.runUsage
+	res.CumulativeTurns = st.turns
+	res.CumulativeUsage = st.usage
 	if st.finalized {
 		return *res, res.Err
 	}
@@ -502,9 +830,11 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 		Status: status,
 		Text:   capText(st.lastText, maxEventTextBytes),
 	})
-	endErr := r.record(session.TypeSessionEnd, st.turns, "", sessionEndData{
+	endErr := r.record(session.TypeRunEnd, st.turns, "", runEndData{
 		Status:     status,
 		Reason:     capText(reason, maxErrorEventBytes),
+		RunTurns:   st.runTurns,
+		RunUsage:   st.runUsage,
 		Turns:      st.turns,
 		Usage:      st.usage,
 		DurationMS: time.Since(st.start).Milliseconds(),
@@ -537,6 +867,23 @@ func (r *Runner) record(typ session.EventType, turn int, role string, payload an
 	return nil
 }
 
+func (r *Runner) recordUserMessage(turn int, text, source string) error {
+	if err := r.record(session.TypeUserMessage, turn, string(model.RoleUser), userMessageData{
+		Text:   capText(text, maxEventTextBytes),
+		Source: capText(source, maxEventTextBytes),
+	}); err != nil {
+		return err
+	}
+	return r.sync()
+}
+
+func (r *Runner) recordToolResult(turn int, payload toolResultData) error {
+	if err := r.record(session.TypeToolResult, turn, string(model.RoleTool), payload); err != nil {
+		return err
+	}
+	return r.sync()
+}
+
 func (r *Runner) sync() error {
 	if err := r.store.Sync(); err != nil {
 		return fmt.Errorf("sync session log: %w", err)
@@ -558,27 +905,27 @@ func (r *Runner) recordCompaction(turn int, proj Projection, policy string) erro
 }
 
 func (r *Runner) recordError(turn int, class, message string) error {
-	return r.record(session.TypeError, turn, "", errorData{
-		Class:   class,
-		Message: capText(message, maxErrorEventBytes),
-	})
+	return r.recordErrorWithPartial(turn, class, message, "", 0)
 }
 
-func (r *Runner) recordStuckHint(turn int, text string) error {
-	return r.record(session.TypeUserMessage, turn, string(model.RoleUser), userMessageData{
-		Text:   capText(text, maxErrorEventBytes),
-		Source: sourceStuckHint,
+func (r *Runner) recordErrorWithPartial(turn int, class, message, partial string, partialBytes int) error {
+	return r.record(session.TypeError, turn, "", errorData{
+		Class:        class,
+		Message:      capText(message, maxErrorEventBytes),
+		PartialText:  capText(partial, maxPartialTextBytes),
+		PartialBytes: partialBytes,
 	})
 }
 
 func (r *Runner) recordResponse(comp completion, turn int) error {
 	return r.record(session.TypeModelResponse, turn, string(model.RoleAssistant), modelResponseData{
-		Text:         capText(comp.resp.Text, maxEventTextBytes),
+		Text:         cleanText(comp.resp.Text),
 		ToolCalls:    loggableToolCalls(comp.resp.ToolCalls),
 		FinishReason: comp.resp.FinishReason,
 		Usage:        comp.resp.Usage,
 		LatencyMS:    comp.latency.Milliseconds(),
 		Attempt:      comp.attempt,
+		Streamed:     comp.streamed,
 	})
 }
 
@@ -669,7 +1016,7 @@ func (r *Runner) appendUnexecuted(calls []model.ToolCall, turn int, code tools.C
 			Code:   code,
 			Error:  message,
 		}
-		if err := r.record(session.TypeToolResult, turn, string(model.RoleTool), payload); err != nil {
+		if err := r.recordToolResult(turn, payload); err != nil {
 			return err
 		}
 	}
@@ -683,4 +1030,23 @@ func failureKey(name, canonical string, canonicalErr error, code string, raw jso
 	return name + "\x00" + canonical + "\x00" + code
 }
 
-const continuationHint = "Your previous response was truncated by the output length limit. Continue the task from where you left off without repeating completed work, and reply without a tool call when complete."
+func partialFromError(err error) (string, int) {
+	if partial, ok := errors.AsType[*model.PartialError](err); ok {
+		return capText(partial.Text, maxPartialTextBytes), partial.Bytes
+	}
+	return "", 0
+}
+
+const (
+	continuationHint = "Your previous response was truncated by the output length limit. Continue the task from where you left off without repeating completed work, and reply without a tool call when complete."
+
+	interruptHint = "The previous model call was interrupted by the user before it completed. No assistant response from that attempt is in the transcript. Continue the task from the durable transcript, or stop by replying without a tool call if you are blocked."
+
+	repairMessage = "the harness restarted before this tool call returned; its side effect may or may not have occurred; verify the outcome before retrying"
+
+	toolInterruptMessage = "the tool call was interrupted by SIGINT; its side effect may or may not have occurred; verify the outcome before retrying"
+
+	toolNotStartedMessage = "the tool call was not started because the operation was interrupted"
+
+	canceledBeforeMessage = "run canceled before tool execution"
+)

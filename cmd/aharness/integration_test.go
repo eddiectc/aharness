@@ -66,10 +66,10 @@ func runHarnessEnv(t *testing.T, bin, workspace, stateDir, baseURL string, extra
 		}
 		env = append(env, entry)
 	}
-	env = append(env,
-		"AHARNESS_PROVIDER_BASE_URL="+baseURL,
-		"AHARNESS_STATE_DIR="+stateDir,
-	)
+	env = append(env, "AHARNESS_STATE_DIR="+stateDir)
+	if baseURL != "" {
+		env = append(env, "AHARNESS_PROVIDER_BASE_URL="+baseURL)
+	}
 	env = append(env, extraEnv...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -223,7 +223,7 @@ func TestBinaryRunsBothDialects(t *testing.T) {
 			if !strings.Contains(run.stdout, "done") {
 				t.Errorf("stdout = %q, want final assistant text", run.stdout)
 			}
-			for _, want := range []string{"session_start", "model_response", "tool_result", "final", "session_end", "call_1", "hello from file"} {
+			for _, want := range []string{"session_start", "run_start", "model_response", "tool_result", "final", "run_end", "call_1", "hello from file"} {
 				if !strings.Contains(run.log, want) {
 					t.Errorf("log missing %q:\n%s", want, run.log)
 				}
@@ -470,7 +470,7 @@ func TestSignalKillsChildAndCleansWorkDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := string(logData)
-	for _, want := range []string{"interrupted", "final", "session_end", "tool_result", "canceled"} {
+	for _, want := range []string{"interrupted", "final", "run_end", "tool_result", "canceled"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log missing %q:\n%s", want, log)
 		}

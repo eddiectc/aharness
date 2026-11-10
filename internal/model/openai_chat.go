@@ -7,6 +7,8 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 )
 
 // OpenAIChat is the dialect adapter for the OpenAI Chat Completions API.
@@ -23,10 +25,16 @@ func NewOpenAIChat(baseURL, token, sessionID, version string) *OpenAIChat {
 }
 
 type chatRequest struct {
-	Model     string        `json:"model"`
-	Messages  []chatMessage `json:"messages"`
-	Tools     []chatTool    `json:"tools,omitempty"`
-	MaxTokens int           `json:"max_tokens,omitempty"`
+	Model         string             `json:"model"`
+	Messages      []chatMessage      `json:"messages"`
+	Tools         []chatTool         `json:"tools,omitempty"`
+	MaxTokens     int                `json:"max_tokens,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
+	StreamOptions *chatStreamOptions `json:"stream_options,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatMessage struct {
@@ -78,9 +86,74 @@ type chatUsage struct {
 	CompletionTokens int `json:"completion_tokens"`
 }
 
+type chatChunk struct {
+	Choices []chatChunkChoice `json:"choices"`
+	Usage   *chatUsage        `json:"usage"`
+}
+
+type chatChunkChoice struct {
+	Index        int       `json:"index"`
+	Delta        chatDelta `json:"delta"`
+	FinishReason *string   `json:"finish_reason"`
+}
+
+type chatDelta struct {
+	Content   string              `json:"content"`
+	ToolCalls []chatDeltaToolCall `json:"tool_calls"`
+}
+
+type chatDeltaToolCall struct {
+	Index    int               `json:"index"`
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Function chatDeltaFunction `json:"function"`
+}
+
+type chatDeltaFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type chatStreamCall struct {
+	id   string
+	name string
+	args strings.Builder
+}
+
 // Complete sends one canonical request through the Chat Completions wire
 // format and maps the first choice back into the canonical response.
 func (a *OpenAIChat) Complete(ctx context.Context, req Request) (Response, error) {
+	body, err := a.transport.post(ctx, a.payload(req))
+	if err != nil {
+		return Response{}, err
+	}
+	return decodeChatResponse(body)
+}
+
+// CompleteStream sends a streaming Chat Completions request. Assistant-text
+// deltas are display-only; the assembled response is authoritative.
+func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error) {
+	payload := a.payload(req)
+	payload.Stream = true
+	payload.StreamOptions = &chatStreamOptions{IncludeUsage: true}
+	resp, err := a.transport.postStream(ctx, payload)
+	if err != nil {
+		return Response{}, err
+	}
+	if !isEventStream(resp.Header.Get("Content-Type")) {
+		body, err := readBodyCapped(resp)
+		if err != nil {
+			return Response{}, err
+		}
+		return decodeChatResponse(body)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	return consumeChatStream(resp.Body, emit)
+}
+
+func (a *OpenAIChat) payload(req Request) chatRequest {
 	payload := chatRequest{
 		Model:     req.Model,
 		Messages:  make([]chatMessage, 0, len(req.Messages)),
@@ -111,17 +184,142 @@ func (a *OpenAIChat) Complete(ctx context.Context, req Request) (Response, error
 			Function: chatToolFunction(tool),
 		})
 	}
+	return payload
+}
 
-	body, err := a.transport.post(ctx, payload)
-	if err != nil {
-		return Response{}, err
-	}
-
+func decodeChatResponse(body []byte) (Response, error) {
 	var decoded chatResponse
 	if err := jsonv2.Unmarshal(body, &decoded); err != nil {
 		return Response{}, &ProtocolError{Err: fmt.Errorf("decode chat completion: %w", err)}
 	}
 	return decoded.canonical()
+}
+
+func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
+	dec := newSSEDecoder(r)
+	var (
+		text         strings.Builder
+		emittedText  strings.Builder
+		emittedBytes int
+		argBytes     int
+		calls        = make(map[int]*chatStreamCall)
+		order        []int
+		finishReason string
+		usage        *chatUsage
+	)
+	fail := func(err error) (Response, error) {
+		if emittedBytes > 0 {
+			return Response{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
+		}
+		return Response{}, err
+	}
+
+	for {
+		event, err := dec.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fail(err)
+		}
+		data := string(event.Data)
+		if data == "[DONE]" {
+			break
+		}
+		var chunk chatChunk
+		if err := jsonv2.Unmarshal(event.Data, &chunk); err != nil {
+			return fail(&ProtocolError{Err: fmt.Errorf("decode chat stream event: %w", err)})
+		}
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+		choice := chunk.Choices[0]
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
+		}
+		if delta := choice.Delta.Content; delta != "" {
+			if text.Len()+argBytes+len(delta) > MaxCanonicalResponse {
+				return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
+			}
+			text.WriteString(delta)
+			emittedText.WriteString(delta)
+			emittedBytes += len(delta)
+			if err := emit(delta); err != nil {
+				return Response{}, err
+			}
+		}
+		for _, fragment := range choice.Delta.ToolCalls {
+			acc := calls[fragment.Index]
+			if acc == nil {
+				acc = &chatStreamCall{}
+				calls[fragment.Index] = acc
+				order = append(order, fragment.Index)
+			}
+			if fragment.ID != "" {
+				if acc.id != "" && acc.id != fragment.ID {
+					return fail(&ProtocolError{Err: fmt.Errorf("tool call index %d changed id from %q to %q", fragment.Index, acc.id, fragment.ID)})
+				}
+				acc.id = fragment.ID
+			}
+			if fragment.Function.Name != "" {
+				if acc.name != "" && acc.name != fragment.Function.Name {
+					return fail(&ProtocolError{Err: fmt.Errorf("tool call index %d changed name from %q to %q", fragment.Index, acc.name, fragment.Function.Name)})
+				}
+				acc.name = fragment.Function.Name
+			}
+			if fragment.Function.Arguments != "" {
+				if text.Len()+argBytes+len(fragment.Function.Arguments) > MaxCanonicalResponse {
+					return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
+				}
+				acc.args.WriteString(fragment.Function.Arguments)
+				argBytes += len(fragment.Function.Arguments)
+			}
+		}
+	}
+
+	if usage == nil {
+		return fail(&ProtocolError{Err: errors.New("chat stream completed without usage")})
+	}
+
+	out := Response{
+		Text: text.String(),
+		Usage: Usage{
+			InputTokens:  usage.PromptTokens,
+			OutputTokens: usage.CompletionTokens,
+		},
+		Streamed: true,
+	}
+	seen := make(map[string]struct{}, len(calls))
+	for _, index := range order {
+		acc := calls[index]
+		if acc.id == "" {
+			return fail(&ProtocolError{Err: fmt.Errorf("tool call index %d is missing an id", index)})
+		}
+		if acc.name == "" {
+			return fail(&ProtocolError{Err: fmt.Errorf("tool call %q is missing a name", acc.id)})
+		}
+		if _, ok := seen[acc.id]; ok {
+			return fail(&ProtocolError{Err: fmt.Errorf("duplicate tool call id %q", acc.id)})
+		}
+		seen[acc.id] = struct{}{}
+		args := acc.args.String()
+		if !jsontext.Value(args).IsValid() {
+			return fail(&ProtocolError{Err: fmt.Errorf("tool call %q has invalid json arguments", acc.id)})
+		}
+		out.ToolCalls = append(out.ToolCalls, ToolCall{
+			ID:        acc.id,
+			Name:      acc.name,
+			Arguments: json.RawMessage(args),
+		})
+	}
+	if responseContentBytes(out) > MaxCanonicalResponse {
+		return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
+	}
+	out.FinishReason = chatFinishReason(finishReason, len(out.ToolCalls) > 0)
+	return out, nil
 }
 
 // canonical maps the first wire choice into a canonical response. A provided

@@ -14,15 +14,39 @@ import (
 // the agent owns the JSON object stored in Event.Data for each event type.
 
 type sessionStartData struct {
-	PromptVersion  string `json:"prompt_version"`
-	ToolsetVersion string `json:"toolset_version"`
-	Workspace      string `json:"workspace"`
-	StateDir       string `json:"state_dir"`
-	Provider       string `json:"provider"`
-	Dialect        string `json:"dialect"`
-	Model          string `json:"model"`
-	Limits         Limits `json:"limits"`
-	HarnessVersion string `json:"harness_version"`
+	PromptVersion    string `json:"prompt_version"`
+	ToolsetVersion   string `json:"toolset_version"`
+	Workspace        string `json:"workspace"`
+	StateDir         string `json:"state_dir"`
+	Provider         string `json:"provider"`
+	Dialect          string `json:"dialect"`
+	Model            string `json:"model"`
+	Limits           Limits `json:"limits"`
+	MaxTurns         int    `json:"max_turns"`
+	MaxTotalTokens   int    `json:"max_total_tokens"`
+	SessionTimeoutMS int64  `json:"session_timeout_ms"`
+	ModelTimeoutMS   int64  `json:"model_timeout_ms"`
+	HarnessVersion   string `json:"harness_version"`
+	ParentSession    string `json:"parent_session,omitempty"`
+	ParentSeq        uint64 `json:"parent_seq,omitzero"`
+}
+
+type runStartData struct {
+	RunID            string `json:"run_id"`
+	ResumedFromSeq   uint64 `json:"resumed_from_seq"`
+	Model            string `json:"model"`
+	Dialect          string `json:"dialect"`
+	BaseURL          string `json:"base_url"`
+	Limits           Limits `json:"limits"`
+	MaxTurns         int    `json:"max_turns"`
+	MaxTotalTokens   int    `json:"max_total_tokens"`
+	SessionTimeoutMS int64  `json:"session_timeout_ms"`
+	ModelTimeoutMS   int64  `json:"model_timeout_ms"`
+	PromptVersion    string `json:"prompt_version"`
+	ToolsetVersion   string `json:"toolset_version"`
+	HarnessVersion   string `json:"harness_version"`
+	Interactive      bool   `json:"interactive"`
+	Stream           bool   `json:"stream"`
 }
 
 type userMessageData struct {
@@ -53,6 +77,7 @@ type modelResponseData struct {
 	Usage        model.Usage        `json:"usage"`
 	LatencyMS    int64              `json:"latency_ms"`
 	Attempt      int                `json:"attempt"`
+	Streamed     bool               `json:"streamed"`
 }
 
 type modelRetryData struct {
@@ -89,9 +114,19 @@ type limitData struct {
 	Observed   int64  `json:"observed,omitzero"`
 }
 
+type interruptData struct {
+	Operation   string `json:"operation"`
+	CallID      string `json:"call_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	PartialText string `json:"partial_text,omitempty"`
+	Reason      string `json:"reason"`
+}
+
 type errorData struct {
-	Class   string `json:"class"`
-	Message string `json:"message"`
+	Class        string `json:"class"`
+	Message      string `json:"message"`
+	PartialText  string `json:"partial_text,omitempty"`
+	PartialBytes int    `json:"partial_bytes,omitzero"`
 }
 
 type finalData struct {
@@ -99,9 +134,11 @@ type finalData struct {
 	Text   string     `json:"text,omitempty"`
 }
 
-type sessionEndData struct {
+type runEndData struct {
 	Status     StopReason  `json:"status"`
 	Reason     string      `json:"reason"`
+	RunTurns   int         `json:"run_turns"`
+	RunUsage   model.Usage `json:"run_usage"`
 	Turns      int         `json:"turns"`
 	Usage      model.Usage `json:"usage"`
 	DurationMS int64       `json:"duration_ms"`
@@ -111,6 +148,14 @@ type sessionEndData struct {
 const (
 	sourceContinuationHint = "continuation-hint"
 	sourceStuckHint        = "stuck-hint"
+	sourceSteer            = "steer"
+	sourceInterruptHint    = "interrupt-hint"
+)
+
+// Interrupt operations recorded in interrupt events.
+const (
+	operationModel = "model"
+	operationTool  = "tool"
 )
 
 // Limit kinds recorded in limit events.
@@ -136,14 +181,18 @@ const (
 	errorClassProtocol      = "protocol"
 	errorClassContentFilter = "content_filter"
 	errorClassOverflow      = "context_overflow"
+	errorClassInternal      = "internal"
 )
 
 const (
-	maxEventTextBytes    = 64 << 10
-	maxErrorEventBytes   = 2 << 10
-	maxModelRequestBytes = 1 << 20
-	maxPanicStackBytes   = 4 << 10
-	maxPanicMessageBytes = 1 << 10
+	maxEventTextBytes     = 64 << 10
+	maxErrorEventBytes    = 2 << 10
+	maxModelRequestBytes  = 1 << 20
+	maxPanicStackBytes    = 4 << 10
+	maxPanicMessageBytes  = 1 << 10
+	maxModelResponseBytes = 1 << 20
+	maxPartialTextBytes   = 64 << 10
+	maxSteeringBytes      = 64 << 10
 )
 
 // capText sanitizes invalid UTF-8, truncates at a byte limit on a rune
@@ -189,10 +238,20 @@ func loggableToolCalls(calls []model.ToolCall) []loggedToolCall {
 	out := make([]loggedToolCall, len(calls))
 	for i, call := range calls {
 		out[i] = loggedToolCall{
-			ID:        capText(call.ID, maxEventTextBytes),
-			Name:      capText(call.Name, maxEventTextBytes),
+			ID:        strings.ToValidUTF8(call.ID, "\uFFFD"),
+			Name:      strings.ToValidUTF8(call.Name, "\uFFFD"),
 			Arguments: safeArguments(call.Arguments),
 		}
 	}
 	return out
+}
+
+// responseBytes counts the canonical response content that must be recorded
+// so a resumed run can replay exactly what was executed.
+func responseBytes(resp model.Response) int {
+	n := len(resp.Text)
+	for _, call := range resp.ToolCalls {
+		n += len(call.ID) + len(call.Name) + len(call.Arguments)
+	}
+	return n
 }

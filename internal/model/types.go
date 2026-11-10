@@ -71,18 +71,42 @@ type Usage struct {
 // Total returns the total tokens reported for the response.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
 
-// Response is one canonical model response.
+// Response is one canonical model response. Streamed reports that the
+// response was assembled from an SSE stream; it is display/provenance metadata,
+// not transcript content. The completed response remains authoritative.
 type Response struct {
 	Text         string       `json:"text,omitempty"`
 	ToolCalls    []ToolCall   `json:"tool_calls,omitempty"`
 	FinishReason FinishReason `json:"finish_reason"`
 	Usage        Usage        `json:"usage"`
+	Streamed     bool         `json:"-"`
 }
 
 // Completer is the provider-facing contract. Both dialect adapters implement
 // it; the agent loop sees only canonical types.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
+}
+
+// StreamCompleter is the optional streaming contract. emit receives
+// display-only assistant-text deltas; the returned Response is authoritative
+// and is the only value recorded in the transcript.
+type StreamCompleter interface {
+	CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error)
+}
+
+// MaxCanonicalResponse is the largest assembled canonical response accepted
+// before any tool executes.
+const MaxCanonicalResponse = 1 << 20
+
+// responseContentBytes counts the response fields that must be replayed
+// exactly: text, tool-call IDs, names, and raw arguments.
+func responseContentBytes(resp Response) int {
+	n := len(resp.Text)
+	for _, call := range resp.ToolCalls {
+		n += len(call.ID) + len(call.Name) + len(call.Arguments)
+	}
+	return n
 }
 
 // Dialect identifies the OpenAI wire dialect used by a model.

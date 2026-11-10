@@ -118,8 +118,11 @@ func testConfig() Config {
 		Provider:       "opencode-go",
 		Dialect:        string(model.DialectChat),
 		Model:          "test-model",
+		BaseURL:        "http://127.0.0.1:1",
 		Workspace:      "/tmp/workspace",
 		StateDir:       "/tmp/state",
+		PromptVersion:  PromptVersion,
+		ToolsetVersion: tools.Version,
 		HarnessVersion: "test-harness",
 		MaxTurns:       10,
 		MaxTotalTokens: 1_000_000,
@@ -135,11 +138,23 @@ func testConfig() Config {
 	}
 }
 
+func defaultRunOptions() RunOptions {
+	return RunOptions{Task: "do the task", TaskSet: true, TaskFrom: "-task"}
+}
+
+func startTestSession(t *testing.T, runner *Runner) {
+	t.Helper()
+	if err := runner.StartSession(nil); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+}
+
 func runTask(t *testing.T, cfg Config, comp completer, ts toolset) (*fakeStore, Result, error) {
 	t.Helper()
 	store := &fakeStore{}
 	runner := newRunner(cfg, comp, ts, store)
-	res, err := runner.Run(t.Context(), "do the task", "-task")
+	startTestSession(t, runner)
+	res, err := runner.Run(t.Context(), defaultRunOptions())
 	return store, res, err
 }
 
@@ -177,16 +192,21 @@ func newTestEvent(t *testing.T, typ session.EventType, turn int, role string, pa
 
 func startEvent(t *testing.T, workspace string) session.Event {
 	t.Helper()
+	cfg := testConfig()
 	return newTestEvent(t, session.TypeSessionStart, 0, "", sessionStartData{
-		PromptVersion:  PromptVersion,
-		ToolsetVersion: tools.Version,
-		Workspace:      workspace,
-		StateDir:       "/tmp/state",
-		Provider:       "opencode-go",
-		Dialect:        "openai-chat",
-		Model:          "test-model",
-		Limits:         testConfig().Limits,
-		HarnessVersion: "test-harness",
+		PromptVersion:    PromptVersion,
+		ToolsetVersion:   tools.Version,
+		Workspace:        workspace,
+		StateDir:         "/tmp/state",
+		Provider:         "opencode-go",
+		Dialect:          "openai-chat",
+		Model:            "test-model",
+		Limits:           cfg.Limits,
+		MaxTurns:         cfg.MaxTurns,
+		MaxTotalTokens:   cfg.MaxTotalTokens,
+		SessionTimeoutMS: cfg.SessionTimeout.Milliseconds(),
+		ModelTimeoutMS:   cfg.ModelTimeout.Milliseconds(),
+		HarnessVersion:   "test-harness",
 	})
 }
 

@@ -7,6 +7,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -30,6 +31,7 @@ type responsesRequest struct {
 	Tools           []responsesTool `json:"tools,omitempty"`
 	MaxOutputTokens int             `json:"max_output_tokens,omitempty"`
 	Store           bool            `json:"store"`
+	Stream          bool            `json:"stream,omitempty"`
 }
 
 type responsesContentPart struct {
@@ -68,7 +70,7 @@ type responsesResponse struct {
 	Status            string               `json:"status"`
 	IncompleteDetails *responsesIncomplete `json:"incomplete_details"`
 	Error             *responsesError      `json:"error"`
-	Usage             responsesUsage       `json:"usage"`
+	Usage             *responsesUsage      `json:"usage"`
 }
 
 type responsesIncomplete struct {
@@ -104,10 +106,49 @@ type responsesOutputPart struct {
 	Text string `json:"text"`
 }
 
+type responsesStreamEvent struct {
+	Type     string             `json:"type"`
+	Response *responsesResponse `json:"response"`
+	Delta    string             `json:"delta"`
+	Error    *responsesError    `json:"error"`
+	Code     string             `json:"code"`
+	Message  string             `json:"message"`
+}
+
 // Complete sends one canonical request through the Responses wire format and
 // maps the returned output items back into the canonical response. The full
 // projected input is replayed; server-side conversation state is never used.
 func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, error) {
+	body, err := a.transport.post(ctx, a.payload(req))
+	if err != nil {
+		return Response{}, err
+	}
+	return decodeResponsesResponse(body, a.transport.token)
+}
+
+// CompleteStream sends a streaming Responses request. Text deltas are
+// display-only; the terminal completed response is authoritative.
+func (a *OpenAIResponses) CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error) {
+	payload := a.payload(req)
+	payload.Stream = true
+	resp, err := a.transport.postStream(ctx, payload)
+	if err != nil {
+		return Response{}, err
+	}
+	if !isEventStream(resp.Header.Get("Content-Type")) {
+		body, err := readBodyCapped(resp)
+		if err != nil {
+			return Response{}, err
+		}
+		return decodeResponsesResponse(body, a.transport.token)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	return consumeResponsesStream(resp.Body, emit, a.transport.token)
+}
+
+func (a *OpenAIResponses) payload(req Request) responsesRequest {
 	payload := responsesRequest{
 		Model:           req.Model,
 		Input:           make([]any, 0, len(req.Messages)),
@@ -131,12 +172,9 @@ func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, 
 		case RoleAssistant:
 			if msg.Content != "" {
 				payload.Input = append(payload.Input, responsesInputMessage{
-					Type: "message",
-					Role: "assistant",
-					Content: []responsesContentPart{{
-						Type: "output_text",
-						Text: msg.Content,
-					}},
+					Type:    "message",
+					Role:    "assistant",
+					Content: []responsesContentPart{{Type: "output_text", Text: msg.Content}},
 				})
 			}
 			for _, call := range msg.ToolCalls {
@@ -163,17 +201,115 @@ func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, 
 			Parameters:  tool.Parameters,
 		})
 	}
+	return payload
+}
 
-	body, err := a.transport.post(ctx, payload)
-	if err != nil {
-		return Response{}, err
-	}
-
+func decodeResponsesResponse(body []byte, token string) (Response, error) {
 	var decoded responsesResponse
 	if err := jsonv2.Unmarshal(body, &decoded); err != nil {
 		return Response{}, &ProtocolError{Err: fmt.Errorf("decode responses completion: %w", err)}
 	}
-	return decoded.canonical(a.transport.token)
+	return decoded.canonical(token)
+}
+
+func consumeResponsesStream(r io.Reader, emit func(string) error, token string) (Response, error) {
+	dec := newSSEDecoder(r)
+	var (
+		emittedText  strings.Builder
+		emittedBytes int
+	)
+	fail := func(err error) (Response, error) {
+		if emittedBytes > 0 {
+			return Response{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
+		}
+		return Response{}, err
+	}
+
+	for {
+		event, err := dec.Next()
+		if errors.Is(err, io.EOF) {
+			return fail(&ProtocolError{Err: errors.New("responses stream ended before a terminal event")})
+		}
+		if err != nil {
+			return fail(err)
+		}
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := jsonv2.Unmarshal(event.Data, &head); err != nil {
+			return fail(&ProtocolError{Err: fmt.Errorf("decode responses stream event: %w", err)})
+		}
+		var decoded responsesStreamEvent
+		switch head.Type {
+		case "response.output_text.delta":
+			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("decode output text delta: %w", err)})
+			}
+			if decoded.Delta == "" {
+				continue
+			}
+			if emittedBytes+len(decoded.Delta) > MaxCanonicalResponse {
+				return fail(&ProtocolError{Err: fmt.Errorf("streamed text exceeds %d bytes", MaxCanonicalResponse)})
+			}
+			emittedText.WriteString(decoded.Delta)
+			emittedBytes += len(decoded.Delta)
+			if err := emit(decoded.Delta); err != nil {
+				return Response{}, err
+			}
+		case "response.function_call_arguments.delta":
+			// Tool calls are assembled from the terminal response event; the
+			// fragment is accepted for protocol compatibility.
+			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("decode function call arguments delta: %w", err)})
+			}
+		case "response.completed", "response.incomplete":
+			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("decode terminal response event: %w", err)})
+			}
+			if decoded.Response == nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("%s event has no response", head.Type)})
+			}
+			if decoded.Response.Usage == nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("%s event has no usage", head.Type)})
+			}
+			resp, err := decoded.Response.canonical(token)
+			if err != nil {
+				return fail(err)
+			}
+			if responseContentBytes(resp) > MaxCanonicalResponse {
+				return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
+			}
+			resp.Streamed = true
+			return resp, nil
+		case "response.failed":
+			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("decode failed response event: %w", err)})
+			}
+			detail := "response failed"
+			switch {
+			case decoded.Response != nil && decoded.Response.Error != nil && decoded.Response.Error.Message != "":
+				detail += ": " + decoded.Response.Error.Message
+			case decoded.Response != nil && decoded.Response.Error != nil && decoded.Response.Error.Code != "":
+				detail += ": " + decoded.Response.Error.Code
+			case decoded.Error != nil && decoded.Error.Message != "":
+				detail += ": " + decoded.Error.Message
+			case decoded.Message != "":
+				detail += ": " + decoded.Message
+			}
+			return fail(&ProtocolError{Err: errors.New(redactBody(detail, token))})
+		case "error":
+			detail := "provider stream error"
+			switch {
+			case decoded.Message != "":
+				detail += ": " + decoded.Message
+			case decoded.Code != "":
+				detail += ": " + decoded.Code
+			}
+			return fail(&ProtocolError{Err: errors.New(redactBody(detail, token))})
+		default:
+			// Unknown event types are ignored for forward compatibility.
+		}
+	}
 }
 
 // canonical maps Responses output items into a canonical response. Message
@@ -181,9 +317,11 @@ func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, 
 // by call_id, never by the provider item id.
 func (r responsesResponse) canonical(token string) (Response, error) {
 	var out Response
-	out.Usage = Usage{
-		InputTokens:  r.Usage.InputTokens,
-		OutputTokens: r.Usage.OutputTokens,
+	if r.Usage != nil {
+		out.Usage = Usage{
+			InputTokens:  r.Usage.InputTokens,
+			OutputTokens: r.Usage.OutputTokens,
+		}
 	}
 
 	var text strings.Builder

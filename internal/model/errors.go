@@ -49,6 +49,19 @@ type ProtocolError struct {
 func (e *ProtocolError) Error() string { return "provider protocol: " + e.Err.Error() }
 func (e *ProtocolError) Unwrap() error { return e.Err }
 
+// PartialError wraps a failure that occurred after at least one assistant-text
+// delta was emitted. A streamed retry after output began would duplicate
+// stdout, so the agent treats it as terminal. Text and Bytes are diagnostics
+// only and are never projected.
+type PartialError struct {
+	Err   error
+	Text  string
+	Bytes int
+}
+
+func (e *PartialError) Error() string { return e.Err.Error() }
+func (e *PartialError) Unwrap() error { return e.Err }
+
 // ContextOverflowError wraps the provider error that indicated context
 // overflow. It satisfies errors.Is(err, ErrContextOverflow).
 type ContextOverflowError struct {

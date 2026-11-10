@@ -3,11 +3,13 @@
 The Go coding standard is [docs/coding-standard.md](docs/coding-standard.md).
 Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
 are defined there, and it wins over other docs on Go practice. Product scope
-and milestones live in [docs/v0-build.md](docs/v0-build.md); system structure,
+and milestones live in [docs/v1-build.md](docs/v1-build.md) (v0 history is in
+[docs/v0-build.md](docs/v0-build.md)); system structure,
 tool behavior, and CLI/config contracts live in
 [docs/architecture.md](docs/architecture.md); the testing strategy lives in
-[docs/testing-strategy.md](docs/testing-strategy.md); completion criteria live
-in [docs/definition-of-done.md](docs/definition-of-done.md).
+[docs/testing-strategy.md](docs/testing-strategy.md); current completion
+criteria live in [docs/v1-build.md §1.4](docs/v1-build.md#14-definition-of-done)
+(the historical v0 checklist is in [docs/definition-of-done.md](docs/definition-of-done.md)).
 
 Non-negotiables:
 

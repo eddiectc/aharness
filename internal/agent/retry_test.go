@@ -27,17 +27,18 @@ func TestRunRetry429ThenSuccess(t *testing.T) {
 		}}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		runner.jitter = func(d time.Duration) time.Duration { return d }
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(t.Context(), "do the task", "-task")
+			res, err := runner.Run(t.Context(), defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		got := <-outcome
 		if got.err != nil {
 			t.Fatalf("Run error = %v, want nil", got.err)
 		}
-		if got.res.Status != StopCompleted || got.res.Turns != 1 {
+		if got.res.Status != StopCompleted || got.res.CumulativeTurns != 1 {
 			t.Fatalf("result = %+v", got.res)
 		}
 		if comp.calls != 2 {
@@ -97,7 +98,7 @@ func TestRunRetry401FastFail(t *testing.T) {
 		t.Fatalf("error = %+v", data)
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
-	assertExactlyOne(t, store, session.TypeSessionEnd)
+	assertExactlyOne(t, store, session.TypeRunEnd)
 }
 
 func TestRunProtocolErrorNoRetry(t *testing.T) {
@@ -132,10 +133,11 @@ func TestRunTransportRetriesExhausted(t *testing.T) {
 		comp := &fakeCompleter{steps: steps}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		runner.jitter = func(d time.Duration) time.Duration { return d }
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(t.Context(), "do the task", "-task")
+			res, err := runner.Run(t.Context(), defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		got := <-outcome
@@ -167,7 +169,7 @@ func TestRunTransportRetriesExhausted(t *testing.T) {
 			t.Fatalf("model_response events = %d, want 0", got)
 		}
 		assertExactlyOne(t, store, session.TypeFinal)
-		assertExactlyOne(t, store, session.TypeSessionEnd)
+		assertExactlyOne(t, store, session.TypeRunEnd)
 	})
 }
 
@@ -182,10 +184,11 @@ func TestRunModelTimeoutRetried(t *testing.T) {
 		}}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		runner.jitter = func(d time.Duration) time.Duration { return d }
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(t.Context(), "do the task", "-task")
+			res, err := runner.Run(t.Context(), defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		got := <-outcome
@@ -221,12 +224,13 @@ func TestRunCancelDuringRetryBackoffMapsInterrupted(t *testing.T) {
 		}
 		store := &fakeStore{}
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
 		runner.jitter = func(d time.Duration) time.Duration { return d }
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		outcome := make(chan runOutcome, 1)
 		go func() {
-			res, err := runner.Run(ctx, "do the task", "-task")
+			res, err := runner.Run(ctx, defaultRunOptions())
 			outcome <- runOutcome{res: res, err: err}
 		}()
 		<-comp.called
@@ -317,7 +321,8 @@ func TestRunToolResultsSyncedBeforeNextCall(t *testing.T) {
 	}}
 	store := &fakeStore{}
 	runner := newRunner(cfg, comp, &fakeToolset{}, store)
-	if _, err := runner.Run(t.Context(), "do the task", "-task"); err != nil {
+	startTestSession(t, runner)
+	if _, err := runner.Run(t.Context(), defaultRunOptions()); err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
 	if store.syncs < 3 {

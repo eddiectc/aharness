@@ -1,9 +1,10 @@
 # aharness architecture
 
-- **Date:** 2026-11-09
-- **Status:** normative for v0 structure and runtime contracts
+- **Date:** 2026-11-10
+- **Status:** normative for v1 structure and runtime contracts
 - **Related:** [Go coding standard](coding-standard.md),
-  [bare-minimum harness research](agent-harness-minimum.md)
+  [bare-minimum harness research](agent-harness-minimum.md),
+  [v1 build plan](v1-build.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This document
@@ -16,21 +17,25 @@ standard wins; on structure and runtime contracts, this document wins.
 ```mermaid
 flowchart LR
   cli["aharness CLI"] --> runner["agent runner"]
-  runner <--> model["dialect adapters"]
+  runner <--> model["dialect adapters (buffered + SSE)"]
   runner <--> tools["tool registry"]
-  runner --> session[("JSONL session log")]
+  runner <--> control["signals + stdin steering"]
+  runner --> session[("v2 JSONL session log")]
   tools <--> workspace[("workspace (os.Root)")]
   model <--> api[(opencode-go API)]
 ```
 
 One process, one loop, no daemon, no worker pool. The runner owns turn state and
 is the only component that advances the loop. Tools do not call the model. The
-model adapters do not touch the workspace. The event log is append-only and is
-the only persisted truth.
+model adapters do not touch the workspace. The v2 event log is append-only and is
+the only persisted truth. A session is the durable conversation; a run is one
+process invocation that advances it. Resume appends to the same log; fork copies
+a session into a new self-contained log.
+
 
 ## 2. Provider and model
 
-v0 supports one provider, `opencode-go`, through two OpenAI wire dialects:
+v1 supports one provider, `opencode-go`, through two OpenAI wire dialects:
 Chat Completions and Responses. The initial models are `crouton-alpha-free`,
 `deepseek-v4.1-flash`, and `muse-spark-1.3-contributor`; the model registry
 assigns each to one dialect. `-model`
@@ -46,12 +51,12 @@ unset or empty, it omits `Authorization`, which supports local no-auth endpoints
 and `httptest` servers. An endpoint that requires auth surfaces a missing token
 as `provider_error` (401); local no-auth endpoints run without one. The token is
 kept in memory, redacted from logs, and excluded from tool environments.
-Credential handling stays in the adapters; v0 does not scan unrelated host
+Credential handling stays in the adapters; v1 does not scan unrelated host
 configuration or discover credentials implicitly.
 
 ### 2.1 Wire format and SDKs
 
-v0 ships two dialect adapters over plain HTTP against the same `opencode-go`
+v1 ships two dialect adapters over plain HTTP against the same `opencode-go`
 base URL, `https://opencode.ai/inference/go/v1`:
 
 - **Chat Completions:** `POST <base>/chat/completions`.
@@ -65,7 +70,7 @@ The model registry maps each initial model to its documented OpenAI dialect:
 | `crouton-alpha-free` | `openai-responses` |
 | `muse-spark-1.3-contributor` | `openai-responses` |
 
-It is a small table in `cmd`, not user-configurable in v0. Anthropic and Gemini
+It is a small table in `cmd`, not user-configurable in v1. Anthropic and Gemini
 are deferred. If a model misbehaves through a dialect, fix that adapter or add
 its native dialect behind the same canonical model; do not change the loop. The
 wire dialect is not the internal schema; both adapters map into the canonical
@@ -74,7 +79,7 @@ model (Section 2.2).
 Do not use an OpenCode SDK at this boundary. The published Go SDKs
 (`opencode-sdk-go` and its community forks) are generated clients for the
 OpenCode server REST API; adopting one would move the loop, tools, and session
-state into OpenCode, which is the architecture v0 rejects. There is no official
+state into OpenCode, which is the architecture this harness rejects. There is no official
 Go SDK for the OpenCode Go inference endpoint: it is OpenAI-compatible HTTP, and
 the stdlib adapters are smaller than the mapping layer an SDK would require. An
 inference SDK would also own retries, error bodies, and decoding, hiding the
@@ -89,7 +94,7 @@ self-identifying `User-Agent: aharness/<version>`. An empty token omits the
 `Authorization` header, supporting local no-auth endpoints and tests. OpenCode
 Go requires the session header; the value is the run's UUIDv7 session ID. The
 base URL is a constructor argument so tests and local deployments can point the
-adapters at another OpenAI-compatible server. The v0 CLI defaults to the hosted
+adapters at another OpenAI-compatible server. The CLI defaults to the hosted
 URL and exposes `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` for
 integration tests and local endpoints; this is the resolution of
 [v0-build.md §4.3 item 4](v0-build.md#43-prerequisites-and-resolutions). Production runs
@@ -161,14 +166,70 @@ members are ignored for forward compatibility. Tool arguments are stricter:
 typed decoding uses `RejectUnknownMembers(true)` (Section 5). Do not set
 `RejectUnknownMembers(true)` for provider responses.
 
-v0 has no opaque provider options or capability flags. Add adapter-specific
+v1 has no opaque provider options or capability flags. Add adapter-specific
 knobs only when a dialect requires them, and keep them out of the loop.
 
-v0 ships `model.OpenAIChat` and `model.OpenAIResponses` over the `opencode-go`
+v1 ships `model.OpenAIChat` and `model.OpenAIResponses` over the `opencode-go`
 base URL. Add `anthropic` or `gemini` adapters when a real provider requires
 them; each maps into the same canonical model without changing the loop. Share
 HTTP, retry, and fixture plumbing; do not share a universal request/response
 schema beyond the canonical model.
+
+### 2.3 Streaming
+
+Each adapter optionally implements:
+
+```go
+type StreamCompleter interface {
+	CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error)
+}
+```
+
+`CompleteStream` is opt-in through `-stream` (implied by `-interactive` unless
+`-stream=false`). The agent keeps `Completer` and falls back to `Complete` when
+the adapter does not implement streaming. The callback is display-only; the
+returned canonical `Response` is authoritative and is the only transcript
+record. Tool calls are assembled inside the adapter and are never exposed as
+deltas.
+
+- Chat Completions sends `stream: true` and
+  `stream_options: {"include_usage": true}`. It assembles text, tool-call
+  fragments by index, finish reason, and usage from the chunks.
+- Responses consumes `response.output_text.delta`,
+  `response.function_call_arguments.delta`, and the terminal
+  `response.completed`/`response.incomplete`/`response.failed` events. The
+  completed response is authoritative.
+- A 2xx response whose content type is not `text/event-stream` is decoded as a
+  normal JSON response, so local OpenAI-compatible servers keep working.
+- Final usage is required. A completed stream without usage is a
+  `protocol_error`; the harness does not silently undercount tokens.
+- Retries happen only before the first delta. After the first delta, any
+  failure is terminal and is wrapped in `PartialError` carrying capped partial
+  text and the emitted byte count; it is never retried, because a retry would
+  duplicate stdout and could duplicate tool calls.
+- Caps: 4 MiB per SSE event, 1 MiB for the assembled canonical response, 8 MiB
+  for the total stream, and 64 KiB for partial text on an interrupt or failed
+  stream. The event cap is larger than the response cap because a terminal
+  `response.completed` event wraps the full response in JSON. A response over
+  1 MiB is a `protocol_error` before any tool executes. Invalid JSON, duplicate
+  object names, and invalid UTF-8 are `protocol_error`. Error bodies are capped,
+  redacted, and never logged whole.
+- The durable transcript keeps the executed response: the `model_response`
+  payload is capped at 1 MiB total canonical content, and the session line cap
+  is 4 MiB so JSON escaping and envelope fields fit. Tool results remain at
+  64 KiB. This avoids a mismatch where a large response is executed but its
+  logged fields are truncated, which would break resume.
+- A failed stream after deltas appends one `error` event with the partial byte
+  count and capped partial text; no `model_response` is written and the partial
+  text is not projected. An interactive interrupt appends `interrupt` instead.
+- No per-delta events are written. The log size and projection behavior stay
+  proportional to complete responses.
+
+With `-stream`, stdout carries assistant text from every turn as it arrives; a
+response's final text is not reprinted if any delta for it was emitted. If the
+adapter fell back to non-streaming, the response text is printed once. Without
+`-stream`, stdout remains the final assistant text printed at the end.
+
 
 ## 3. Packages and contracts
 
@@ -176,28 +237,34 @@ schema beyond the canonical model.
 
 | Path | Responsibility |
 |---|---|
-| `cmd/aharness/` | Flags, environment parsing, config validation, wiring, signal handling, exit codes. |
-| `internal/agent/` | Runner, turn execution, stop policy, retry policy, repeated-failure detection, projection/compaction. |
-| `internal/model/` | Canonical types; Chat Completions and Responses adapters; shared HTTP plumbing; typed transport errors. |
+| `cmd/aharness/` | Flags, environment parsing, config validation, session selection, wiring, signal handling, steering reader, exit codes. |
+| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, streaming display, interactive interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
+| `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
-| `internal/session/` | Event envelope, JSONL append-only store, session metadata, replay-ready reader. |
+| `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
 ```text
 go.mod
 cmd/aharness/
-  main.go        # flags/env, wiring, signals, exit codes
-  config.go      # parsing, validation, model-to-dialect registry
-  config_test.go
+  main.go        # os.Exit(run())
+  run.go         # run modes, wiring, exit codes, work directories
+  config.go      # parsing, validation, inheritance, model-to-dialect registry
+  control.go     # interactive signal routing
+  steering.go    # bounded stdin-line reader
+  textsink.go    # streamed stdout newline handling
+  version.go
 internal/agent/
-  runner.go      # loop, stop policy, repeated-failure detection
+  runner.go      # run lifecycle, loop, stop policy, repair, interrupts
+  state.go       # durable state reconstruction and pending calls
+  events.go      # event payloads and caps
   context.go     # projection, token estimate, compaction
-  retry.go
-  stop.go
+  retry.go       # retry policy and streaming-aware model calls
+  types.go
 internal/model/
-  types.go            # canonical request/response/error types
-  openai_chat.go      # Chat Completions adapter
-  openai_responses.go # Responses adapter
-  http.go             # shared request, body cap, error decoding
+  types.go            # canonical types, StreamCompleter
+  openai_chat.go      # Chat Completions buffered + SSE adapter
+  openai_responses.go # Responses buffered + SSE adapter
+  http.go             # shared request, body cap, SSE decoder, errors
   errors.go
 internal/tools/
   registry.go
@@ -206,23 +273,28 @@ internal/tools/
   edit.go
   search.go
   command.go
+  command_unix.go
+  schemas.go
   output.go
 internal/session/
-  event.go       # event envelope only
-  store.go       # append-only JSONL store and reader
+  event.go       # v2 envelope and event types
+  reader.go      # replay, validation, torn-line offsets
+  store.go       # create/open/lock/repair/copy/append
+  lock_unix.go   # flock helpers
+  errors.go
 ```
 
-This five-package split is normative for v0. `config` lives in `cmd`,
-projection lives in `agent`, and workspace policy lives in `tools`. `session`
-remains a leaf; event payloads are `json.RawMessage`, decoded by their
-producers. `cmd` is wiring and I/O only; `agent` is the only orchestrator, and
-`model`, `tools`, and `session` MUST NOT import `agent` or `cmd`. Add a package
-only when a second consumer or a clear boundary justifies it; do not add `pkg/`,
-`util`, `common`, or `types`.
+This five-package split is normative for v1. `config` lives in `cmd`,
+projection and durable-state interpretation live in `agent`, and workspace
+policy lives in `tools`. `session` remains a leaf; event payloads are
+`json.RawMessage`, decoded by their producers. `cmd` is wiring and I/O only;
+`agent` is the only orchestrator, and `model`, `tools`, and `session` MUST NOT
+import `agent` or `cmd`. Add a package only when a second consumer or a clear
+boundary justifies it; do not add `pkg/`, `util`, `common`, or `types`.
 
 Dependencies stay deliberately small: Go standard library only at runtime. Typed
 structs and explicit checks validate tool arguments; a JSON Schema validator is
-not needed in v0. The provider adapters use `net/http` with the OpenAI Chat
+not needed in v1. The provider adapters use `net/http` with the OpenAI Chat
 Completions and Responses dialects; no provider SDK is used (Section 2.1). Dev
 tools (`goimports`, `golangci-lint`, `govulncheck`) are not runtime dependencies.
 
@@ -234,31 +306,50 @@ tools (`goimports`, `golangci-lint`, `govulncheck`) are not runtime dependencies
   schemas, `max_output_tokens`, and model name. `model.Response` carries
   assistant text, zero or more tool calls (canonical call ID, name, raw JSON
   arguments), a normalized finish reason (`stop`, `length`, `tool_calls`,
-  `content_filter`, or `other`), and usage. Adapters guarantee a non-empty call
-  ID; for a dialect that supplies IDs, a missing or duplicate ID is
-  `protocol_error` and is not repaired. Typed errors (`HTTPError`,
-  `TransportError`, `ProtocolError`, and context overflow) keep retry policy in
-  `agent`. `cmd` maps the configured model to its dialect and wires the
-  corresponding adapter.
-- `tools.Registry` — concrete registry with `Schemas() []tools.Schema` and
+  `content_filter`, or `other`), usage, and a display-only `Streamed` flag.
+  Adapters guarantee a non-empty call ID; for a dialect that supplies IDs, a
+  missing or duplicate ID is `protocol_error` and is not repaired. Typed errors
+  (`HTTPError`, `TransportError`, `ProtocolError`, `PartialError`, and context
+  overflow) keep retry policy in `agent`. `cmd` maps the configured model to its
+  dialect and wires the corresponding adapter.
+- `model.StreamCompleter` — optional `CompleteStream(ctx, req, emit)` contract.
+  `emit` receives display-only text deltas; the returned `Response` is
+  authoritative. The agent falls back to `Complete` when an adapter does not
+  implement it.
+- `tools.Registry` — concrete registry with `Schemas() []model.ToolSchema` and
   `Execute(ctx, name string, args json.RawMessage) tools.Result`. The dispatcher
   validates arguments and converts errors into `tools.Result`; a panic is
   paired with a result and then stops the run with `internal_error`. The package
   exports sentinel errors for caller decisions: `ErrOutsideWorkspace`,
   `ErrGitProtected`, `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`,
   and `ErrTooLarge`.
-- `session.Store` — concrete append-only store with `Append(Event) error`,
-  `Events() []Event`, `Sync() error`, and `Close() error`. One writer. `Append`
-  assigns `v`, `seq`, `ts`, and `session`; callers leave those fields zero.
-  `seq` starts at 1 and increments by 1. `Sync` flushes the file; `Close` syncs
-  and closes. The runner calls `Sync` at every turn boundary and on exit.
+- `session.Create(stateDir, id)` — creates a new v2 log with mode 0600 and an
+  exclusive non-blocking `flock`. `session.Open(stateDir, id)` opens an existing
+  log for resume, takes an exclusive `flock`, validates it, truncates only a
+  torn final line (recording `session_repair`), and terminates a valid final
+  line that lacks a newline. `session.OpenShared(stateDir, id)` takes a shared
+  `flock` for a fork and never modifies the parent. `Store` exposes
+  `Append(Event) error`, `CopyHistory([]Event) error`, `Events() []Event`,
+  `Sync() error`, `Close() error`, `ID()`, and `Path()`. One writer.
+  `Append` assigns `v=2`, `seq`, `ts`, and `session`; forked copies preserve the
+  source timestamps and payloads while renumbering `seq` and the session ID.
+  `seq` starts at 1 and increments by 1. `Sync` flushes the file; `Close` syncs,
+  unlocks, and closes.
+- `agent.Inspect(events) (State, error)` — pure function of the durable log. It
+  reconstructs session metadata, cumulative turns and usage, the last run's
+  effective configuration and terminal status, and every unpaired tool call.
+  Unknown event types and fields within v2 are ignored.
+- `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
+  once-per-session `session_start` event for a new or forked session.
 - `agent.Project(events []session.Event, limits Limits) (Projection, error)` —
   pure function of events plus limits; no hidden state. `Limits` carries the
   per-call input budget, the next-output reserve, and the compaction target; the
   prompt and tool schemas are selected from the versions recorded in
-  `session_start` using immutable package constants. The returned `Projection`
-  carries the canonical messages, the input-token estimate, and the
-  elided-result count; the runner logs `compaction` when the count changes.
+  `session_start` using immutable package constants. Run/control events
+  (`run_start`, `run_end`, `interrupt`, `session_repair`, `final`, `limit`,
+  `error`, and unknown types) are ignored. The returned `Projection` carries the
+  canonical messages, the input-token estimate, and the elided-result count; the
+  runner logs `compaction` when the count changes.
 
 The agent MAY define unexported consumer interfaces (`completer`, `toolset`,
 `eventStore`) so loop tests use fakes. Keep each interface to one or two
@@ -272,80 +363,106 @@ not export interfaces solely for tests.
 
 ### 4.1 Turn sequence
 
-1. Create the harness-owned work directories and the session store, then append
-   `session_start` with the workspace, state directory, provider, dialect, model,
-   limits, prompt version, toolset version, and harness version. Secrets are
-   redacted. Append `user_message` with the task text and its source (`-task` or
-   `-task-file`). Config/usage validation failures exit 2 before any session
-   state is created; disk failures while creating the session state exit 1
-   (`internal_error`) without a `final` event. If setup fails after the work
-   directory is created, remove it before exiting.
-2. Check all limits: the turn count (`turns >= max_turns`), the session
-   wall-clock deadline, and the cumulative token budget. A reached limit appends
-   `limit` and terminates.
-3. Rebuild the model input from the event log through `agent.Project`.
-4. Call the model with retries (Section 8). Each failed transport attempt that
-   will be retried appends `model_retry` with its attempt number, error class,
-   HTTP status, and delay. The successful attempt appends exactly one
-   `model_response`, including text, tool calls, finish reason, usage, latency,
-   and attempt number. Failed attempts do not append `model_response`.
-5. If there are no tool calls, act on the normalized finish reason: `stop` (or
-   absent) terminates with `completed`; `length` appends a `user_message` with
-   source `continuation-hint` and continues, but a second consecutive `length`
-   response without tool calls (no tool-call turn in between) terminates with
+1. Validate configuration before creating new session state. A new session
+   requires exactly one task source and a model. A resume or fork resolves the
+   session under `<state>/sessions`, validates the v2 log, inherits the recorded
+   workspace/model/base URL/limits unless explicitly overridden, requires the
+   workspace to match, and enforces the task matrix and inherited cumulative
+   limits. Config failures exit 2; a corrupt or unreadable existing log is a
+   state failure (1) and writes no new session events.
+2. Prepare durable state. A new session creates the store and appends
+   `session_start`. A resume takes an exclusive `flock`, validates the log,
+   repairs only a torn final line (recording `session_repair`), and pairs every
+   unpaired tool call with `tool_result` carrying `code=canceled` and an
+   outcome-unknown message. A fork takes a shared `flock` on the parent,
+   validates and inherits, creates a new session ID and store, appends a new
+   `session_start` with `parent_session`/`parent_seq`, copies the parent events
+   (skipping its `session_start`) with the new session ID and renumbered `seq`,
+   and repairs unpaired calls in the copy. The parent is never modified.
+3. Remove and recreate `<state>/work/<session-id>` before the run. A failure to
+   clear a stale directory is a startup failure (exit 1), not a silent reuse.
+4. Append `run_start` with a UUIDv7 `run_id`, `resumed_from_seq`, effective
+   model/dialect/base URL/limits, prompt/toolset/harness versions, and
+   `interactive`/`stream`; sync. Append the task `user_message` when this run has
+   one, with its source, and sync.
+5. Consume any already-pending steering lines as `user_message` events with
+   `source=steer`, then check the cumulative turn/token budgets and the per-run
+   wall clock. A reached limit appends `limit` and terminates.
+6. Rebuild the model input from the event log through `agent.Project`.
+7. Call the model with retries (Section 8). With `-stream`, use the adapter's
+   `CompleteStream` and emit display-only deltas; otherwise use `Complete`. Each
+   failed transport attempt that will be retried appends `model_retry` with its
+   attempt number, error class, HTTP status, and delay. The successful attempt
+   appends exactly one `model_response`, including text, tool calls, finish
+   reason, usage, latency, attempt number, and `streamed`. Failed attempts do not
+   append `model_response`. A response over 1 MiB is `protocol_error` before any
+   tool executes.
+8. If there are no tool calls, act on the normalized finish reason: `stop` (or
+   absent) consumes any steering line already pending and continues if one was
+   appended, otherwise terminates with `completed`; `length` appends a
+   `user_message` with source `continuation-hint` and continues, but a second
+   consecutive `length` response without tool calls terminates with
    `token_limit`; `content_filter` terminates with `provider_error`; any other
-   value terminates with `protocol_error`.
-6. Before executing, reject a response with missing or duplicate tool-call IDs
-   (`protocol_error`, Section 8). For each remaining tool call, in response
-   order: resolve the tool, validate arguments, execute with a timeout, and
-   append exactly one `tool_result` carrying a stable `code`. A failure is still
-   a result with the original call ID. A recovered panic is paired before the
-   run stops with `internal_error`.
-7. Increment the turn counter and repeat from step 2. Stop when a limit is
-   reached, a fatal error occurs, or a signal arrives.
-8. On termination of an initialized session, emit exactly one `final` event with
-   the terminal status and the last assistant text emitted in the run, if any,
-   then append `session_end` with status, totals, and final usage. Sync and close
-   the log, then remove `<state>/work/<session-id>` best-effort; a cleanup
-   failure is reported on stderr and does not change the terminal status. If the
-   log write itself fails, still attempt cleanup and exit `internal_error`
-   without claiming durability. Best-effort, including on signal; see Section 8
-   for the shutdown budget.
+   value terminates with `protocol_error`. An interactive interruption of the
+   model call appends `interrupt` and a `user_message` with source
+   `interrupt-hint`, then continues without counting a turn.
+9. Before executing, reject a response with missing or duplicate tool-call IDs
+   (`protocol_error`, Section 8). For each tool call, in response order: resolve
+   the tool, validate arguments, execute with a timeout, append exactly one
+   `tool_result` carrying a stable `code`, and sync. A failure is still a result
+   with the original call ID. A recovered panic is paired before the run stops
+   with `internal_error`. An interactive tool interruption pairs the interrupted
+   call and every unstarted call in that response with `code=canceled`, appends
+   `interrupt`, and continues; the model sees the results.
+10. Increment the turn counter and repeat from step 5. Stop when a limit is
+    reached, a fatal error occurs, or the run is canceled.
+11. On termination of an initialized run, emit exactly one `final` event with
+    the terminal status and the last assistant text emitted in this run, if any,
+    then append `run_end` with the run and cumulative turns/usage and the run
+    duration. Sync and close the log, then remove
+    `<state>/work/<session-id>` best-effort; a cleanup failure is reported on
+    stderr and does not change the terminal status. If the log write itself
+    fails, still attempt cleanup and exit `internal_error` without claiming
+    durability.
 
 The loop never batches multiple assistant turns, never skips a tool call, and
-never sends a tool result without a preceding call. If a model response contains
-multiple tool calls, v0 executes them sequentially in the order returned. It does
-not rely on provider-side `parallel_tool_calls` support; correctness must not
-depend on that flag.
+never sends a tool result without a preceding call. Multiple tool calls execute
+sequentially in the order returned; correctness does not depend on provider-side
+`parallel_tool_calls` support. `seq` and `turn` continue across runs. Steering
+is plain stdin text consumed only at turn boundaries; it never interrupts a tool
+round. `SIGINT` is the interruption mechanism.
 
 ### 4.2 Terminal states
 
 | Status | Meaning | Exit code |
 |---|---|---|
 | `completed` | Model returned a final message with no tool calls and a `stop`/absent finish reason. | 0 |
-| `max_turns` | Model-call limit reached (`turns >= max_turns`). | 2 |
+| `max_turns` | Cumulative model-call limit reached (`turns >= max_turns`). | 2 |
 | `token_limit` | Cumulative token budget reached, repeated consecutive output-length truncation, or an unrecoverable context overflow. | 2 |
-| `time_limit` | Session wall-clock deadline reached. | 2 |
+| `time_limit` | Per-run wall-clock deadline reached. | 2 |
 | `provider_error` | Non-retryable provider failure, content filter, or retries exhausted. | 3 |
-| `protocol_error` | Model response cannot be paired or parsed safely, including missing or duplicate tool-call IDs. | 4 |
+| `protocol_error` | Model response cannot be paired or parsed safely, including missing or duplicate tool-call IDs, malformed streams, missing usage, or an over-cap response. | 4 |
 | `stuck` | Repeated identical tool failures (same tool, canonical arguments, stable result code) crossed the threshold. | 4 |
-| `interrupted` | SIGINT/SIGTERM; child process group killed. | 130 |
+| `interrupted` | Non-interactive SIGINT/SIGTERM, or the second interactive SIGINT/SIGTERM; child process group killed. | 130 |
 | `internal_error` | Post-validation disk or harness invariant failure, or a recovered tool panic. Pre-session config/usage failures exit 2 without a session. | 1 |
 
-Every terminal state of an initialized session emits exactly one `final` event
-with the status and the last assistant text emitted in the run, if any, followed
-by a `session_end` event with a human-readable reason and totals. If the log
-write itself fails, the run exits `internal_error`; the harness does not claim
-durability. Pre-session config/usage failures exit 2 and produce no session
-events. The final assistant text, if any, is printed to stdout; progress and the
-trace path go to stderr. Represent the terminal status as a typed string
-(`StopReason`) and map it to the exit code in one function; do not scatter
-exit-code decisions through the loop.
+Every terminal state of an initialized run emits exactly one `final` event with
+the status and the last assistant text emitted in that run, if any, followed by
+one `run_end` event with a human-readable reason, run and cumulative totals, and
+the run duration. v1 does not emit `session_end`. If the log write itself fails,
+the run exits `internal_error`; the harness does not claim durability.
+Pre-session config/usage failures exit 2 and produce no session events. A
+resumed or forked run's `final` event and stdout carry only that run's assistant
+text; prior final text stays in the log and is not reprinted. The final
+assistant text, if any, is printed to stdout; with `-stream`, assistant text is
+written as it arrives. Progress and the trace path go to stderr. Represent the
+terminal status as a typed string (`StopReason`) and map it to the exit code in
+one function; do not scatter exit-code decisions through the loop.
 
 ### 4.3 System prompt
 
-The system prompt is versioned (`prompt-v0`) and recorded in `session_start`. It
-must state, briefly:
+The system prompt is versioned (`prompt-v0`) and recorded in `session_start`; v1
+keeps it unchanged. It states, briefly:
 
 - The workspace root, and that tools are the only way to act.
 - Search and read before editing; keep changes minimal; run the relevant tests.
@@ -355,8 +472,9 @@ must state, briefly:
 - Stop by replying without a tool call when the task is complete or blocked.
 
 Tool-specific guidance belongs in tool descriptions, not duplicated in the
-system prompt. Any prompt change bumps the version and should be checked against
-raw traces.
+system prompt. Steering instructions are user messages and recovery notes are
+tool results, not prompt changes. Any prompt change bumps the version and must
+keep the old version replayable or explicitly refuse resume/fork for it.
 
 ## 5. Tools
 
@@ -427,7 +545,7 @@ func (w *Workspace) rel(p string) (string, error) {
 | `search` | `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, and files over 1 MiB. Returns `path:line: text`, with long lines clipped, and marks capped results. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `path.Match` globs do not support `**`. |
 | `run_command` | `command`, `cwd` (default workspace root), `timeout_ms` (default 120000, max 600000) | Runs `/bin/sh -c` in its own process group with `Setpgid`, a `Cancel` that kills the group, and `WaitDelay`; stdin is nil. Captures stdout and stderr separately, sanitizes to valid UTF-8, and caps at 64 KiB combined with head+tail. Returns `exit_code`, `timed_out`, and labeled streams. Non-zero exit is a normal result (`ok=true`). On timeout or cancellation, kills the whole process group. Rejects `cwd` outside the workspace. |
 
-`search` is implemented with a Go walk; v0 does not shell out to `rg`; measure
+`search` is implemented with a Go walk; v1 does not shell out to `rg`; measure
 before adding it.
 
 `edit_file` writes atomically: create a temp file in the same directory with
@@ -451,7 +569,7 @@ name matching `*_TOKEN`, `*_SECRET`, `*_KEY`, or `*_PASSWORD`
 (case-insensitive); this is defense in depth, not a boundary. The child never
 inherits provider credentials or unrelated host variables. This is hygiene, not
 isolation; a child process can still inspect the harness process. Use external
-isolation when that matters. v0 deliberately does not use the host `/tmp` for
+isolation when that matters. v1 deliberately does not use the host `/tmp` for
 these paths: `/tmp` may be mounted `noexec`, size-limited, or cleaned while a
 long session runs. The state dir is configurable; point it at fast local disk
 if needed.
@@ -462,7 +580,7 @@ are decoded into typed structs with `RejectUnknownMembers(true)`; tests assert
 that each schema and its argument struct agree. `read_file` returns line
 numbers so the model can reference what it saw; `search` returns locations so
 the model can page; `edit_file` errors state whether the match was absent or
-ambiguous. These ACI choices are the highest-leverage prompt work in v0.
+ambiguous. These ACI choices are the highest-leverage prompt work in v1.
 
 ## 6. Context budget
 
@@ -503,39 +621,65 @@ it on every turn. Compaction never mutates the log.
   source's Tier 1 requirement and is easier to reason about.
 - Cumulative totals include every model response's input and output tokens,
   including retries. The session logs token usage; dollar-cost tracking is out
-  of scope in v0.
+  of scope in v1.
 
 ## 7. Session log
 
 - **Location:** `-state-dir` or `AHARNESS_STATE_DIR`, defaulting to
   `$XDG_STATE_HOME/aharness` (fallback `~/.local/state/aharness`). The log is
-  `<state>/sessions/<session-id>.jsonl`. `run_command` gets harness-owned `HOME`
-  and `TMPDIR` at `<state>/work/<session-id>/home` and
-  `<state>/work/<session-id>/tmp`, created with mode 0700 when the session
-  starts. The whole `<state>/work/<session-id>` subtree is removed on
-  termination; `sessions/` is the only durable record, and the empty `work/`
-  container remains for later runs.
+  `<state>/sessions/<session-id>.jsonl`; session IDs are UUIDv7 and are
+  validated before a path is built. `run_command` gets harness-owned `HOME` and
+  `TMPDIR` at `<state>/work/<session-id>/home` and
+  `<state>/work/<session-id>/tmp`, created with mode 0700 at the start of every
+  run. The whole `<state>/work/<session-id>` subtree is removed at run start and
+  best-effort at run end; `sessions/` is the only durable record.
 - **Creation:** create the state directory with mode 0700 and the session file
-  with `O_CREATE|O_WRONLY|O_APPEND|O_EXCL`, mode 0600. If the state directory is
-  not writable, start-up fails with a clear error (exit 2). The default is
-  outside the workspace; avoid pointing it into the workspace, where the log
-  becomes part of the task diff.
+  with `O_CREATE|O_RDWR|O_APPEND|O_EXCL`, mode 0600, then take an exclusive
+  non-blocking `flock`. If the state directory is not writable, start-up fails
+  with a clear error (exit 2). The default is outside the workspace; avoid
+  pointing it into the workspace, where the log becomes part of the task diff.
+- **Resume:** open the log read-write, take `LOCK_EX|LOCK_NB`, verify mode 0600,
+  validate every line, truncate only a torn/undecodable final line (append
+  `session_repair` with the discarded byte count and last good `seq`), and
+  terminate a valid final line that lacks a newline by appending one. A
+  decodable final line that fails sequence or session validation is
+  corruption and refuses resume. A version mismatch is rejected as an
+  unsupported schema. Then pair every unpaired tool call with
+  `tool_result` carrying `code=canceled` and the outcome-unknown message, append
+  a new `run_start`, and continue. The session ID is unchanged.
+- **Fork:** open the parent read-only with `LOCK_SH|LOCK_NB`, verify mode 0600,
+  validate it, and leave it unchanged. Create a new session ID and log, append a
+  new `session_start` with `parent_session`/`parent_seq`, copy the parent events
+  (skipping its `session_start`) with the new session ID and renumbered `seq`
+  while preserving payloads and timestamps, repair unpaired calls in the copy,
+  and append the new run. A fork is self-contained; it never reads the parent
+  again.
 - **Format:** one JSON object per line, encoded with `encoding/json/v2` through
   `jsontext.NewEncoder` (`jsonv2.MarshalEncode`). Common fields:
-  `v` (schema version, 1 for v0), `seq` (starts at 1 and increments by 1),
+  `v` (schema version, 2 for v1), `seq` (starts at 1 and increments by 1),
   `ts` (RFC3339Nano), `session`, `turn`, `type`, `role` (message events only),
   and `data`. Keep the envelope stable and versioned. Use `omitzero` for zero
-  scalars; v2 `omitempty` means “encodes as empty JSON”.
-- **Durability:** `jsontext.Encoder` flushes each top-level value; `Store.Append`
-  assigns `v`, `seq`, `ts`, and `session`, and `Store.Sync` flushes the file. The
-  runner calls `Sync` at every turn boundary and on exit; `Close` syncs before
-  closing. The single runner goroutine is the only writer; a signal handler
-  only cancels the context and never appends from another goroutine. The reader
-  accepts a valid final line without a trailing newline, ignores only a
-  torn/invalid final line, validates that `seq` starts at 1 and increments by 1
-  on replay, and never rewrites the log.
+  scalars; v2 `omitempty` means “encodes as empty JSON”. Every event in a file
+  has the same `v`; a v0 (`v=1`) or unknown version is rejected with a clear
+  error, and there is no migration.
+- **Durability:** `jsontext.Encoder` flushes each top-level value;
+  `Store.Append` assigns `v`, `seq`, `ts`, and `session`, and `Store.Sync`
+  flushes the file. Sync points are after `session_start`, `run_start`, each
+  user message, each `model_response` before any tool executes, each
+  `tool_result`, and `final`/`run_end`. `Close` syncs, unlocks, and closes. The
+  single runner goroutine is the only writer; a signal handler only cancels
+  contexts and never appends from another goroutine. The reader accepts a valid
+  final line without a trailing newline, treats only a torn/undecodable final
+  line as a crash artifact, validates that `seq` starts at 1 and increments by 1
+  on replay, and never rewrites the log except for the documented torn-line
+  repair.
 - **Session ID:** `uuid.NewV7().String()` from the Go 1.27 standard library. No
-  reuse.
+  reuse. The provider's `x-opencode-session` header uses this ID; resume keeps
+  it, fork uses the new ID.
+- **Lock:** `resume` uses an exclusive non-blocking `flock`; `fork` uses a
+  shared non-blocking `flock`. The lock is the session log file itself, not a
+  separate lock file. Locking is advisory and local-filesystem only. A busy
+  session is a config error naming the trace path.
 - **Truth:** the log is the durable record; the context window is a projection.
   The log contains enough information to rebuild every model input except the
   exact provider wire format. With `AHARNESS_LOG_REQUESTS=1`, an additional
@@ -544,48 +688,69 @@ it on every turn. Compaction never mutates the log.
   environments, HTTP headers, or credentials. Tool arguments and results appear
   only as capped event payloads, never in stderr.
 
-| Event type | Payload |
-|---|---|
-| `session_start` | Prompt version, toolset version, workspace, state dir, provider, dialect, model, limits, harness version. |
-| `user_message` | Task text or corrective hint, plus source (`-task`, `-task-file`, `stuck-hint`, or `continuation-hint`). |
-| `model_request` | Debug only (`AHARNESS_LOG_REQUESTS=1`): exact projected messages, capped at 1 MiB. One per distinct projected request; transport retries reuse it, a compaction retry logs a new one. |
-| `model_response` | Assistant text, tool calls (ID, name, arguments), finish reason, token usage, latency, attempt number. Exactly one per successful model call. |
-| `model_retry` | Attempt number, error class, HTTP status, delay before the next attempt. One per failed transport attempt that will be retried. |
-| `tool_result` | Call ID, tool name, `ok`, stable code (`ok` on success), output, error message, exit code, duration, truncated flag. |
-| `compaction` | Before/after token estimate, elided result count, policy. |
-| `limit` | Limit kind, configured value, observed value. |
-| `error` | Fatal error class and message; no secrets. |
-| `final` | Terminal status and last assistant text, if any; exactly one per initialized session. |
-| `session_end` | Status, reason, turn count, total token usage, duration. |
+| Event type | Scope | Payload |
+|---|---|---|
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, limits, max turns/total tokens, timeouts, harness version, plus optional `parent_session`/`parent_seq`. |
+| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective model, dialect, base URL, limits, prompt/toolset/harness versions, `interactive`, `stream`. |
+| `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
+| `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request. |
+| `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage, latency, attempt, `streamed`; 1 MiB total canonical content. |
+| `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |
+| `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag. |
+| `compaction` | as needed | Before/after token estimate, elided result count, policy. |
+| `limit` | as needed | Limit kind, configured value, observed value. |
+| `interrupt` | as needed | Operation (`model`/`tool`), call ID/name for a tool, capped partial text, reason. |
+| `error` | as needed | Fatal error class and message; optional capped partial text and partial byte count for a failed stream. |
+| `session_repair` | on resume | Discarded bytes, last good `seq`, reason. |
+| `final` | once per run | Terminal status and last assistant text for this run, if any. |
+| `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration. |
 
-The log is for debugging and resume-readiness, not a tamper-proof audit trail.
-A shell running as the same user can reach the state directory. Separating the
-log from the shell would require a separate UID or process boundary and is out
-of scope for v0.
+v1 uses `run_end` and does not emit `session_end`. The projection ignores every
+run/control event. `seq` and `turn` continue across runs. A run without a
+`run_end` is a crash artifact; resume does not fabricate a terminal event for it,
+and the new `run_start` records `resumed_from_seq`.
+
+The log is for debugging and resume, not a tamper-proof audit trail. A shell
+running as the same user can reach the state directory. Separating the log from
+the shell would require a separate UID or process boundary and is out of scope.
 
 ## 8. Failure handling
 
 | Failure | Policy |
 |---|---|
-| HTTP 429, 5xx, connection reset before response | Retry up to 5 attempts total (the initial call plus up to 4 retries) with exponential backoff plus jitter; honor `Retry-After` (seconds or HTTP-date) up to 60 seconds. Each failed transport attempt that will be retried appends `model_retry` before the backoff sleep. Backoff sleeps are context-aware. Before each retry, check the session context; a canceled session is not retried and stops with `time_limit` or `interrupted`. All retries count toward the session deadline and token totals. When attempts are exhausted, append `error` and stop with `provider_error`. |
+| HTTP 429, 5xx, connection reset before response | Retry up to 5 attempts total (the initial call plus up to 4 retries) with exponential backoff plus jitter; honor `Retry-After` (seconds or HTTP-date) up to 60 seconds. Each failed transport attempt that will be retried appends `model_retry` before the backoff sleep. Backoff sleeps are context-aware. Before each retry, check the operation and run contexts; a canceled run is not retried. When attempts are exhausted, append `error` and stop with `provider_error`. |
 | HTTP 4xx other than 429, auth failure, invalid request | No retry. Append `error`, end with `provider_error`. |
 | Malformed or schema-invalid provider JSON (including duplicate object names or invalid UTF-8) | Append `error`; stop with `protocol_error`. Do not retry. |
+| Stream failure before the first display delta | Retry within the normal transport attempt budget. No stdout has been written. |
+| Stream failure after the first display delta | Terminal; wrap in `PartialError`, append one `error` with capped partial text and byte count, write no `model_response`, and do not retry. `provider_error` for transport failures, `protocol_error` for malformed events or missing usage. |
+| Completed stream without final usage | `protocol_error`; if output began, the error carries partial diagnostics. The harness does not undercount tokens. |
+| SSE event, assembled response, or total stream over cap | `protocol_error` before any tool executes; after output began, the error is terminal. |
 | Context-length error from provider | Rebuild with the same deterministic compactor against a target 10% below the failed per-call limit, log `compaction` with policy `provider-overflow`, and retry once; this retry is separate from the transport attempt budget. If no further tool results can be elided or the retry fails, stop with `token_limit`. |
-| Model call timeout | Counts as a retryable transport failure up to the attempt limit. A canceled session context is not a model call timeout: stop with `time_limit` or `interrupted` without retrying. |
+| Model call timeout | Counts as a retryable transport failure up to the attempt limit. A canceled run context is not a model call timeout. |
 | Unknown tool or invalid arguments | One `tool_result` with `ok=false`, a stable `code` (`unknown_tool` for an unregistered name, `invalid_args` for a registered tool with bad arguments), and a short corrective message naming the tool and the problem. |
 | Tool timeout | Kill the process group, return a result with `ok=false`, `timed_out=true`, and `code=timeout`. |
 | Tool panic | Recover at the dispatcher boundary, append a result with `code=panic` and a capped stack, then stop with `internal_error`. Pairing completes before the stop. |
 | Tool process fails to start | Return an error result with `code=spawn_failed` and the spawn error. |
-| Model response with a tool call missing its ID | Append `error`; stop with `protocol_error`. Do not invent an ID or execute any call in that response. |
-| Model response with duplicate tool-call IDs | Append `error`; stop with `protocol_error`. Do not execute any call in that response. |
+| Model response with a tool call missing or duplicating its ID | Append `error`; stop with `protocol_error`. Do not invent an ID or execute any call in that response. |
+| Model response over 1 MiB of canonical content | Append `error`; stop with `protocol_error` before logging a response or executing a tool. |
 | Repeated identical tool failure | Counts only `ok=false` results; "identical" means the same tool, canonical arguments, and stable result code. Canonical arguments are computed from the provider-supplied JSON by recursively sorting object members by name, preserving array order and numeric literals, and rejecting duplicate names; whitespace differences are ignored. The message is for display, not identity. After 3 consecutive identical failures, append a `user_message` event with source `stuck-hint` and include it in the next projection. After 5, stop with `stuck`. |
-| Session turn/token/time limit | Append `limit`, then terminate; the terminal path emits `final` and `session_end` with the corresponding status. |
-| SIGINT/SIGTERM | Kill the running child's process group; write final events and sync the log with a fresh 5-second shutdown budget; remove `<state>/work/<session-id>` best-effort; terminate with `interrupted`, exit 130. `Append`/`Sync` and cleanup are not context-aware, so a hung filesystem may exceed the budget; the shutdown path is still best-effort. |
+| Cumulative turn/token or per-run time limit | Append `limit`, then terminate; the terminal path emits `final` and `run_end` with the corresponding status. |
+| Interactive first SIGINT while a model call is in flight | Cancel only that operation context. Append `interrupt` (`operation=model`, capped partial text when available) and a `user_message` with source `interrupt-hint`; continue without counting a turn. A SIGINT with no operation in flight is ignored. |
+| Interactive first SIGINT while a tool is in flight | Kill the whole process group, record `interrupt` (`operation=tool`), pair the interrupted call and every unstarted call in that response with `code=canceled` and an outcome-unknown message, and continue. |
+| Interactive second SIGINT or SIGTERM | Cancel the run; write `final` and `run_end`, sync, remove the work directory, and exit 130. |
+| Non-interactive SIGINT/SIGTERM | Cancel the run; kill the child process group; write `final` and `run_end`; sync; remove the work directory; exit 130. |
+| Resume with an unpaired call | Pair it before `run_start` with `code=canceled` and a message stating the harness restarted and the side effect may or may not have occurred. The model must verify. Resume is not transactional. |
+| Resume/fork with a torn final line | Truncate only the torn line and append `session_repair`; a decodable final line failing sequence or session validation is corruption and refuses resume. |
+| Resume with a locked session | Config error (2) naming the trace path. The lock is advisory and local-filesystem only. |
+| v0 (`v=1`) or unknown schema | Config error (2) with a clear message; no migration. |
+| Corrupt or unreadable existing log | State failure (1); no new session events are written. |
 | Disk write failure for the log | Fail fast with `internal_error`; still attempt work-directory removal; the run cannot be made durable. |
 | Work-directory cleanup failure | Report the leftover path on stderr and leave it for inspection; the terminal status is unchanged. A surviving child or a read-only filesystem can cause this; use external isolation for hard containment. |
 
 Model requests are retried; tool executions are not. This distinction prevents
-duplicate file edits and commands after a transient failure.
+duplicate file edits and commands after a transient failure. Streaming retries
+are further restricted to the pre-output window because stdout is not
+transactional.
 
 Errors wrap with `%w`; branch with `errors.Is`/`errors.As`; never match error
 strings. Error strings are lowercase and have no trailing punctuation.
@@ -595,63 +760,96 @@ strings. Error strings are lowercase and have no trailing punctuation.
 ```
 aharness -task "..." -model deepseek-v4.1-flash
 aharness -task-file task.md -model crouton-alpha-free -workspace /tmp/repo
+aharness -resume <session-id> -task "Now run the tests"
+aharness -fork <session-id> -task "Try a different approach"
+aharness -interactive -stream -task "Investigate the failure"
 ```
 
 The examples target the hosted `opencode-go` endpoint and assume
 `AHARNESS_PROVIDER_TOKEN` is exported. Both dialect adapters also accept an
 empty token for local no-auth endpoints and tests (Section 2.1).
 
-- Use the standard `flag` package; no CLI framework in v0.
+- Use the standard `flag` package; no CLI framework.
 - Precedence: defaults, then environment, then flags. Parse environment errors
-  as config errors; validate the effective config once before the loop.
-- Exactly one of `-task` or `-task-file` is required. `-task-file` is read once
-  before the loop; it may be outside the workspace.
-- `-workspace` defaults to `AHARNESS_WORKSPACE`, then the current directory.
-  Resolve it to an absolute path, require an existing directory, and open the
-  root once.
+  as config errors; validate the effective config once before the run.
+- New flags: `-resume <id>`, `-fork <id>`, `-interactive`, and `-stream`. They
+  have no environment equivalents in v1. A session ID is validated as a UUID
+  before a path is built.
+- Validation matrix:
+  - New session: exactly one of `-task`/`-task-file`; `-model` required.
+  - `-resume`: at most one task source; a task is required if the last run
+    ended `completed`; model/workspace/limits are inherited unless explicitly
+    set; a task may be omitted after interrupted, crashed, `provider_error`,
+    `protocol_error`, `stuck`, `time_limit`, or `token_limit`.
+  - `-fork`: exactly one task source; model/workspace/limits inherited unless
+    explicitly set.
+  - `-resume` and `-fork` are mutually exclusive.
+  - `-interactive` without `-resume` requires a task.
+  - `-stream` without a task is allowed only with `-resume`.
+- `-workspace` defaults to `AHARNESS_WORKSPACE`, then the current directory for
+  a new session. On resume/fork, an omitted `-workspace` inherits the recorded
+  workspace; an explicitly different workspace is a config error. Resolve it to
+  an absolute path, require an existing directory, and open the root once.
 - `-state-dir` defaults to `AHARNESS_STATE_DIR`, then
   `$XDG_STATE_HOME/aharness`, then `~/.local/state/aharness`. Reject a relative
   `XDG_STATE_HOME`. The harness creates the directory with mode 0700 if needed;
-  it must be writable, or start-up fails with exit 2.
-- `-model` or `AHARNESS_MODEL` is required. Accepted values:
+  it must be writable, or start-up fails with exit 2. The token and state
+  directory are read from the current invocation and are not inherited from the
+  log.
+- `-model` or `AHARNESS_MODEL` is required for a new session. Accepted values:
   `crouton-alpha-free`, `deepseek-v4.1-flash`, `muse-spark-1.3-contributor`.
-  The provider is fixed to `opencode-go` in v0. The model registry is fixed:
+  The provider is fixed to `opencode-go`. The model registry is fixed:
   `crouton-alpha-free` and `muse-spark-1.3-contributor` use
-  `openai-responses`; `deepseek-v4.1-flash` uses `openai-chat`. The selected
-  dialect is recorded in `session_start`.
+  `openai-responses`; `deepseek-v4.1-flash` uses `openai-chat`. An explicit
+  model may change between runs; `run_start` records the effective value.
 - `-provider-base-url` defaults to `AHARNESS_PROVIDER_BASE_URL`, then the
-  hosted base URL (`https://opencode.ai/inference/go/v1`). It exists for
-  integration tests and local OpenAI-compatible endpoints; production runs
-  leave it at the default. Do not intercept the hosted URL with a proxy or a
-  hosts-file override.
+  hosted base URL (`https://opencode.ai/inference/go/v1`) for a new session. On
+  resume/fork, an omitted flag/env inherits the last run's URL. The URL must be
+  http(s) with a host and must not contain userinfo or a query/fragment, so the
+  log cannot capture credentials. Do not intercept the hosted URL with a proxy
+  or a hosts-file override.
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
   optional. When set, the selected adapter sends it as a Bearer token; when
   unset or empty, it omits `Authorization`, supporting local no-auth endpoints
   and `httptest` adapters. An endpoint that requires auth surfaces a missing
-  token as `provider_error` (401); local no-auth endpoints run without one.
-  Never logged and never passed to tools. The adapter sends the run's session ID
-  in the required `x-opencode-session` header and identifies itself as
-  `aharness/<version>` in `User-Agent` (Section 2.1). OpenCode documents
-  free-tier chat models as restricted to OpenCode clients; other clients
-  receive `403`. Use the Go Responses model
+  token as `provider_error` (401). Never logged and never passed to tools. The
+  adapter sends the session ID in the required `x-opencode-session` header and
+  identifies itself as `aharness/<version>` in `User-Agent` (Section 2.1).
+  OpenCode documents free-tier chat models as restricted to OpenCode clients;
+  other clients receive `403`. Use the Go Responses model
   `muse-spark-1.3-contributor` for the Responses smoke; the workspace must
-  allow paid endpoints that train on request data
-  ([v0-build.md §4.3](v0-build.md#43-prerequisites-and-resolutions)).
+  allow paid endpoints that train on request data.
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
 - `-max-turns`, `-max-total-tokens`, `-max-context-tokens`, `-session-timeout`,
-  and `-max-output-tokens` override defaults. Validate positive values and
+  and `-max-output-tokens` override defaults or inherited values. Validate
+  positive values and
   `max-output-tokens + safety_margin < max-context-tokens`.
   `AHARNESS_MAX_CONTEXT_TOKENS` sets the per-call context window; it must match
   the model. The 200,000 default is provisional until the model context window
   is confirmed; acceptance runs MUST set the flag explicitly to the confirmed
-  window. The harness logs a warning when the provisional default is used.
-- Output contract: final assistant text on stdout only; one `log/slog` progress
-  line per model call and per tool call plus the trace path on stderr.
-  Pre-session config/usage validation errors exit 2 and produce no session
-  events; `internal_error` (1) is reserved for post-validation failures. `main`
-  calls `os.Exit(run())`; library code never exits.
-- No config file in v0; flags and environment are enough. No interactive mode.
+  window. The harness logs a warning when the provisional default is used for a
+  new session.
+- Prompt and toolset versions are selected from `session_start` and must be
+  supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
+- Effective limits are inherited from the last run unless overridden. A resume
+  or fork already at an inherited turn/token limit fails at config validation
+  unless that limit is raised.
+- Exit codes: `completed` 0, limits 2, provider 3, protocol/stuck 4,
+  interrupted 130, internal 1. A missing/invalid/locked session, a workspace
+  mismatch, an unsupported prompt/toolset version, or a task-rule violation is a
+  config error (2). A corrupt or unreadable existing log is a state failure (1)
+  and writes no new session events. A v0 or unknown schema log is a config error
+  (2) with a clear message.
+- Output contract: without `-stream`, stdout carries the final assistant text
+  for this run only; with `-stream`, stdout carries assistant text from every
+  turn as it arrives, and a response's final text is not reprinted after its
+  deltas. Progress lines, the session ID, and the trace path go to stderr. The
+  session ID and trace path are logged for a new, resumed, or forked session;
+  for a fork the new ID is the one to use afterward. `main` calls
+  `os.Exit(run())`; library code never exits.
+- No config file in v1. Interactive control is plain stdin text; there is no
+  command language or TUI.
 
 Defaults are deliberately conservative and easy to change:
 
@@ -661,7 +859,7 @@ Defaults are deliberately conservative and easy to change:
 | Max context tokens | 200,000 provisional; set explicitly to the confirmed model window for acceptance runs |
 | Max output tokens per call | 8,192 |
 | Max total tokens | 2,000,000 |
-| Max session wall clock | 60 minutes |
+| Max run wall clock | 60 minutes |
 | Model call timeout | 300 seconds |
 | `run_command` timeout | 120 seconds (max 600) |
 | Tool result cap | 32 KiB file tools; 64 KiB command output |
@@ -670,13 +868,15 @@ Defaults are deliberately conservative and easy to change:
 
 ## 10. Limits and timeouts
 
-The complete reference for current and planned caps, limits, and timeouts is
-[limits.md](limits.md). Limits are part of the runtime contract; changing one
-requires updating that reference and the code constant.
+The complete reference for caps, limits, and timeouts is [limits.md](limits.md).
+Limits are part of the runtime contract; changing one requires updating that
+reference and the code constant.
 
-The main current values are the defaults in §9 plus: a 5% (minimum 1,000-token)
-context safety margin; 4 retained turns; 5 transport attempts with 1s base,
-30s max, and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool results;
-64 KiB command output; 1 MiB provider responses; 1 MiB debug requests; a 64 KiB
-event-text cap; and a 1 MiB + 64 KiB session-line cap.
+The main values are the defaults in §9 plus: a 5% (minimum 1,000-token) context
+safety margin; 4 retained turns; 5 transport attempts with 1s base, 30s max,
+and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool results; 64 KiB
+command output; a 1 MiB non-streaming provider response; a 4 MiB SSE event; a
+1 MiB assembled response; an 8 MiB total stream; 64 KiB partial text; a 1 MiB
+debug request; a 64 KiB model-response event-text cap except for the fully
+recorded `model_response`; a 64 KiB steering line; and a 4 MiB session line.
 

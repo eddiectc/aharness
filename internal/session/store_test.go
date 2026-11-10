@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -16,9 +17,9 @@ const testSession = "0190a0c4-0000-7000-8000-000000000001"
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	st, err := NewStore(t.TempDir(), testSession)
+	st, err := Create(t.TempDir(), testSession)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := st.Close(); err != nil {
@@ -73,11 +74,49 @@ func assertEventsEqual(t *testing.T, got, want []Event) {
 	}
 }
 
-func TestNewStoreCreatesDirectoryAndFile(t *testing.T) {
+func testEvent(seq uint64, typ EventType, data string) Event {
+	return Event{
+		V:       Version,
+		Seq:     seq,
+		TS:      time.Unix(int64(seq), 0).UTC(),
+		Session: testSession,
+		Type:    typ,
+		Data:    json.RawMessage(data),
+	}
+}
+
+func encodeLines(t *testing.T, events ...Event) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	for _, ev := range events {
+		data, err := jsonv2.Marshal(ev)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+	return buf.Bytes()
+}
+
+func writeSessionFile(t *testing.T, stateDir, content string) string {
+	t.Helper()
+	dir := filepath.Join(stateDir, "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := SessionPath(stateDir, testSession)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	return path
+}
+
+func TestCreateCreatesDirectoryAndFile(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
-	st, err := NewStore(stateDir, testSession)
+	st, err := Create(stateDir, testSession)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	defer func() {
 		if err := st.Close(); err != nil {
@@ -97,19 +136,22 @@ func TestNewStoreCreatesDirectoryAndFile(t *testing.T) {
 	checkPerm(t, st.Path(), 0o600)
 }
 
-func TestNewStoreRejectsExistingSession(t *testing.T) {
+func TestCreateRejectsExistingAndInvalidID(t *testing.T) {
 	stateDir := t.TempDir()
-	st, err := NewStore(stateDir, testSession)
+	st, err := Create(stateDir, testSession)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	defer func() {
 		if err := st.Close(); err != nil {
 			t.Errorf("Store.Close: %v", err)
 		}
 	}()
-	if _, err := NewStore(stateDir, testSession); !errors.Is(err, os.ErrExist) {
-		t.Fatalf("second NewStore: got %v, want os.ErrExist", err)
+	if _, err := Create(stateDir, testSession); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second Create: got %v, want os.ErrExist", err)
+	}
+	if _, err := Create(stateDir, "../../escape"); !errors.Is(err, ErrInvalidID) {
+		t.Fatalf("Create traversal id: got %v, want ErrInvalidID", err)
 	}
 }
 
@@ -193,8 +235,6 @@ func TestAppendRejectsInvalidData(t *testing.T) {
 			if size := info.Size(); size != 0 {
 				t.Fatalf("log size after rejected append: got %d, want 0", size)
 			}
-
-			// A rejected event must not consume a sequence number.
 			if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); err != nil {
 				t.Fatalf("Append after rejection: %v", err)
 			}
@@ -232,11 +272,11 @@ func TestAppendOnly(t *testing.T) {
 	}
 }
 
-func TestStoreSyncDurability(t *testing.T) {
+func TestStoreSyncAndClose(t *testing.T) {
 	stateDir := t.TempDir()
-	st, err := NewStore(stateDir, testSession)
+	st, err := Create(stateDir, testSession)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		t.Fatalf("Create: %v", err)
 	}
 	for i := range 3 {
 		data := json.RawMessage(fmt.Sprintf(`{"n":%d}`, i))
@@ -251,6 +291,12 @@ func TestStoreSyncDurability(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); !errors.Is(err, ErrStoreClosed) {
+		t.Errorf("Append after Close: got %v, want ErrStoreClosed", err)
+	}
 
 	got, err := Read(st.Path())
 	if err != nil {
@@ -259,35 +305,12 @@ func TestStoreSyncDurability(t *testing.T) {
 	assertEventsEqual(t, got, want)
 }
 
-func TestStoreCloseIdempotent(t *testing.T) {
-	st := openTestStore(t)
-	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
-	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); !errors.Is(err, ErrStoreClosed) {
-		t.Errorf("Append after Close: got %v, want ErrStoreClosed", err)
-	}
-	if err := st.Sync(); !errors.Is(err, ErrStoreClosed) {
-		t.Errorf("Sync after Close: got %v, want ErrStoreClosed", err)
-	}
-	if got := len(st.Events()); got != 1 {
-		t.Errorf("Events after Close: got %d, want 1", got)
-	}
-}
-
 func TestStoreEventsReturnsCopy(t *testing.T) {
 	st := openTestStore(t)
 	data := []byte(`{"x":1}`)
 	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(data)}); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-
 	data[0] = '['
 	first := st.Events()
 	if got := string(first[0].Data); got != `{"x":1}` {
@@ -304,7 +327,218 @@ func TestStoreEventsReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestNewIDIsUUIDv7(t *testing.T) {
+func TestOpenRepairsTornFinalLine(t *testing.T) {
+	stateDir := t.TempDir()
+	first := encodeLines(t, testEvent(1, TypeSessionStart, `{"model":"m"}`))
+	content := append(append([]byte(nil), first...), []byte(`{"v":2,"seq":2,"sess`)...)
+	path := writeSessionFile(t, stateDir, string(content))
+
+	st, err := Open(stateDir, testSession)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	events := st.Events()
+	if len(events) != 2 {
+		t.Fatalf("events after repair = %d, want 2: %+v", len(events), events)
+	}
+	if events[0].Type != TypeSessionStart || events[1].Type != TypeSessionRepair {
+		t.Fatalf("event types = %v, want session_start, session_repair", []EventType{events[0].Type, events[1].Type})
+	}
+	var repair RepairData
+	if err := jsonv2.Unmarshal(events[1].Data, &repair); err != nil {
+		t.Fatalf("decode repair: %v", err)
+	}
+	if repair.DiscardedBytes <= 0 || repair.LastGoodSeq != 1 || repair.Reason == "" {
+		t.Fatalf("repair = %+v", repair)
+	}
+	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); err != nil {
+		t.Fatalf("Append after repair: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 3 || got[2].Seq != 3 {
+		t.Fatalf("log after repair = %+v", got)
+	}
+}
+
+func TestOpenTerminatesFinalLineWithoutNewline(t *testing.T) {
+	stateDir := t.TempDir()
+	line := encodeLines(t, testEvent(1, TypeSessionStart, `{}`))
+	path := writeSessionFile(t, stateDir, string(bytes.TrimSuffix(line, []byte("\n"))))
+
+	st, err := Open(stateDir, testSession)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got := len(st.Events()); got != 1 {
+		t.Fatalf("events = %d, want 1", got)
+	}
+	if err := st.Append(Event{Type: TypeUserMessage, Data: json.RawMessage(`{}`)}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(data, []byte("\n")) != 2 {
+		t.Fatalf("newline count = %d, want 2: %q", bytes.Count(data, []byte("\n")), data)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 2 || got[0].Type != TypeSessionStart || got[1].Type != TypeUserMessage {
+		t.Fatalf("events = %+v", got)
+	}
+}
+
+func TestOpenRejectsCorruptFinalLine(t *testing.T) {
+	stateDir := t.TempDir()
+	content := string(encodeLines(t,
+		testEvent(1, TypeSessionStart, `{}`),
+		testEvent(3, TypeUserMessage, `{}`),
+	))
+	path := writeSessionFile(t, stateDir, content)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(stateDir, testSession); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("Open: got %v, want ErrCorrupt", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("Open changed a corrupt log: before %q, after %q", before, after)
+	}
+}
+
+func TestOpenRejectsUnsupportedVersionAndMode(t *testing.T) {
+	t.Run("v0 version", func(t *testing.T) {
+		stateDir := t.TempDir()
+		path := writeSessionFile(t, stateDir, `{"v":1,"seq":1,"ts":"1970-01-01T00:00:00Z","session":"`+testSession+`","type":"session_start","data":{}}`+"\n")
+		if _, err := Open(stateDir, testSession); !errors.Is(err, ErrUnsupportedVersion) {
+			t.Fatalf("Open: got %v, want ErrUnsupportedVersion", err)
+		}
+		if _, err := Read(path); !errors.Is(err, ErrUnsupportedVersion) {
+			t.Fatalf("Read: got %v, want ErrUnsupportedVersion", err)
+		}
+	})
+	t.Run("broad mode", func(t *testing.T) {
+		stateDir := t.TempDir()
+		path := writeSessionFile(t, stateDir, string(encodeLines(t, testEvent(1, TypeSessionStart, `{}`))))
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(stateDir, testSession); !errors.Is(err, ErrMode) {
+			t.Fatalf("Open: got %v, want ErrMode", err)
+		}
+	})
+}
+
+func TestSessionLocks(t *testing.T) {
+	stateDir := t.TempDir()
+	st, err := Create(stateDir, testSession)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := st.Append(Event{Type: TypeSessionStart, Data: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(stateDir, testSession); !errors.Is(err, ErrLocked) {
+		t.Fatalf("Open while exclusive: got %v, want ErrLocked", err)
+	}
+	if _, err := OpenShared(stateDir, testSession); !errors.Is(err, ErrLocked) {
+		t.Fatalf("OpenShared while exclusive: got %v, want ErrLocked", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := OpenShared(stateDir, testSession)
+	if err != nil {
+		t.Fatalf("OpenShared: %v", err)
+	}
+	defer func() {
+		if err := src.Close(); err != nil {
+			t.Errorf("Source.Close: %v", err)
+		}
+	}()
+	if _, err := Open(stateDir, testSession); !errors.Is(err, ErrLocked) {
+		t.Fatalf("Open while shared: got %v, want ErrLocked", err)
+	}
+	other, err := OpenShared(stateDir, testSession)
+	if err != nil {
+		t.Fatalf("second OpenShared: %v", err)
+	}
+	if err := other.Close(); err != nil {
+		t.Fatalf("second Source.Close: %v", err)
+	}
+}
+
+func TestCopyHistoryRenumbersAndPreserves(t *testing.T) {
+	stateDir := t.TempDir()
+	parent := []Event{
+		testEvent(1, TypeSessionStart, `{"workspace":"/w"}`),
+		testEvent(2, TypeUserMessage, `{"text":"hi"}`),
+		testEvent(3, TypeModelResponse, `{"text":"there"}`),
+		testEvent(4, TypeRunEnd, `{"status":"completed"}`),
+	}
+	newID := "0190a0c4-0000-7000-8000-000000000002"
+	child, err := Create(stateDir, newID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer func() {
+		if err := child.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	if err := child.Append(Event{Type: TypeSessionStart, Data: json.RawMessage(`{"workspace":"/w","parent_session":"` + testSession + `"}`)}); err != nil {
+		t.Fatalf("Append session_start: %v", err)
+	}
+	if err := child.CopyHistory(parent); err != nil {
+		t.Fatalf("CopyHistory: %v", err)
+	}
+	got := child.Events()
+	if len(got) != 4 {
+		t.Fatalf("child events = %d, want 4: %+v", len(got), got)
+	}
+	if got[0].Type != TypeSessionStart || got[0].Session != newID {
+		t.Fatalf("child session_start = %+v", got[0])
+	}
+	if got[1].Type != TypeUserMessage || got[2].Type != TypeModelResponse || got[3].Type != TypeRunEnd {
+		t.Fatalf("copied types = %v", []EventType{got[1].Type, got[2].Type, got[3].Type})
+	}
+	for i, ev := range got {
+		if ev.Seq != uint64(i+1) {
+			t.Errorf("event %d seq = %d, want %d", i, ev.Seq, i+1)
+		}
+		if ev.Session != newID {
+			t.Errorf("event %d session = %q, want %q", i, ev.Session, newID)
+		}
+	}
+	for i := 1; i < len(got); i++ {
+		if !got[i].TS.Equal(parent[i].TS) {
+			t.Errorf("copied event %d TS = %v, want %v", i, got[i].TS, parent[i].TS)
+		}
+		if !bytes.Equal(got[i].Data, parent[i].Data) {
+			t.Errorf("copied event %d data = %s, want %s", i, got[i].Data, parent[i].Data)
+		}
+	}
+}
+
+func TestCanonicalIDAndNewID(t *testing.T) {
 	id := NewID()
 	parsed, err := uuid.Parse(id)
 	if err != nil {
@@ -316,7 +550,17 @@ func TestNewIDIsUUIDv7(t *testing.T) {
 	if got := parsed[8] >> 6; got != 2 {
 		t.Errorf("variant: got %d, want 2", got)
 	}
-	if got := parsed.String(); got != id {
-		t.Errorf("canonical form: got %q, want %q", got, id)
+	canonical, err := CanonicalID("{" + id + "}")
+	if err != nil {
+		t.Fatalf("CanonicalID: %v", err)
+	}
+	if canonical != id {
+		t.Errorf("CanonicalID = %q, want %q", canonical, id)
+	}
+	if _, err := CanonicalID("../" + id); err == nil {
+		t.Fatal("CanonicalID accepted a traversal path")
+	}
+	if _, err := CanonicalID("not-a-uuid"); err == nil {
+		t.Fatal("CanonicalID accepted a non-UUID")
 	}
 }
