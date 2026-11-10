@@ -6,7 +6,8 @@ session log, and exits with a final answer or a typed stop reason.
 
 - **Status:** v0 complete. Both implemented dialects passed the real-provider
   smoke: `deepseek-v4.1-flash` (Chat Completions) and
-  `muse-spark-1.3-contributor` (Responses). Progress is tracked by the
+  `muse-spark-1.3-contributor` (Responses). v1 is drafted in the
+  [v1 build plan](docs/v1-build.md); v0 history is in the
   [v0 build plan](docs/v0-build.md).
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** Go standard library only at runtime; see the
@@ -29,14 +30,18 @@ session log, and exits with a final answer or a typed stop reason.
 
 Not in v0: streaming, resume/fork, MCP/plugins, subagents, RAG, model-based
 summarization, and built-in evals. See [v0 scope](docs/v0-build.md#1-scope).
+The v1 draft adds streaming, interrupt/steering, and resume/fork; see
+[v1 scope](docs/v1-build.md#1-scope).
 
 ## Documentation
 
 | Document | What it defines |
 |---|---|
 | [architecture.md](docs/architecture.md) | System structure, packages, loop and tool contracts, CLI and configuration |
+| [limits.md](docs/limits.md) | Caps, limits, and timeouts (current and v1 planned) |
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
-| [v0-build.md](docs/v0-build.md) | Scope, milestones, acceptance criteria, decisions, and risks |
+| [v1-build.md](docs/v1-build.md) | Draft v1 scope, contract deltas, milestones, decisions, and costly-to-reverse assumptions |
+| [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, and manual smoke checks |
 | [definition-of-done.md](docs/definition-of-done.md) | The v0 completion checklist |
 | [agent-harness-minimum.md](docs/agent-harness-minimum.md) | Research rationale and primary sources behind the design |

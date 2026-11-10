@@ -668,3 +668,15 @@ Defaults are deliberately conservative and easy to change:
 | `read_file` window | 100 lines (max 500) |
 | `search` results | 100 (max 200) |
 
+## 10. Limits and timeouts
+
+The complete reference for current and planned caps, limits, and timeouts is
+[limits.md](limits.md). Limits are part of the runtime contract; changing one
+requires updating that reference and the code constant.
+
+The main current values are the defaults in §9 plus: a 5% (minimum 1,000-token)
+context safety margin; 4 retained turns; 5 transport attempts with 1s base,
+30s max, and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool results;
+64 KiB command output; 1 MiB provider responses; 1 MiB debug requests; a 64 KiB
+event-text cap; and a 1 MiB + 64 KiB session-line cap.
+
