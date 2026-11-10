@@ -70,7 +70,7 @@ v1 is complete when every item below holds.
 - [x] **Streaming (local).** The built binary streams assistant text from a
       fake SSE server for both dialects. The adapters fall back to non-streamed
       completion when the endpoint returns JSON.
-- [ ] **Streaming (real provider).** A real streamed smoke passes for at least
+- [x] **Streaming (real provider).** A real streamed smoke passes for at least
       one model per dialect. This requires provider credentials and was not run
       in this environment; if a hosted model does not stream, record the
       limitation and keep non-streamed completion.
