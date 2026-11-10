@@ -1,8 +1,8 @@
 # aharness v1 testing strategy
 
 - **Date:** 2026-11-10
-- **Status:** normative testing strategy for v1
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md)
+- **Status:** normative testing strategy for v1 and the shipped TUI
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and
@@ -40,9 +40,28 @@ real timeouts for subprocess and signal tests.
 - Streaming loop: deltas emitted once, no reprint after deltas, non-streaming
   fallback printed once, retry before the first delta, no retry after a delta,
   partial error fields, and oversized responses rejected before tools.
-- Interactive: model interrupt hint; tool interrupt pairs the interrupted call
-  and unstarted calls; steering consumed at turn boundaries and before a
-  completed response; EOF and line caps; non-interactive signal behavior.
+- TUI/display: display-event order for streamed, fallback, tool, retry, and
+  error paths; `RunStarted` model/dialect/resume sequence; display failure maps
+  to `internal_error` and pairs tool calls; nil display disables events.
+- History: multiple runs, run headers, assistant text once, tool pairing,
+  canceled/panic/repaired results, anomalies, hints/notices, partial text,
+  fork metadata, malformed payloads, unknown events/fields, and caps.
+- TUI app: composer editing/history, submit vs steering, steering ack and
+  unacknowledged requeue, first/second `Ctrl-C`, `Ctrl-D`, `Esc`, overlay
+  focus/restore, rich/raw toggle, table/file/model/image overlays, model picker
+  next-run-only, workspace containment, sanitizer, and raw Option-`[`/Option-`]`
+  input through a fake input pipe.
+- Headless UI: `-ui-json` decode/encode, caps, `wait` conditions/timeouts,
+  frame/style/cursor/image metadata, SVG determinism, forced glyph mode, and
+  no ANSI/raw image bytes. `x/vt` cell/style fixtures cover wide/CJK, combining
+  marks, emoji, and cursor state.
+- Markdown/images: Glamour fixtures for headings/emphasis/code/lists/tables/
+  links, raw HTML inert, over-deep/over-block fallback, workspace-contained
+  PNG/JPEG/GIF decode caps, placeholders, glyph thumbnails, viewer, and
+  oversize/unsupported/symlink/escape rejection.
+- Interrupt/control: model interrupt hint; tool interrupt pairs the interrupted
+  call and unstarted calls; TUI steering consumed at turn boundaries and before
+  a completed response; batch non-interactive signal behavior.
 - Projection: prompt/toolset selection by version; run/control events ignored;
   resumed and forked histories; repaired calls paired; retained turns.
 - Config: new flags; mutual exclusion; task rules; inheritance; explicit
@@ -81,11 +100,17 @@ diagnostic, not a gate.
   with a new session ID and renumbered `seq` plus the new task.
 - Locks: a second `-resume` against a run paused in the provider exits 2 with
   the trace path.
-- Interactive: the first `SIGINT` during a model call records `interrupt` and
-  the interrupt hint, stdin steering reaches the next call, and the run
-  completes; a second `SIGINT` exits 130; a tool interrupt pairs remaining calls
-  with `code=canceled` and kills the process group; non-interactive signals
-  remain terminal.
+- TUI/`-ui-json` end to end: default startup/seed, live streaming before the
+  provider completes, tool activity, a second message as a second run in the
+  same log, steering queued/acknowledged and reaching the next request,
+  resume/fork, first/second interrupt, `Ctrl-D` active 130, `SIGTERM` 130 with
+  `final`/`run_end`, clean EOF/quit 0, protocol errors 2, and no ANSI in
+  frames.
+- Batch: preserve the v1 stdout/stderr, streaming, resume/fork, and exit codes;
+  non-TTY invocations batch automatically; `-interactive` is an unknown flag.
+- TUI terminal safety: resize mid-stream, model/tool text containing OSC 52,
+  CSI cursor moves, bidi, raw HTML, and image links with `..`/`.git`/symlink/
+  absolute paths; frames contain no ESC and unsafe images become placeholders.
 - Crash/schema: a v0 log is rejected with a clear error and is unchanged;
   unknown v2 events and fields are tolerated.
 - Caps: an oversized response stops with `protocol_error` and executes no tool;
@@ -94,15 +119,18 @@ diagnostic, not a gate.
   goroutines or child processes. Use `synctest` for retry/deadline tests; use
   real short timeouts for subprocess tests.
 - CI runs the standard's §8 gates in one Linux job, with `gcc` installed for
-  `-race`; fuzzing MAY run on a schedule.
+  `-race`; TUI and `-ui-json` tests use the Bubble Tea fake input/output and
+  `x/vt`, so no PTY is required. Fuzzing MAY run on a schedule.
 - CI also runs `go mod tidy`/`go mod verify`; a dirty `go.mod` or `go.sum`
   fails.
 
 ## 3. Fuzzing
 
-Fuzz targets cover the SSE decoder and the v2 JSONL reader/repair path, with
-seed corpora under `internal/model/testdata/fuzz` and
-`internal/session/testdata/fuzz`. The unit test run executes the seeds; a
+Fuzz targets cover the SSE decoder, the v2 JSONL reader/repair path, the TUI
+terminal sanitizer, markdown input, file-path/image containment, the
+`-ui-json` command decoder and frame/event/snapshot encoders, and
+`agent.History`. Seeds live under `internal/model/testdata/fuzz` and
+`internal/session/testdata/fuzz`; the TUI/history targets use built-in seeds. The unit test run executes the seeds; a
 scheduled job MAY run longer fuzzing. The fuzz targets must not make real
 network calls or require writable state.
 
@@ -116,8 +144,22 @@ implemented dialect on a small temporary repository; set
 the Responses smoke. It requires a Go subscription and the workspace privacy
 setting that allows paid endpoints to train on request data.
 
-For each dialect: run a non-streamed task, a streamed task, interrupt and steer,
-resume the session, and fork it. Inspect the raw log, confirm stdout/stderr
+For each dialect: run a non-streamed batch task and a streamed batch task,
+then run the TUI through new, stream, tool round, steer, `Esc`/first `Ctrl-C`,
+second `Ctrl-C`, a second message, quit, resume, and fork. Drive `-ui-json` as
+a coding agent would: pipe a command script, parse frames/events/styles/images,
+request `snapshot`, inspect the SVG, and confirm the session log is the durable
+record. Record the real terminal, `TERM`, exit code, and `stty -a` before/after.
+
+For the TUI manual matrix, use at least one local emulator and tmux at 80x24 and
+200x60 (tmux is not available in every CI environment; this is manual). Exercise
+resize during streaming and a tool call, scrollback, long lines, CJK/emoji/
+combining input and output, bracketed paste, `Esc`, first/second `Ctrl-C`, raw
+Option-`[`/Option-`]`, `SIGTERM`, `SIGHUP`, and `Ctrl-D`; confirm no child
+process or work directory survives. For images, render a PNG chart, open
+`Ctrl-G`, verify Kitty where available and glyph fallback elsewhere, and check
+close/resize/scroll leave no stale image. Run `-ui-json` at 80x24 and 200x60 and
+confirm deterministic frames/snapshots for a fixed fake provider. Inspect the raw log, confirm stdout/stderr
 separation, confirm no delta events are logged, and confirm no
 `<state>/work/<session-id>` directory remains. If a hosted model does not
 stream, record the limitation and do not claim streaming support for it.

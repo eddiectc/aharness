@@ -1,8 +1,12 @@
 # aharness TUI build plan
 
 - **Date:** 2026-11-10
-- **Status:** planned; not started. This is a post-v1 feature. v1 M0–M3 are
-  implemented; the real-provider streamed smoke remains the v1 release gate.
+- **Status:** implemented (M0–M5) on 2026-11-10. The shipped surface, protocol,
+  keys, and caps are recorded in [tui.md](tui.md). Automated fake-provider and
+  headless checks pass; the real-provider TUI smoke and the real-terminal Kitty/
+  tmux image matrix remain pending environment/credentials. This is a post-v1
+  feature. v1 M0–M3 remain implemented; the real-provider streamed v1 smoke is
+  still the v1 release gate.
   The framework decision was revised again on 2026-11-10 after reviewing
   teatest/v2, Glamour v2, and ntcharts v2: **Bubble Tea v2 is the chosen
   application framework**, with Bubbles v2 for widgets, Glamour v2 for

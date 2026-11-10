@@ -1,0 +1,165 @@
+package agent
+
+import (
+	"strings"
+	"time"
+
+	"aharness/internal/model"
+	"aharness/internal/tools"
+)
+
+// DisplayEvent is display-only progress from the runner. It is never durable
+// state and is not replayed from the session log.
+type DisplayEvent interface{ isDisplayEvent() }
+
+// NoticeKind classifies a display notice.
+type NoticeKind string
+
+const (
+	NoticeRetry      NoticeKind = "retry"
+	NoticeCompaction NoticeKind = "compaction"
+	NoticeLimit      NoticeKind = "limit"
+	NoticeInterrupt  NoticeKind = "interrupt"
+	NoticeRepair     NoticeKind = "repair"
+	NoticeWarning    NoticeKind = "warning"
+	NoticeError      NoticeKind = "error"
+)
+
+// RunStarted is emitted after run_start is durable and pending calls are
+// repaired. It carries the effective model and dialect recorded in the log.
+type RunStarted struct {
+	Turn           int
+	ResumedFromSeq uint64
+	Model          string
+	Dialect        string
+}
+
+// ModelStarted is emitted before each transport attempt.
+type ModelStarted struct {
+	Turn    int
+	Attempt int
+}
+
+// TextDelta carries display-only assistant text. It is never logged as a
+// delta; ResponseCompleted carries the canonical response.
+type TextDelta struct {
+	Text string
+}
+
+// ResponseCompleted is emitted after model_response is appended.
+type ResponseCompleted struct {
+	Turn         int
+	Text         string
+	ToolCalls    []model.ToolCall
+	FinishReason model.FinishReason
+	Usage        model.Usage
+	Latency      time.Duration
+	Streamed     bool
+}
+
+// ToolStarted is emitted immediately before a tool call executes, after the
+// model response carrying it is durable.
+type ToolStarted struct {
+	Turn int
+	Call model.ToolCall
+}
+
+// ToolCompleted is emitted after tool_result is appended and synced.
+type ToolCompleted struct {
+	Turn      int
+	CallID    string
+	Name      string
+	OK        bool
+	Code      tools.Code
+	Output    string
+	Error     string
+	ExitCode  int
+	Duration  time.Duration
+	TimedOut  bool
+	Truncated bool
+}
+
+// MessageRecorded acknowledges a task, steering line, or hint after its
+// user_message event is durable.
+type MessageRecorded struct {
+	Turn   int
+	Source string
+	Text   string
+}
+
+// Notice is a display-only retry, compaction, limit, interrupt, repair, or
+// warning message.
+type Notice struct {
+	Turn int
+	Kind NoticeKind
+	Text string
+}
+
+// RunFinished is emitted after final and run_end are durable.
+type RunFinished struct {
+	Result   Result
+	Reason   string
+	Duration time.Duration
+}
+
+func (RunStarted) isDisplayEvent()        {}
+func (ModelStarted) isDisplayEvent()      {}
+func (TextDelta) isDisplayEvent()         {}
+func (ResponseCompleted) isDisplayEvent() {}
+func (ToolStarted) isDisplayEvent()       {}
+func (ToolCompleted) isDisplayEvent()     {}
+func (MessageRecorded) isDisplayEvent()   {}
+func (Notice) isDisplayEvent()            {}
+func (RunFinished) isDisplayEvent()       {}
+
+// sanitizeDisplayEvent removes terminal control characters from text fields
+// before they reach a display consumer. The session log remains the raw
+// record; this sanitization is display-only.
+func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
+	switch ev := ev.(type) {
+	case TextDelta:
+		ev.Text = displaySafe(ev.Text)
+		return ev
+	case ResponseCompleted:
+		ev.Text = displaySafe(ev.Text)
+		return ev
+	case ToolCompleted:
+		ev.Output = displaySafe(ev.Output)
+		ev.Error = displaySafe(ev.Error)
+		return ev
+	case MessageRecorded:
+		ev.Text = displaySafe(ev.Text)
+		return ev
+	case Notice:
+		ev.Text = displaySafe(ev.Text)
+		return ev
+	case RunFinished:
+		ev.Reason = displaySafe(ev.Reason)
+		return ev
+	default:
+		return ev
+	}
+}
+
+func displaySafe(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20:
+			b.WriteRune(0x2400 + r)
+		case r == 0x7f:
+			b.WriteRune(0x2421)
+		case r >= 0x80 && r <= 0x9f:
+			b.WriteRune('\uFFFD')
+		case (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0x200e || r == 0x200f || r == 0x061c:
+			// bidi controls are dropped
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

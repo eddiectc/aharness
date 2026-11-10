@@ -1,0 +1,638 @@
+package tui
+
+import (
+	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"aharness/internal/agent"
+	"aharness/internal/tools"
+)
+
+// overlayState is the TUI overlay/focus stack. Only the top overlay is drawn;
+// closing it restores the overlay below and then the transcript.
+type overlayState struct {
+	kind   OverlayKind
+	stack  []OverlayKind
+	focus  int
+	help   []string
+	scroll int
+
+	table *tableOverlay
+	file  *fileOverlay
+	model *modelOverlay
+	image *imageOverlay
+}
+
+func (o *overlayState) push(kind OverlayKind) {
+	if o.kind != OverlayNone {
+		o.stack = append(o.stack, o.kind)
+		if len(o.stack) > 4 {
+			o.stack = o.stack[len(o.stack)-4:]
+		}
+	}
+	o.kind = kind
+	o.focus = 0
+	o.scroll = 0
+}
+
+func (o *overlayState) pop() {
+	o.kind = OverlayNone
+	if n := len(o.stack); n > 0 {
+		o.kind = o.stack[n-1]
+		o.stack = o.stack[:n-1]
+	}
+	o.focus = 0
+}
+
+func (m *App) closeOverlay() {
+	m.overlay.pop()
+	m.layout()
+}
+
+func (m *App) closeOverlayCmd() tea.Cmd {
+	cmd := m.clearImageViewerCmd()
+	m.closeOverlay()
+	return cmd
+}
+
+// insert routes text to the focused overlay filter. It reports whether the
+// overlay consumed the text.
+func (o *overlayState) insert(m *App, text string) bool {
+	switch o.kind {
+	case OverlayFile:
+		if o.file != nil {
+			o.file.insertFilter(text)
+			return true
+		}
+	case OverlayModel:
+		if o.model != nil {
+			o.model.insertFilter(text)
+			return true
+		}
+	}
+	return false
+}
+
+func (o *overlayState) resize(m *App, width, height int) {
+	_ = o.resizeCmd(m, width, height)
+}
+
+func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
+	innerW, innerH := boxInner(width, height)
+	if o.file != nil {
+		o.file.resize(innerW, innerH)
+	}
+	if o.model != nil {
+		o.model.resize(innerW, innerH)
+	}
+	if o.table != nil {
+		o.table.resize(innerW, innerH)
+	}
+	if o.image != nil {
+		return o.image.resize(m, innerW, innerH)
+	}
+	return nil
+}
+
+func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.Keystroke()
+	switch key {
+	case "tab", "shift+tab":
+		o.focus = 1 - o.focus
+		return nil
+	}
+	switch o.kind {
+	case OverlayHelp, OverlayDetails:
+		switch key {
+		case "up", "k":
+			o.scroll = max(0, o.scroll-1)
+		case "down", "j":
+			o.scroll++
+		case "pgup":
+			o.scroll = max(0, o.scroll-8)
+		case "pgdown":
+			o.scroll += 8
+		}
+		return nil
+	case OverlayTable:
+		if o.table != nil {
+			return o.table.update(msg)
+		}
+	case OverlayFile:
+		if o.file != nil {
+			return o.file.update(m, msg)
+		}
+	case OverlayModel:
+		if o.model != nil {
+			return o.model.update(m, msg)
+		}
+	case OverlayImage:
+		if o.image != nil {
+			return o.image.update(m, msg)
+		}
+	}
+	return nil
+}
+
+func (o *overlayState) view(m *App) string {
+	t := newTheme(m.noColor)
+	innerW, innerH := boxInner(m.width, m.height)
+	var title string
+	var content string
+	switch o.kind {
+	case OverlayHelp:
+		title = "help"
+		content = renderScroll(o.help, innerW, innerH, o.scroll)
+	case OverlayDetails:
+		title = "details"
+		content = renderScroll(o.help, innerW, innerH, o.scroll)
+	case OverlayTable:
+		title = "table · Ctrl-T"
+		if o.table != nil {
+			content = o.table.view(innerW, innerH)
+			if o.focus == 1 {
+				title += " · actions"
+			}
+		}
+	case OverlayFile:
+		title = "file picker · Ctrl-O"
+		if o.file != nil {
+			content = o.file.view()
+		}
+	case OverlayModel:
+		title = "model picker · Ctrl-P"
+		if o.model != nil {
+			content = o.model.view()
+		}
+	case OverlayImage:
+		title = "image · Ctrl-G"
+		if o.image != nil {
+			content = o.image.view()
+		}
+	}
+	body := t.label.Render(title) + "\n" + content
+	return t.box.Render(fitLines(body, innerW, innerH))
+}
+
+func boxInner(width, height int) (int, int) {
+	boxW := min(width-2, max(38, width*9/10))
+	boxH := min(height-2, max(8, height*4/5))
+	return max(10, boxW-4), max(3, boxH-2)
+}
+
+func renderScroll(lines []string, width, height, offset int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	offset = min(offset, max(0, len(lines)-1))
+	end := min(len(lines), offset+height)
+	return fitLines(strings.Join(lines[offset:end], "\n"), width, height)
+}
+
+func (m *App) openHelpOverlay() tea.Cmd {
+	t := newTheme(m.noColor)
+	lines := []string{
+		t.label.Render("keys"),
+		"",
+		"Enter            submit the composer (steering while a run is active)",
+		"Esc              close overlay, clear composer, or interrupt the operation",
+		"Ctrl-C           first interrupt, second cancel the run",
+		"Ctrl-D           quit (cancels an active run)",
+		"Ctrl-L           full repaint",
+		"Ctrl-U           clear the composer",
+		"Ctrl-A / Ctrl-E  composer start / end",
+		"Ctrl-W / Ctrl-K  delete previous word / to end",
+		"Up / Down        input history",
+		"PgUp / PgDn      scroll the transcript",
+		"Ctrl-R           toggle rich/raw rendering",
+		"Ctrl-T           table overlay",
+		"Ctrl-G           image viewer",
+		"Ctrl-P           model picker (idle)",
+		"Ctrl-O           file picker (idle)",
+		"F1               help; Ctrl-X details",
+		"",
+		t.dim.Render("Mouse reporting is disabled. Terminal output is sanitized."),
+	}
+	m.overlay.help = lines
+	m.overlay.push(OverlayHelp)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func detailsSession(m *App) string {
+	if m.headless {
+		return "(hidden in -ui-json; the session log is the durable record)"
+	}
+	return SanitizeLine(m.info.SessionID)
+}
+
+func detailsTrace(m *App) string {
+	if m.headless {
+		return "(hidden in -ui-json)"
+	}
+	return SanitizeLine(m.info.TracePath)
+}
+
+func (m *App) openDetailsOverlay() tea.Cmd {
+	t := newTheme(m.noColor)
+	lines := []string{
+		t.label.Render("session"),
+		"session:    " + detailsSession(m),
+		"trace:      " + detailsTrace(m),
+		"workspace:  " + SanitizeLine(m.info.Workspace),
+		"model:      " + SanitizeLine(m.info.Model) + " (" + SanitizeLine(m.info.Dialect) + ")",
+		"turns:      " + fmt.Sprintf("%d/%d", m.info.Turns, m.info.MaxTurns),
+		"tokens:     " + fmt.Sprintf("%d/%d", m.info.Usage.Total(), m.info.MaxTotalTokens),
+		"run:        " + fmt.Sprintf("%d", m.run.number),
+		"",
+		t.label.Render("terminal"),
+		"name:       " + SanitizeLine(m.opts.Terminal.Name),
+		"version:    " + SanitizeLine(m.opts.Terminal.Version),
+		"color:      " + SanitizeLine(m.colorProfile),
+		"no-color:   " + fmt.Sprintf("%v", m.noColor),
+		"images:     " + SanitizeLine(m.imageProtocol),
+	}
+	if provider, ok := m.host.(DetailsProvider); ok {
+		d := provider.Details()
+		lines = append(lines,
+			"",
+			t.label.Render("configuration"),
+			"provider:   "+SanitizeLine(d.Provider),
+			"base URL:   "+SanitizeLine(d.BaseURL),
+			"prompt:     "+SanitizeLine(d.PromptVersion),
+			"toolset:    "+SanitizeLine(d.ToolsetVersion),
+			"harness:    "+SanitizeLine(d.HarnessVersion),
+			"state dir:  "+SanitizeLine(d.StateDir),
+			"max ctx:    "+fmt.Sprintf("%d", d.MaxContextTokens),
+			"max output: "+fmt.Sprintf("%d", d.MaxOutputTokens),
+			"timeouts:   "+fmt.Sprintf("run %s, model %s", d.SessionTimeout, d.ModelTimeout),
+		)
+	}
+	m.overlay.help = lines
+	m.overlay.push(OverlayDetails)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+// tableOverlay renders the most recent markdown table.
+type tableOverlay struct {
+	table  table.Model
+	data   *tableData
+	xoff   int
+	width  int
+	height int
+}
+
+func (m *App) openTableOverlay() tea.Cmd {
+	data := m.latestTable()
+	if data == nil {
+		m.notice = "no markdown table in the transcript"
+		return nil
+	}
+	t := newTheme(m.noColor)
+	cols := make([]table.Column, len(data.headers))
+	for i, header := range data.headers {
+		w := ansi.StringWidth(header)
+		for _, row := range data.rows {
+			if i < len(row) {
+				w = max(w, ansi.StringWidth(row[i]))
+			}
+		}
+		cols[i] = table.Column{Title: header, Width: min(max(4, w+2), maxTableColumnLen)}
+	}
+	rows := make([]table.Row, len(data.rows))
+	for i, row := range data.rows {
+		cells := make([]string, len(cols))
+		copy(cells, row)
+		rows[i] = table.Row(cells)
+	}
+	tbl := table.New(
+		table.WithColumns(cols),
+		table.WithRows(rows),
+		table.WithFocused(true),
+		table.WithStyles(table.Styles{
+			Header:   t.label,
+			Cell:     lipgloss.NewStyle().Padding(0, 1),
+			Selected: lipgloss.NewStyle().Reverse(true),
+		}),
+	)
+	m.overlay.table = &tableOverlay{table: tbl, data: data}
+	m.overlay.push(OverlayTable)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func (to *tableOverlay) resize(width, height int) {
+	to.width = width
+	to.height = height
+	to.table.SetWidth(width)
+	to.table.SetHeight(max(3, height-1))
+}
+
+func (to *tableOverlay) update(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.Keystroke() {
+	case "left", "h":
+		to.xoff = max(0, to.xoff-4)
+		return nil
+	case "right", "l":
+		to.xoff += 4
+		return nil
+	case "home":
+		to.xoff = 0
+		return nil
+	}
+	updated, cmd := to.table.Update(msg)
+	to.table = updated
+	return cmd
+}
+
+func (to *tableOverlay) view(width, height int) string {
+	lines := strings.Split(to.table.View(), "\n")
+	if len(lines) > height-1 {
+		lines = lines[:height-1]
+	}
+	for i := range lines {
+		lines[i] = ansi.Cut(lines[i], to.xoff, to.xoff+width)
+	}
+	hint := fmt.Sprintf("←/→ scroll · position %d · %d rows", to.xoff, len(to.data.rows))
+	if len(lines) == 0 {
+		return hint
+	}
+	return fitLines(strings.Join(lines, "\n")+"\n"+hint, width, height)
+}
+
+func (m *App) latestTable() *tableData {
+	for _, v := range slices.Backward(m.items) {
+		if v.kind == itemAssistant {
+			if table := parseLastTable(v.text); table != nil {
+				return table
+			}
+		}
+	}
+	return nil
+}
+
+// fileOverlay is a Bubbles list constrained to the workspace root. Bubbles'
+// filepicker reads directories directly and cannot enforce os.Root/symlink
+// containment, so the picker keeps Bubbles' list/filter UX but reads entries
+// only through tools.Workspace.ListDisplayDir.
+type fileOverlay struct {
+	root   *tools.Workspace
+	dir    string
+	list   list.Model
+	err    string
+	width  int
+	height int
+}
+
+type fileItem struct {
+	name string
+	rel  string
+	dir  bool
+}
+
+func (f fileItem) Title() string {
+	if f.dir {
+		return f.name + "/"
+	}
+	return f.name
+}
+
+func (f fileItem) Description() string { return f.rel }
+
+func (f fileItem) FilterValue() string { return f.name }
+
+func (m *App) openFileOverlay() tea.Cmd {
+	root := m.isWorkspace()
+	if root == nil {
+		m.notice = "file picker requires a workspace"
+		return nil
+	}
+	fo := &fileOverlay{root: root, dir: "."}
+	fo.reload("")
+	if fo.err != "" {
+		m.notice = fo.err
+		return nil
+	}
+	m.overlay.file = fo
+	m.overlay.push(OverlayFile)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func (f *fileOverlay) reload(dir string) {
+	entries, err := f.root.ListDisplayDir(dir, 2000)
+	if err != nil {
+		f.err = SanitizeLine(err.Error())
+		return
+	}
+	f.err = ""
+	f.dir = dir
+	if f.dir == "" {
+		f.dir = "."
+	}
+	items := make([]list.Item, 0, len(entries)+1)
+	if f.dir != "." {
+		parent := filepath.Dir(f.dir)
+		items = append(items, fileItem{name: "..", rel: parent})
+	}
+	for _, entry := range entries {
+		if hasControlRune(entry.Name) {
+			f.err = "some file names were rejected because they contain control characters"
+			continue
+		}
+		items = append(items, fileItem{name: SanitizeLine(entry.Name), rel: entry.Rel, dir: entry.Dir})
+	}
+	if f.list.Width() == 0 {
+		f.list = list.New(items, list.NewDefaultDelegate(), f.width, f.height)
+		f.list.SetFilteringEnabled(true)
+		f.list.SetShowFilter(true)
+		f.list.SetShowStatusBar(true)
+		f.list.SetShowHelp(false)
+		f.list.SetShowPagination(false)
+		f.list.SetStatusBarItemName("file", "files")
+	} else {
+		f.list.SetFilterText("")
+		f.list.SetItems(items)
+	}
+	f.list.Title = "files: ./" + strings.TrimPrefix(SanitizeLine(f.dir), "./")
+	f.list.SetFilterText("")
+}
+
+func hasControlRune(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fileOverlay) insertFilter(text string) {
+	f.list.SetFilterText(f.list.FilterInput.Value() + text)
+}
+
+func (f *fileOverlay) resize(width, height int) {
+	f.width, f.height = width, height
+	f.list.SetSize(width, max(3, height-2))
+}
+
+func (f *fileOverlay) view() string {
+	if f.err != "" {
+		return SanitizeLine(f.err)
+	}
+	return f.list.View()
+}
+
+func (f *fileOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
+	key := msg.Keystroke()
+	if key == "enter" || key == "right" || key == "l" {
+		item, ok := f.list.SelectedItem().(fileItem)
+		if !ok {
+			return nil
+		}
+		if item.dir {
+			f.reload(item.rel)
+			return nil
+		}
+		if item.rel == "" {
+			return nil
+		}
+		if err := f.confirm(item.rel); err != nil {
+			m.notice = SanitizeLine(err.Error())
+			return nil
+		}
+		m.closeOverlay()
+		m.composer.InsertString(item.rel)
+		m.layout()
+		return nil
+	}
+	if (key == "left" || key == "backspace" || key == "h") && f.list.FilterInput.Value() == "" {
+		if f.dir != "." {
+			f.reload(filepath.Dir(f.dir))
+		}
+		return nil
+	}
+	updated, cmd := f.list.Update(msg)
+	f.list = updated
+	return cmd
+}
+
+// confirm rechecks containment and regular-file status without reading the file.
+func (f *fileOverlay) confirm(rel string) error {
+	dir := filepath.Dir(rel)
+	entries, err := f.root.ListDisplayDir(dir, 2000)
+	if err != nil {
+		return err
+	}
+	name := filepath.Base(rel)
+	for _, entry := range entries {
+		if entry.Name == name && !entry.Dir {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s is not a selectable workspace file", rel)
+}
+
+// modelOverlay is the accepted-model registry picker.
+type modelOverlay struct {
+	list   list.Model
+	width  int
+	height int
+}
+
+type modelItem struct {
+	choice  ModelChoice
+	current bool
+}
+
+func (mi modelItem) Title() string {
+	title := mi.choice.ID
+	if mi.current {
+		title += " (current)"
+	}
+	if mi.choice.Default {
+		title += " (default)"
+	}
+	return title
+}
+
+func (mi modelItem) Description() string { return string(mi.choice.Dialect) }
+
+func (mi modelItem) FilterValue() string { return mi.choice.ID }
+
+func (m *App) openModelOverlay() tea.Cmd {
+	if m.run.active {
+		m.notice = "the model picker is disabled while a run is active"
+		return nil
+	}
+	if len(m.models) == 0 {
+		m.notice = "no accepted models available"
+		return nil
+	}
+	items := make([]list.Item, len(m.models))
+	for i, choice := range m.models {
+		items[i] = modelItem{choice: choice, current: choice.ID == m.info.Model}
+	}
+	ml := list.New(items, list.NewDefaultDelegate(), 40, 8)
+	current := 0
+	for i, choice := range m.models {
+		if choice.ID == m.info.Model {
+			current = i
+			break
+		}
+	}
+	ml.Select(current)
+	ml.SetShowFilter(true)
+	ml.SetShowStatusBar(false)
+	ml.SetShowHelp(false)
+	ml.SetShowPagination(false)
+	ml.Title = "model for the next run"
+	mo := &modelOverlay{list: ml}
+	m.overlay.model = mo
+	m.overlay.push(OverlayModel)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func (mo *modelOverlay) insertFilter(text string) {
+	mo.list.SetFilteringEnabled(true)
+	mo.list.SetFilterText(mo.list.FilterInput.Value() + text)
+}
+
+func (mo *modelOverlay) resize(width, height int) {
+	mo.width, mo.height = width, height
+	mo.list.SetSize(width, max(3, height-2))
+}
+
+func (mo *modelOverlay) view() string {
+	return mo.list.View()
+}
+
+func (mo *modelOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Keystroke() == "enter" {
+		item, ok := mo.list.SelectedItem().(modelItem)
+		if !ok {
+			return nil
+		}
+		m.nextModel = item.choice.ID
+		m.nextDialect = item.choice.Dialect
+		m.notice = "model for the next run: " + item.choice.ID
+		m.emit(EventModelChanged{Model: item.choice.ID, Dialect: string(item.choice.Dialect)})
+		m.closeOverlay()
+		return nil
+	}
+	updated, cmd := mo.list.Update(msg)
+	mo.list = updated
+	return cmd
+}
+
+var _ = agent.NoticeWarning

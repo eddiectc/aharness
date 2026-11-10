@@ -29,6 +29,36 @@ const (
 	defaultMaxOutputTokens  = 8_192
 	defaultSessionTimeout   = 60 * time.Minute
 	defaultModelTimeout     = 300 * time.Second
+
+	defaultUISizeWidth  = 100
+	defaultUISizeHeight = 30
+	minUISizeWidth      = 20
+	minUISizeHeight     = 5
+	maxUISizeWidth      = 500
+	maxUISizeHeight     = 200
+)
+
+// acceptedModelIDs is the model registry shared by the CLI validator and the
+// TUI model picker.
+var acceptedModelIDs = [...]string{
+	"crouton-alpha-free",
+	"deepseek-v4.1-flash",
+	"muse-spark-1.3-contributor",
+}
+
+// defaultModelID is marked as the registry default in the model picker.
+const defaultModelID = "deepseek-v4.1-flash"
+
+// Mode selects the front end for one process invocation.
+type Mode int
+
+const (
+	// ModeTUI is the default interactive terminal UI.
+	ModeTUI Mode = iota
+	// ModeBatch is the one-shot CLI.
+	ModeBatch
+	// ModeUIJSON is the headless JSONL TUI driver.
+	ModeUIJSON
 )
 
 // config is the effective command-line and environment configuration. Session
@@ -58,8 +88,14 @@ type config struct {
 	ResumeID string
 	ForkID   string
 
-	Interactive bool
-	Stream      bool
+	Mode         Mode
+	Batch        bool
+	UIJSON       bool
+	UISizeWidth  int
+	UISizeHeight int
+
+	Stream    bool
+	StreamSet bool
 
 	ShowVersion        bool
 	ProvisionalContext bool
@@ -150,7 +186,9 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		modelName        string
 		resumeID         string
 		forkID           string
-		interactive      bool
+		batch            bool
+		uiJSON           bool
+		uiSize           string
 		stream           bool
 		maxTurns         int
 		maxTotalTokens   int
@@ -160,15 +198,17 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		providerBaseURL  string
 		showVersion      bool
 	)
-	fs.StringVar(&task, "task", "", "task text; exactly one of -task or -task-file is required for a new session")
-	fs.StringVar(&taskFile, "task-file", "", "file containing the task; exactly one of -task or -task-file is required for a new session")
+	fs.StringVar(&task, "task", "", "task text; seeds the first message in TUI modes")
+	fs.StringVar(&taskFile, "task-file", "", "file containing the task; seeds the first message in TUI modes")
 	fs.StringVar(&workspace, "workspace", env.workspace, "workspace directory (default: AHARNESS_WORKSPACE, then the current directory; inherited on resume/fork)")
 	fs.StringVar(&stateDir, "state-dir", env.stateDir, "state directory (default: AHARNESS_STATE_DIR, then XDG_STATE_HOME/aharness, then ~/.local/state/aharness)")
 	fs.StringVar(&modelName, "model", env.model, "model ID (required for a new session; "+acceptedModels+")")
 	fs.StringVar(&resumeID, "resume", "", "continue an existing v2 session under the state directory")
-	fs.StringVar(&forkID, "fork", "", "create a new v2 session from an existing v2 session; requires a task")
-	fs.BoolVar(&interactive, "interactive", false, "read steering from stdin and enable first-SIGINT interruption")
-	fs.BoolVar(&stream, "stream", false, "stream assistant text to stdout (implied by -interactive)")
+	fs.StringVar(&forkID, "fork", "", "create a new v2 session from an existing v2 session")
+	fs.BoolVar(&batch, "batch", false, "force the one-shot CLI instead of the interactive TUI")
+	fs.BoolVar(&uiJSON, "ui-json", false, "run the TUI headlessly with the versioned JSONL protocol")
+	fs.StringVar(&uiSize, "ui-size", fmt.Sprintf("%dx%d", defaultUISizeWidth, defaultUISizeHeight), "initial -ui-json frame size (WxH, 20x5-500x200)")
+	fs.BoolVar(&stream, "stream", false, "stream assistant text in batch mode (implied in TUI modes)")
 	fs.IntVar(&maxTurns, "max-turns", defaultMaxTurns, "maximum cumulative model turns")
 	fs.IntVar(&maxTotalTokens, "max-total-tokens", defaultMaxTotalTokens, "cumulative token budget")
 	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window")
@@ -212,15 +252,26 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		if err != nil {
 			return config{}, err
 		}
-		if !taskSet {
-			return config{}, errors.New("-fork requires a task")
+	}
+	if batch && uiJSON {
+		return config{}, errors.New("-batch and -ui-json are mutually exclusive")
+	}
+	mode := ModeTUI
+	switch {
+	case uiJSON:
+		mode = ModeUIJSON
+	case batch:
+		mode = ModeBatch
+	}
+	if visited["ui-size"] && !uiJSON {
+		return config{}, errors.New("-ui-size is only valid with -ui-json")
+	}
+	sizeWidth, sizeHeight := defaultUISizeWidth, defaultUISizeHeight
+	if uiJSON {
+		sizeWidth, sizeHeight, err = parseUISize(uiSize)
+		if err != nil {
+			return config{}, err
 		}
-	}
-	if resumeID == "" && forkID == "" && !taskSet {
-		return config{}, errors.New("one of -task or -task-file is required")
-	}
-	if stream && !taskSet && resumeID == "" {
-		return config{}, errors.New("-stream without a task is allowed only with -resume")
 	}
 
 	state, err := resolveStateDir(stateDir, getenv)
@@ -245,8 +296,13 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		LogRequests:       env.logRequests,
 		ResumeID:          resumeID,
 		ForkID:            forkID,
-		Interactive:       interactive,
+		Mode:              mode,
+		Batch:             batch,
+		UIJSON:            uiJSON,
+		UISizeWidth:       sizeWidth,
+		UISizeHeight:      sizeHeight,
 		Stream:            stream,
+		StreamSet:         visited["stream"],
 		PromptVersion:     agent.PromptVersion,
 		ToolsetVersion:    tools.Version,
 		modelSet:          env.model != "" || visited["model"],
@@ -257,10 +313,6 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxContextSet:     env.maxContextSet || visited["max-context-tokens"],
 		maxOutputSet:      visited["max-output-tokens"],
 		sessionTimeoutSet: visited["session-timeout"],
-	}
-	// -interactive implies streaming unless -stream=false was explicit.
-	if interactive && !visited["stream"] {
-		cfg.Stream = true
 	}
 	if providerBaseURL == "" {
 		providerBaseURL = model.DefaultBaseURL
@@ -307,13 +359,64 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 			return config{}, err
 		}
 	}
+	if err := validateModeRules(&cfg); err != nil {
+		return config{}, err
+	}
 	return cfg, nil
 }
 
+// parseUISize parses and bounds the -ui-json initial frame size.
+func parseUISize(raw string) (int, int, error) {
+	w, h, ok := strings.Cut(raw, "x")
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid -ui-size %q: want WxH", raw)
+	}
+	width, err := strconv.Atoi(w)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid -ui-size %q: %w", raw, err)
+	}
+	height, err := strconv.Atoi(h)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid -ui-size %q: %w", raw, err)
+	}
+	if width < minUISizeWidth || width > maxUISizeWidth || height < minUISizeHeight || height > maxUISizeHeight {
+		return 0, 0, fmt.Errorf("invalid -ui-size %dx%d: width must be %d-%d and height %d-%d",
+			width, height, minUISizeWidth, maxUISizeWidth, minUISizeHeight, maxUISizeHeight)
+	}
+	return width, height, nil
+}
+
+// validateModeRules applies the task, stream, and presentation rules for the
+// selected mode. It runs again after a TTY check downgrades the default TUI to
+// batch.
+func validateModeRules(cfg *config) error {
+	switch cfg.Mode {
+	case ModeBatch:
+		if cfg.ResumeID == "" && cfg.ForkID == "" && !cfg.TaskSet {
+			return errors.New("one of -task or -task-file is required")
+		}
+		if cfg.ForkID != "" && !cfg.TaskSet {
+			return errors.New("-fork requires a task")
+		}
+		if cfg.Stream && !cfg.TaskSet && cfg.ResumeID == "" {
+			return errors.New("-stream without a task is allowed only with -resume")
+		}
+	case ModeTUI, ModeUIJSON:
+		if cfg.StreamSet && !cfg.Stream {
+			return errors.New("-stream=false is not supported in TUI mode; use -batch for one-shot output")
+		}
+		cfg.Stream = true
+	default:
+		return errors.New("invalid runtime mode")
+	}
+	return nil
+}
+
 func writeUsage(w io.Writer, fs *flag.FlagSet) {
-	_, _ = fmt.Fprintln(w, "usage: aharness (-task text | -task-file path) -model model-id [flags]")
-	_, _ = fmt.Fprintln(w, "       aharness -resume session-id [options]")
-	_, _ = fmt.Fprintln(w, "       aharness -fork session-id (-task text | -task-file path) [options]")
+	_, _ = fmt.Fprintln(w, "usage: aharness -model model-id [flags]              # interactive TUI in a terminal")
+	_, _ = fmt.Fprintln(w, "       aharness -batch (-task text | -task-file path) -model model-id [flags]")
+	_, _ = fmt.Fprintln(w, "       aharness -batch -resume session-id [options]")
+	_, _ = fmt.Fprintln(w, "       aharness -ui-json -model model-id [-ui-size WxH] [options]")
 	_, _ = fmt.Fprintln(w)
 	fs.VisitAll(func(f *flag.Flag) {
 		name, usage := flag.UnquoteUsage(f)
@@ -600,16 +703,15 @@ func applySessionDefaults(cfg *config, state agent.State) error {
 // validateSessionRules enforces task rules and inherited cumulative limits
 // after the session state is known.
 func validateSessionRules(cfg *config, state agent.State) error {
-	if cfg.ResumeID != "" {
-		if state.LastRunEnded && state.LastRunStatus == agent.StopCompleted && !cfg.TaskSet {
-			return errors.New("-resume requires a task because the last run completed")
+	if cfg.Mode == ModeBatch {
+		if cfg.ResumeID != "" {
+			if state.LastRunEnded && state.LastRunStatus == agent.StopCompleted && !cfg.TaskSet {
+				return errors.New("-resume requires a task because the last run completed")
+			}
 		}
-	}
-	if cfg.ForkID != "" && !cfg.TaskSet {
-		return errors.New("-fork requires a task")
-	}
-	if cfg.Interactive && cfg.ResumeID == "" && !cfg.TaskSet {
-		return errors.New("-interactive without -resume requires a task")
+		if cfg.ForkID != "" && !cfg.TaskSet {
+			return errors.New("-fork requires a task")
+		}
 	}
 	if state.Turns >= cfg.MaxTurns {
 		return fmt.Errorf("session is at its turn limit (%d >= %d); raise -max-turns", state.Turns, cfg.MaxTurns)

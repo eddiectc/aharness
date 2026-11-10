@@ -228,6 +228,7 @@ func TestConfigEnvOverridesDefaults(t *testing.T) {
 
 func TestConfigTaskSources(t *testing.T) {
 	common := []string{
+		"-batch",
 		"-model", "deepseek-v4.1-flash",
 		"-workspace", t.TempDir(),
 		"-state-dir", t.TempDir(),
@@ -280,6 +281,7 @@ func TestConfigTaskSources(t *testing.T) {
 
 func TestConfigTaskRequiredExactlyOne(t *testing.T) {
 	common := []string{
+		"-batch",
 		"-model", "deepseek-v4.1-flash",
 		"-workspace", t.TempDir(),
 		"-state-dir", t.TempDir(),

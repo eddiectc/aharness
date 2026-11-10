@@ -1,8 +1,9 @@
 # aharness limits and timeouts
 
 - **Date:** 2026-11-10
-- **Status:** current for v1.
+- **Status:** current for v1 and the shipped TUI.
 - **Related:** [architecture](architecture.md), [v1 build plan](v1-build.md),
+  [TUI build plan](tui-build.md), [shipped TUI](tui.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
@@ -52,7 +53,7 @@ own constant.
 | Panic stack | 4 KiB | Recovered tool panic stack. |
 | Final event text | 64 KiB | Summary in the log; stdout may print the full response up to the response cap. |
 | Task or task-file effective text | 64 KiB | The file is read without a size cap; the recorded/projected text is capped with a truncation marker. |
-| Steering line | 64 KiB | One stdin line; longer lines are rejected on stderr. |
+| Steering message | 64 KiB | One TUI composer submission; longer is rejected with a notice. Batch has no steering. |
 | Session line | 4 MiB | Includes the JSON envelope and escaping. |
 | `model_response` payload | 1 MiB total canonical content | The executed response is fully recorded so resume can replay it. |
 | Tool result output/error | 64 KiB per field | Tool-specific caps below are usually smaller. |
@@ -125,14 +126,50 @@ Other event payloads:
 | `-session-timeout` | 60 minutes | Must be positive; per run. |
 | Model call timeout | 300 seconds | Fixed; no CLI flag. |
 | `-task` / `-task-file` | no read cap | Effective transcript text is 64 KiB. |
-| Steering line | 64 KiB | `-interactive` stdin line. |
+| Steering message | 64 KiB | TUI composer submission while a run is active. |
 | Session selection | UUIDv7 ID | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
 | Provider token | no length cap | In memory only; never logged or passed to tools. |
 | Provider base URL | no length cap | Must be http(s) with a host; userinfo and query/fragment are rejected. |
 | State directory path | OS path limit | No explicit application cap. |
 | Session log retention | none | No rotation or automatic deletion. |
 
-## 6. No cap or no separate cap
+## 6. TUI and `-ui-json`
+
+These caps are display-only; none changes the session log or the model
+contract. See [tui.md](tui.md) for the shipped behavior.
+
+| Cap | Value | Behavior |
+|---|---|---|
+| Task/steering message | 64 KiB | Longer is rejected with a notice; the run continues. |
+| Transcript items | 20,000 | Oldest UI items are dropped with an "older history omitted" marker. |
+| Transcript text | 16 MiB | Oldest UI items are dropped; the log is unchanged. |
+| Assistant text per item | 64 KiB displayed | Truncation marker; the full response stays in the log. |
+| Markdown source per item | 64 KiB | Longer is rendered as plain text with a marker. |
+| Markdown blocks per item | 4,000 | Excess input falls back to plain text with a notice. |
+| Markdown nesting | 16 levels | Deeper input falls back to plain text with a notice. |
+| Table columns / rows | 12 / 500 displayed | Column width cap 40 cells; excess scrolls/folds with a marker. |
+| Widget list / file picker entries | 1,000 / 2,000 per directory | File picker does not recurse, read contents, follow symlinks, or list `.git`; filter query is 64 bytes. |
+| Overlay stack | 4 | Deeper requests close the oldest non-modal overlay with a notice. |
+| Image file / dimensions | 8 MiB / 4096×4096 | Larger files are rejected with a placeholder. `image.DecodeConfig` runs first. |
+| Decoded image pixels | 16 Mi (4096×4096 max) | Larger images are rejected before full decode. |
+| Images per transcript | 32 | Oldest displayed thumbnails are dropped; the transcript item remains. |
+| Image thumbnail | 60×20 cells or available width | Half-block glyph preview; Kitty only in the viewer. |
+| Tool output | 4 KiB or 40 lines folded | Expanded output never exceeds the logged tool-result cap. |
+| Tool arguments preview | 2 KiB or 8 lines | Full arguments remain in `model_response`/the log. |
+| Input history | 100 entries | In-memory only; not persisted. |
+| Minimum terminal size | 40×10 | Below shows a resize message; quit/resize keys still work. |
+| Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
+| Escape timeout | 50 ms | A lone Esc is delivered; modified sequences never interrupt. |
+| Display queue | 256 events | Backpressure; text deltas are not durable. |
+| `-ui-json` command line | 1 MiB | Longer lines are a protocol error (exit 2). |
+| `-ui-json` text/paste | 64 KiB per command | Longer text is rejected with a protocol error. |
+| `-ui-json` frame size | 20×5–500×200 | `-ui-size`/`resize` outside the range is a config/protocol error. |
+| `-ui-json` wait timeout | 30,000 ms default; 300,000 ms max | A timeout emits `error{code:"timeout"}` and does not exit. |
+| `-ui-json` frame line | 1 MiB | Over-cap emits `frame_too_large` and continues. |
+| `-ui-json` style spans | 16,000 or 256 KiB encoded | Excess styles are dropped; `styles_truncated` is true and `lines` stay complete. |
+| `-ui-json` snapshot | 512 KiB SVG payload | Over-cap emits `snapshot_too_large` and continues. |
+
+## 7. No cap or no separate cap
 
 These are intentionally bounded only by an enclosing limit, not by a dedicated
 constant:
@@ -151,7 +188,7 @@ constant:
 - Provider token length; held in memory only.
 - Session retention; old logs remain until the operator removes them.
 
-## 7. Removed v0 limits
+## 8. Removed v0 limits
 
 v1 replaces the v0 session contract outright. The v0 `session_end` event, the
 1 MiB + 64 KiB session line, and the 64 KiB-per-field `model_response` text cap

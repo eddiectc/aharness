@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/term"
+
 	"aharness/internal/agent"
 	"aharness/internal/model"
 	"aharness/internal/session"
 	"aharness/internal/tools"
+	"aharness/internal/tui"
 )
 
 const (
@@ -44,7 +47,7 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 		return exitConfig
 	}
 	if cfg.ShowVersion {
@@ -54,14 +57,58 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if cfg.ProvisionalContext {
 		_, _ = fmt.Fprintf(stderr, "aharness: warning: max context tokens not set; using provisional default %d; set -max-context-tokens to the confirmed model window\n", cfg.MaxContextTokens)
 	}
+	if err := selectMode(&cfg, stdin, stdout); err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
+		return exitConfig
+	}
 	cfg.HarnessVersion = buildVersion()
 	return execute(cfg, stdin, stdout, stderr)
+}
+
+// selectMode applies the TTY rules: explicit -ui-json and -batch win, and an
+// unspecified mode is TUI only when both stdin and stdout are terminals.
+func selectMode(cfg *config, stdin io.Reader, stdout io.Writer) error {
+	switch {
+	case cfg.UIJSON:
+		cfg.Mode = ModeUIJSON
+	case cfg.Batch:
+		cfg.Mode = ModeBatch
+	case !isTerminal(stdin) || !isTerminal(stdout):
+		cfg.Mode = ModeBatch
+	default:
+		cfg.Mode = ModeTUI
+		if term := os.Getenv("TERM"); term == "" || term == "dumb" {
+			return errors.New("interactive mode requires a terminal TERM value other than \"dumb\"; use -batch for one-shot output")
+		}
+	}
+	if cfg.Mode == ModeTUI {
+		if _, err := tui.ImageProtocolFromEnv(os.Getenv, false); err != nil {
+			return err
+		}
+	}
+	return validateModeRules(cfg)
+}
+
+// terminalCheck is the TTY predicate; tests replace it to exercise the mode
+// matrix without a PTY.
+var terminalCheck = isTerminalValue
+
+// isTerminal reports whether v is backed by a terminal file descriptor.
+func isTerminal(v any) bool { return terminalCheck(v) }
+
+func isTerminalValue(v any) bool {
+	type fileDescriptor interface{ Fd() uintptr }
+	f, ok := v.(fileDescriptor)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // execute wires the workspace, session state, provider adapter, tool registry,
 // and runner, then performs terminal cleanup. Configuration has already been
 // validated for a new session; resume and fork inherit before running.
 func execute(cfg config, stdin io.Reader, stdout, stderr io.Writer) int {
+	if cfg.Mode != ModeBatch {
+		return executeTUI(cfg, stdin, stdout, stderr)
+	}
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	switch {
 	case cfg.ResumeID != "":
@@ -253,26 +300,17 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		logger.Warn("provider token is unset; hosted OpenCode Go requires AHARNESS_PROVIDER_TOKEN")
 	}
 
-	runCtx, controller, stopSignals := setupSignals(cfg.Interactive)
+	runCtx, stopSignals := setupSignals()
 	defer stopSignals()
 	var sink *textSink
 	if cfg.Stream {
 		sink = &textSink{w: stdout}
 	}
-	var steering <-chan string
-	if cfg.Interactive {
-		steering = startSteering(runCtx, stdin, stderr)
-	}
 
 	rcfg := runnerConfig(cfg)
-	rcfg.Controller = controller
 	if sink != nil {
-		rcfg.EmitText = func(s string) error {
-			_, err := sink.Write([]byte(s))
-			return err
-		}
+		rcfg.Display = textDisplay(sink)
 	}
-	rcfg.Steering = steering
 	registry := tools.NewRegistry(ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir})
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
@@ -334,7 +372,6 @@ func runnerConfig(cfg config) agent.Config {
 		SessionTimeout: cfg.SessionTimeout,
 		ModelTimeout:   cfg.ModelTimeout,
 		LogRequests:    cfg.LogRequests,
-		Interactive:    cfg.Interactive,
 		Stream:         cfg.Stream,
 	}
 }
@@ -389,7 +426,14 @@ func sessionFailure(err error, stderr io.Writer) int {
 }
 
 func newCompleter(cfg config, sessionID string) model.Completer {
-	if cfg.Dialect == model.DialectResponses {
+	return newCompleterFor(cfg.Dialect, cfg, sessionID)
+}
+
+// newCompleterFor builds the adapter for one run's dialect. The model picker
+// changes only the dialect/adapter for the next run; the request carries the
+// selected model.
+func newCompleterFor(dialect model.Dialect, cfg config, sessionID string) model.Completer {
+	if dialect == model.DialectResponses {
 		return model.NewOpenAIResponses(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion)
 	}
 	return model.NewOpenAIChat(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion)

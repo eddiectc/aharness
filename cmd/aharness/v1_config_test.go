@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -25,21 +26,23 @@ func TestParseResumeDeferredValidation(t *testing.T) {
 	if cfg.TaskSet || cfg.Model != "" || cfg.Workspace != "" {
 		t.Fatalf("resume config should defer task/model/workspace: %+v", cfg)
 	}
-	if cfg.Stream || cfg.Interactive {
-		t.Fatalf("stream/interactive = %v/%v, want false", cfg.Stream, cfg.Interactive)
+	if !cfg.Stream {
+		t.Fatal("TUI mode should stream")
+	}
+	if cfg.Mode != ModeTUI {
+		t.Fatalf("Mode = %v, want TUI", cfg.Mode)
 	}
 
-	cfg = cfgTestParseOK(t, []string{"-resume", v1TestSession, "-state-dir", stateDir, "-interactive"}, nil)
-	if !cfg.Interactive || !cfg.Stream {
-		t.Fatalf("-interactive should imply stream: %+v", cfg)
-	}
-	cfg = cfgTestParseOK(t, []string{"-resume", v1TestSession, "-state-dir", stateDir, "-interactive", "-stream=false"}, nil)
-	if cfg.Stream {
-		t.Fatal("-stream=false should disable streaming with -interactive")
-	}
 	cfg = cfgTestParseOK(t, []string{"-resume", v1TestSession, "-state-dir", stateDir, "-stream"}, nil)
 	if !cfg.Stream {
 		t.Fatal("-stream should be set")
+	}
+	if _, err := parseConfig([]string{"-resume", v1TestSession, "-state-dir", stateDir, "-stream=false"}, cfgTestGetenv(nil), io.Discard); err == nil {
+		t.Fatal("-stream=false accepted in TUI mode")
+	}
+	batch := cfgTestParseOK(t, []string{"-batch", "-resume", v1TestSession, "-state-dir", stateDir}, nil)
+	if batch.Mode != ModeBatch || batch.Stream {
+		t.Fatalf("batch config = %+v", batch)
 	}
 }
 
@@ -51,10 +54,14 @@ func TestParseResumeAndForkValidation(t *testing.T) {
 	if err := cfgTestParseErr(t, []string{"-resume", "../escape", "-state-dir", stateDir}, nil); err == nil {
 		t.Fatal("invalid resume id accepted")
 	}
-	if err := cfgTestParseErr(t, []string{"-fork", v1TestSession, "-state-dir", stateDir}, nil); err == nil {
-		t.Fatal("fork without a task accepted")
+	if err := cfgTestParseErr(t, []string{"-batch", "-fork", v1TestSession, "-state-dir", stateDir}, nil); err == nil {
+		t.Fatal("batch fork without a task accepted")
 	}
-	cfg := cfgTestParseOK(t, []string{"-fork", v1TestSession, "-state-dir", stateDir, "-task", "new work"}, nil)
+	cfg := cfgTestParseOK(t, []string{"-fork", v1TestSession, "-state-dir", stateDir}, nil)
+	if cfg.ForkID != v1TestSession || cfg.TaskSet || cfg.Mode != ModeTUI {
+		t.Fatalf("TUI fork config = %+v", cfg)
+	}
+	cfg = cfgTestParseOK(t, []string{"-fork", v1TestSession, "-state-dir", stateDir, "-task", "new work"}, nil)
 	if cfg.ForkID != v1TestSession || !cfg.TaskSet || cfg.Task != "new work" {
 		t.Fatalf("fork config = %+v", cfg)
 	}
@@ -62,14 +69,18 @@ func TestParseResumeAndForkValidation(t *testing.T) {
 
 func TestParseStreamWithoutTaskRequiresResume(t *testing.T) {
 	stateDir := t.TempDir()
-	args := []string{"-stream", "-state-dir", stateDir, "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir()}
+	args := []string{"-batch", "-stream", "-state-dir", stateDir, "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir()}
 	if err := cfgTestParseErr(t, args, nil); err == nil {
-		t.Fatal("stream without a task accepted for a new session")
+		t.Fatal("batch stream without a task accepted for a new session")
 	}
 	args = append(args, "-task", "work")
 	cfg := cfgTestParseOK(t, args, nil)
 	if !cfg.Stream {
 		t.Fatal("Stream = false, want true")
+	}
+	tuiCfg := cfgTestParseOK(t, []string{"-state-dir", stateDir, "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir()}, nil)
+	if !tuiCfg.Stream || tuiCfg.Mode != ModeTUI {
+		t.Fatalf("TUI new session without a task = %+v", tuiCfg)
 	}
 }
 
@@ -222,7 +233,7 @@ func TestApplySessionDefaultsRejectsUnsupportedState(t *testing.T) {
 func TestValidateSessionRules(t *testing.T) {
 	makeCfg := func(t *testing.T, args ...string) config {
 		t.Helper()
-		base := []string{"-resume", v1TestSession, "-state-dir", t.TempDir()}
+		base := []string{"-batch", "-resume", v1TestSession, "-state-dir", t.TempDir()}
 		return cfgTestParseOK(t, append(base, args...), nil)
 	}
 

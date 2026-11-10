@@ -1,10 +1,12 @@
 # aharness architecture
 
 - **Date:** 2026-11-10
-- **Status:** normative for v1 structure and runtime contracts
+- **Status:** normative for v1 and the shipped TUI structure and runtime
+  contracts
 - **Related:** [Go coding standard](coding-standard.md),
   [bare-minimum harness research](agent-harness-minimum.md),
-  [v1 build plan](v1-build.md)
+  [v1 build plan](v1-build.md), [TUI build plan](tui-build.md),
+  [shipped TUI](tui.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This document
@@ -16,21 +18,28 @@ standard wins; on structure and runtime contracts, this document wins.
 
 ```mermaid
 flowchart LR
-  cli["aharness CLI"] --> runner["agent runner"]
+  cli["aharness CLI"] --> modes{"mode"}
+  modes --> tui["TUI / -ui-json (Bubble Tea)"]
+  modes --> runner["agent runner"]
+  tui --> host["cmd TUI host"]
+  host --> runner
   runner <--> model["dialect adapters (buffered + SSE)"]
   runner <--> tools["tool registry"]
-  runner <--> control["signals + stdin steering"]
+  runner <--> control["signals + operation controller"]
   runner --> session[("v2 JSONL session log")]
   tools <--> workspace[("workspace (os.Root)")]
   model <--> api[(opencode-go API)]
 ```
 
-One process, one loop, no daemon, no worker pool. The runner owns turn state and
-is the only component that advances the loop. Tools do not call the model. The
-model adapters do not touch the workspace. The v2 event log is append-only and is
-the only persisted truth. A session is the durable conversation; a run is one
-process invocation that advances it. Resume appends to the same log; fork copies
-a session into a new self-contained log.
+One process, one session, no daemon, no worker pool. The runner owns turn state
+and is the only component that advances the loop. Tools do not call the model.
+The model adapters do not touch the workspace. The v2 event log is append-only
+and is the only persisted truth. A session is the durable conversation. In
+batch mode a run is one process invocation; in TUI/`-ui-json` mode a run is one
+submitted message and a process may execute several runs over the same session.
+Resume appends to the same log; fork copies a session into a new self-contained
+log. The TUI is a display-only front end over the same runner, host, and store;
+it adds no durable event type.
 
 
 ## 2. Provider and model
@@ -185,9 +194,10 @@ type StreamCompleter interface {
 }
 ```
 
-`CompleteStream` is opt-in through `-stream` (implied by `-interactive` unless
-`-stream=false`). The agent keeps `Completer` and falls back to `Complete` when
-the adapter does not implement streaming. The callback is display-only; the
+`CompleteStream` is used when streaming is requested. Batch enables it through
+`-stream`; TUI and `-ui-json` always stream, and an explicit `-stream=false`
+there is a config error. The agent keeps `Completer` and falls back to `Complete`
+when the adapter does not implement streaming. The callback is display-only; the
 returned canonical `Response` is authoritative and is the only transcript
 record. Tool calls are assembled inside the adapter and are never exposed as
 deltas.
@@ -237,8 +247,9 @@ adapter fell back to non-streaming, the response text is printed once. Without
 
 | Path | Responsibility |
 |---|---|
-| `cmd/aharness/` | Flags, environment parsing, config validation, session selection, wiring, signal handling, steering reader, exit codes. |
-| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, streaming display, interactive interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
+| `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. |
+| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
+| `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
 | `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
@@ -247,19 +258,32 @@ adapter fell back to non-streaming, the response text is printed once. Without
 go.mod
 cmd/aharness/
   main.go        # os.Exit(run())
-  run.go         # run modes, wiring, exit codes, work directories
+  run.go         # mode selection, batch wiring, exit codes, work directories
   config.go      # parsing, validation, inheritance, model-to-dialect registry
-  control.go     # interactive signal routing
-  steering.go    # bounded stdin-line reader
+  control.go     # operation controller and batch signal delivery
+  tui.go         # TUI host, session shell, -ui-json wiring, summary
   textsink.go    # streamed stdout newline handling
   version.go
 internal/agent/
   runner.go      # run lifecycle, loop, stop policy, repair, interrupts
+  display.go     # display-only event contract
+  history.go     # capped transcript reconstruction
   state.go       # durable state reconstruction and pending calls
   events.go      # event payloads and caps
   context.go     # projection, token estimate, compaction
   retry.go       # retry policy and streaming-aware model calls
   types.go
+internal/tui/
+  app.go         # tea.Model, Host/Run contracts, modes, key handling, lifecycle
+  model.go       # transcript, composer, status, steering, caps
+  view.go        # Lip Gloss layout, transcript/tool/notice views
+  markdown.go    # Glamour rendering, raw/rich toggle, table extraction
+  widgets.go     # table/file/model overlays and focus
+  image.go       # workspace image resolver, ntcharts picture, viewer
+  protocol.go    # -ui-json v1 commands, events, frames, snapshots
+  headless.go    # Bubble Tea + fake input/output + x/vt driver
+  screen.go      # x/vt cell/style/cursor projection and SVG snapshot
+  sanitize.go    # terminal-safe text sanitizer
 internal/model/
   types.go            # canonical types, StreamCompleter
   openai_chat.go      # Chat Completions buffered + SSE adapter
@@ -292,11 +316,16 @@ policy lives in `tools`. `session` remains a leaf; event payloads are
 import `agent` or `cmd`. Add a package only when a second consumer or a clear
 boundary justifies it; do not add `pkg/`, `util`, `common`, or `types`.
 
-Dependencies stay deliberately small: Go standard library only at runtime. Typed
-structs and explicit checks validate tool arguments; a JSON Schema validator is
-not needed in v1. The provider adapters use `net/http` with the OpenAI Chat
-Completions and Responses dialects; no provider SDK is used (Section 2.1). Dev
-tools (`goimports`, `golangci-lint`, `govulncheck`) are not runtime dependencies.
+Dependencies stay deliberately small: the Go standard library by default. The
+TUI is the one approved framework-scale exception (Bubble Tea v2, Bubbles v2,
+Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt`); its rationale and binary
+impact are in the coding standard §3 and the [TUI plan](tui-build.md#28-package-layout-and-wiring).
+Typed structs and explicit checks validate tool arguments; a JSON Schema
+validator is not needed. The provider adapters use `net/http` with the OpenAI
+Chat Completions and Responses dialects; no provider SDK is used (Section 2.1).
+Dev tools (`goimports`, `golangci-lint`, `govulncheck`) are not runtime
+dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
+`model`, `tools`, and `session` MUST NOT import `internal/tui` or `cmd`.
 
 ### 3.2 Core contracts
 
@@ -359,6 +388,43 @@ methods; split append/sync from read/close rather than defining one wide
 `*session.Store`. Because the packages are `internal`, do
 not export interfaces solely for tests.
 
+### 3.3 TUI, display, and history contracts
+
+`internal/tui` defines consumer-side `Host`/`Run` interfaces; `cmd` implements
+them over `session.Store`, `tools.Workspace`, and the provider adapters.
+`agent` never imports `internal/tui`. The TUI adds no durable event type and no
+schema version.
+
+- **Display.** `agent.Config.Display func(DisplayEvent) error` is the single
+  runner-to-UI observation path; it replaces the old `EmitText`. Events are
+  `RunStarted`, `ModelStarted`, `TextDelta`, `ResponseCompleted`, `ToolStarted`,
+  `ToolCompleted`, `MessageRecorded`, `Notice`, and `RunFinished`, emitted in
+  that contract order around the matching durable events. They are display-only
+  and carry no provider token or ANSI. A display failure before `RunFinished` is
+  an internal error; during a tool round it pairs the current and unstarted
+  calls with `canceled`.
+- **History.** `agent.History(events)` reconstructs a capped, display-only
+  transcript from the log: run headers with effective model/dialect and terminal
+  status, user messages, assistant markdown source, tool calls/results paired by
+  call ID (anomalies retained), hints, notices, and partial text. `final` does
+  not duplicate the assistant text. Unknown events/fields are ignored; malformed
+  known payloads are errors.
+- **Run model.** One process owns one session and one lock. Each submitted
+  message while idle starts one run; `run_start.ResumedFromSeq` is the current
+  last sequence. Cumulative turns/tokens and the per-run clock follow v1; the
+  model/dialect are per-run and recorded in `run_start`. The model picker changes
+  only the next run.
+- **Modes.** Terminal default is TUI; `-batch` forces the v1 one-shot CLI;
+  `-ui-json` runs the same Bubble Tea program with fake input/output and an
+  `x/vt` emulator. TTY/`TERM` checks run before session creation for the TUI.
+  `-interactive` and stdin steering are removed; the runner's steering channel
+  remains for TUI submissions. See [tui.md](tui.md) for the shipped modes, keys,
+  protocol, and caps.
+- **Safety.** All untrusted text passes through `internal/tui.Sanitize` before
+  Glamour, Bubbles, or cells. Images are workspace-contained display-only files.
+  Bubble Tea owns raw mode, the alternate screen, paste, resize, cursor, and
+  restoration; the app never writes terminal escapes.
+
 ## 4. Agent loop
 
 ### 4.1 Turn sequence
@@ -403,7 +469,7 @@ not export interfaces solely for tests.
    `user_message` with source `continuation-hint` and continues, but a second
    consecutive `length` response without tool calls terminates with
    `token_limit`; `content_filter` terminates with `provider_error`; any other
-   value terminates with `protocol_error`. An interactive interruption of the
+   value terminates with `protocol_error`. A TUI operation interruption of the
    model call appends `interrupt` and a `user_message` with source
    `interrupt-hint`, then continues without counting a turn.
 9. Before executing, reject a response with missing or duplicate tool-call IDs
@@ -411,7 +477,7 @@ not export interfaces solely for tests.
    the tool, validate arguments, execute with a timeout, append exactly one
    `tool_result` carrying a stable `code`, and sync. A failure is still a result
    with the original call ID. A recovered panic is paired before the run stops
-   with `internal_error`. An interactive tool interruption pairs the interrupted
+   with `internal_error`. A TUI tool interruption pairs the interrupted
    call and every unstarted call in that response with `code=canceled`, appends
    `interrupt`, and continues; the model sees the results.
 10. Increment the turn counter and repeat from step 5. Stop when a limit is
@@ -428,9 +494,11 @@ not export interfaces solely for tests.
 The loop never batches multiple assistant turns, never skips a tool call, and
 never sends a tool result without a preceding call. Multiple tool calls execute
 sequentially in the order returned; correctness does not depend on provider-side
-`parallel_tool_calls` support. `seq` and `turn` continue across runs. Steering
-is plain stdin text consumed only at turn boundaries; it never interrupts a tool
-round. `SIGINT` is the interruption mechanism.
+`parallel_tool_calls` support. `seq` and `turn` continue across runs. In TUI
+mode steering is the composer submission while a run is active; it is consumed
+only at turn boundaries and never interrupts a tool round. Batch has no
+steering. `SIGINT` is the batch interruption mechanism; the TUI uses `Esc`,
+`Ctrl-C`, and its signal handler.
 
 ### 4.2 Terminal states
 
@@ -443,7 +511,7 @@ round. `SIGINT` is the interruption mechanism.
 | `provider_error` | Non-retryable provider failure, content filter, or retries exhausted. | 3 |
 | `protocol_error` | Model response cannot be paired or parsed safely, including missing or duplicate tool-call IDs, malformed streams, missing usage, or an over-cap response. | 4 |
 | `stuck` | Repeated identical tool failures (same tool, canonical arguments, stable result code) crossed the threshold. | 4 |
-| `interrupted` | Non-interactive SIGINT/SIGTERM, or the second interactive SIGINT/SIGTERM; child process group killed. | 130 |
+| `interrupted` | Batch SIGINT/SIGTERM; TUI second `Ctrl-C`, `SIGTERM`, or `SIGHUP`; child process group killed. | 130 |
 | `internal_error` | Post-validation disk or harness invariant failure, or a recovered tool panic. Pre-session config/usage failures exit 2 without a session. | 1 |
 
 Every terminal state of an initialized run emits exactly one `final` event with
@@ -735,10 +803,10 @@ the shell would require a separate UID or process boundary and is out of scope.
 | Model response over 1 MiB of canonical content | Append `error`; stop with `protocol_error` before logging a response or executing a tool. |
 | Repeated identical tool failure | Counts only `ok=false` results; "identical" means the same tool, canonical arguments, and stable result code. Canonical arguments are computed from the provider-supplied JSON by recursively sorting object members by name, preserving array order and numeric literals, and rejecting duplicate names; whitespace differences are ignored. The message is for display, not identity. After 3 consecutive identical failures, append a `user_message` event with source `stuck-hint` and include it in the next projection. After 5, stop with `stuck`. |
 | Cumulative turn/token or per-run time limit | Append `limit`, then terminate; the terminal path emits `final` and `run_end` with the corresponding status. |
-| Interactive first SIGINT while a model call is in flight | Cancel only that operation context. Append `interrupt` (`operation=model`, capped partial text when available) and a `user_message` with source `interrupt-hint`; continue without counting a turn. A SIGINT with no operation in flight is ignored. |
-| Interactive first SIGINT while a tool is in flight | Kill the whole process group, record `interrupt` (`operation=tool`), pair the interrupted call and every unstarted call in that response with `code=canceled` and an outcome-unknown message, and continue. |
-| Interactive second SIGINT or SIGTERM | Cancel the run; write `final` and `run_end`, sync, remove the work directory, and exit 130. |
-| Non-interactive SIGINT/SIGTERM | Cancel the run; kill the child process group; write `final` and `run_end`; sync; remove the work directory; exit 130. |
+| TUI first `Esc`/`Ctrl-C` while a model call is in flight | Cancel only that operation context. Append `interrupt` (`operation=model`, capped partial text when available) and a `user_message` with source `interrupt-hint`; continue without counting a turn. `Esc` with no operation in flight is ignored; the first `Ctrl-C` also arms run cancellation. |
+| TUI first `Esc`/`Ctrl-C` while a tool is in flight | Kill the whole process group, record `interrupt` (`operation=tool`), pair the interrupted call and every unstarted call in that response with `code=canceled` and an outcome-unknown message, and continue. |
+| TUI second `Ctrl-C` or `Ctrl-D` active | Cancel the run; write `final` and `run_end`, sync, remove the work directory, and return to idle (second `Ctrl-C`) or restore and exit 130 (`Ctrl-D`). |
+| Batch SIGINT/SIGTERM, TUI `Ctrl-D` active, `SIGTERM`, or `SIGHUP` | Cancel the run; kill the child process group; write `final` and `run_end`; sync; remove the work directory; restore the terminal; exit 130. |
 | Resume with an unpaired call | Pair it before `run_start` with `code=canceled` and a message stating the harness restarted and the side effect may or may not have occurred. The model must verify. Resume is not transactional. |
 | Resume/fork with a torn final line | Truncate only the torn line and append `session_repair`; a decodable final line failing sequence or session validation is corruption and refuses resume. |
 | Resume with a locked session | Config error (2) naming the trace path. The lock is advisory and local-filesystem only. |
@@ -758,11 +826,14 @@ strings. Error strings are lowercase and have no trailing punctuation.
 ## 9. CLI and configuration
 
 ```
-aharness -task "..." -model deepseek-v4.1-flash
+aharness -model deepseek-v4.1-flash
+aharness -model deepseek-v4.1-flash -task "..."
 aharness -task-file task.md -model crouton-alpha-free -workspace /tmp/repo
-aharness -resume <session-id> -task "Now run the tests"
-aharness -fork <session-id> -task "Try a different approach"
-aharness -interactive -stream -task "Investigate the failure"
+aharness -batch -task "..." -model deepseek-v4.1-flash
+aharness -resume <session-id>
+aharness -batch -resume <session-id> -task "Now run the tests"
+aharness -fork <session-id>
+aharness -ui-json -ui-size 100x30 -model deepseek-v4.1-flash
 ```
 
 The examples target the hosted `opencode-go` endpoint and assume
@@ -772,20 +843,28 @@ empty token for local no-auth endpoints and tests (Section 2.1).
 - Use the standard `flag` package; no CLI framework.
 - Precedence: defaults, then environment, then flags. Parse environment errors
   as config errors; validate the effective config once before the run.
-- New flags: `-resume <id>`, `-fork <id>`, `-interactive`, and `-stream`. They
-  have no environment equivalents in v1. A session ID is validated as a UUID
+- Mode flags: `-batch`, `-ui-json`, and `-ui-size WxH` (only with `-ui-json`,
+  default 100x30, valid 20x5–500x200). A task is optional in TUI/`-ui-json`
+  modes. `-interactive` was removed; passing it is an unknown-flag error.
+- Session flags: `-resume <id>`, `-fork <id>`, `-task`, `-task-file`, `-stream`.
+  They have no environment equivalents. A session ID is validated as a UUID
   before a path is built.
+- Mode selection happens after flag parsing and before task validation or
+  session creation: `-version` first, then explicit `-ui-json`, explicit
+  `-batch`, otherwise TUI when stdin and stdout are terminals, otherwise batch.
+  TUI requires `TERM` set and not `dumb`; `-ui-json` ignores `TERM` and needs no
+  TTY. `-batch` and `-ui-json` are mutually exclusive.
 - Validation matrix:
-  - New session: exactly one of `-task`/`-task-file`; `-model` required.
-  - `-resume`: at most one task source; a task is required if the last run
+  - TUI/`-ui-json` new/resume/fork: task optional; a new session is created
+    eagerly; `-stream` is implied and `-stream=false` is a config error.
+  - Batch new session: exactly one of `-task`/`-task-file`; `-model` required.
+  - Batch `-resume`: at most one task source; a task is required if the last run
     ended `completed`; model/workspace/limits are inherited unless explicitly
-    set; a task may be omitted after interrupted, crashed, `provider_error`,
-    `protocol_error`, `stuck`, `time_limit`, or `token_limit`.
-  - `-fork`: exactly one task source; model/workspace/limits inherited unless
-    explicitly set.
+    set.
+  - Batch `-fork`: exactly one task source; model/workspace/limits inherited
+    unless explicitly set.
   - `-resume` and `-fork` are mutually exclusive.
-  - `-interactive` without `-resume` requires a task.
-  - `-stream` without a task is allowed only with `-resume`.
+  - Batch `-stream` without a task is allowed only with `-resume`.
 - `-workspace` defaults to `AHARNESS_WORKSPACE`, then the current directory for
   a new session. On resume/fork, an omitted `-workspace` inherits the recorded
   workspace; an explicitly different workspace is a config error. Resolve it to
@@ -841,15 +920,23 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   config error (2). A corrupt or unreadable existing log is a state failure (1)
   and writes no new session events. A v0 or unknown schema log is a config error
   (2) with a clear message.
-- Output contract: without `-stream`, stdout carries the final assistant text
-  for this run only; with `-stream`, stdout carries assistant text from every
-  turn as it arrives, and a response's final text is not reprinted after its
-  deltas. Progress lines, the session ID, and the trace path go to stderr. The
-  session ID and trace path are logged for a new, resumed, or forked session;
-  for a fork the new ID is the one to use afterward. `main` calls
-  `os.Exit(run())`; library code never exits.
-- No config file in v1. Interactive control is plain stdin text; there is no
-  command language or TUI.
+- Output contract: batch without `-stream` prints the final assistant text for
+  this run only; batch with `-stream` prints assistant text from every turn as
+  it arrives, and a response's final text is not reprinted after its deltas.
+  Progress lines, the session ID, and the trace path go to stderr. The TUI does
+  not print assistant text to stdout; on exit it restores the terminal and
+  prints the session ID, trace path, and last status to stderr. `-ui-json`
+  writes protocol JSONL to stdout and diagnostics to stderr. For a fork the new
+  ID is the one to use afterward. `main` calls `os.Exit(run())`; library code
+  never exits.
+- Exit codes: TUI/`-ui-json` clean idle quit 0; quit while a run is active or
+  `SIGTERM`/`SIGHUP` 130; config/TTY/`TERM`/protocol usage 2; terminal
+  setup/sync/close/protocol-I/O/internal failure 1. `-batch` keeps the
+  `StopReason` mapping (completed 0, limits 2, provider 3, protocol/stuck 4,
+  interrupted 130, internal 1).
+- No config file. The TUI owns interactive input and signals; batch is
+  non-interactive and has no steering. The `-ui-json` v1 protocol is the
+  machine-readable UI surface.
 
 Defaults are deliberately conservative and easy to change:
 

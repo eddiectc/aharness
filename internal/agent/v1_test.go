@@ -297,7 +297,12 @@ func TestRunnerStreamsDeltasOnce(t *testing.T) {
 	cfg := testConfig()
 	cfg.Stream = true
 	var output strings.Builder
-	cfg.EmitText = func(s string) error { output.WriteString(s); return nil }
+	cfg.Display = func(ev DisplayEvent) error {
+		if delta, ok := ev.(TextDelta); ok {
+			output.WriteString(delta.Text)
+		}
+		return nil
+	}
 	comp := &fakeStreamCompleter{steps: []streamStep{{
 		deltas: []string{"a", "b"},
 		resp:   model.Response{Text: "ab", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2}},
@@ -322,7 +327,12 @@ func TestRunnerStreamFallbackPrintsOnce(t *testing.T) {
 	cfg := testConfig()
 	cfg.Stream = true
 	var output strings.Builder
-	cfg.EmitText = func(s string) error { output.WriteString(s); return nil }
+	cfg.Display = func(ev DisplayEvent) error {
+		if delta, ok := ev.(TextDelta); ok {
+			output.WriteString(delta.Text)
+		}
+		return nil
+	}
 	comp := &fakeCompleter{steps: []scriptStep{{resp: model.Response{
 		Text: "plain", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 1},
 	}}}}
@@ -347,7 +357,12 @@ func TestRunnerRetriesOnlyBeforeFirstDelta(t *testing.T) {
 		cfg := testConfig()
 		cfg.Stream = true
 		var output strings.Builder
-		cfg.EmitText = func(s string) error { output.WriteString(s); return nil }
+		cfg.Display = func(ev DisplayEvent) error {
+			if delta, ok := ev.(TextDelta); ok {
+				output.WriteString(delta.Text)
+			}
+			return nil
+		}
 		comp := &fakeStreamCompleter{steps: []streamStep{
 			{err: &model.HTTPError{StatusCode: 429, Status: "429 Too Many Requests"}},
 			{deltas: []string{"ok"}, resp: model.Response{Text: "ok", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}}},
@@ -375,7 +390,12 @@ func TestRunnerRetriesOnlyBeforeFirstDelta(t *testing.T) {
 		cfg := testConfig()
 		cfg.Stream = true
 		var output strings.Builder
-		cfg.EmitText = func(s string) error { output.WriteString(s); return nil }
+		cfg.Display = func(ev DisplayEvent) error {
+			if delta, ok := ev.(TextDelta); ok {
+				output.WriteString(delta.Text)
+			}
+			return nil
+		}
 		comp := &fakeStreamCompleter{steps: []streamStep{{
 			deltas: []string{"partial"},
 			err:    &model.TransportError{Err: errors.New("connection reset")},
@@ -410,7 +430,12 @@ func TestRunnerRetriesOnlyBeforeFirstDelta(t *testing.T) {
 		cfg := testConfig()
 		cfg.Stream = true
 		var output strings.Builder
-		cfg.EmitText = func(s string) error { output.WriteString(s); return nil }
+		cfg.Display = func(ev DisplayEvent) error {
+			if delta, ok := ev.(TextDelta); ok {
+				output.WriteString(delta.Text)
+			}
+			return nil
+		}
 		comp := &fakeStreamCompleter{noPartial: true, steps: []streamStep{{
 			deltas: []string{"partial"},
 			err:    &model.TransportError{Err: errors.New("connection reset")},

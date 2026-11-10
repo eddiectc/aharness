@@ -3,8 +3,10 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -161,4 +163,105 @@ func (w *Workspace) resolveDir(rel string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(w.dir, rel), nil
+}
+
+// DisplayEntry is one sanitized directory entry exposed to the TUI file
+// picker.
+type DisplayEntry struct {
+	Name string
+	Dir  bool
+	Rel  string
+}
+
+// ListDisplayDir lists one workspace-relative directory for the TUI. It never
+// follows symlinks, never includes a .git component, reads no file contents,
+// and caps the entry count.
+func (w *Workspace) ListDisplayDir(rel string, limit int) ([]DisplayEntry, error) {
+	rel = filepath.Clean(rel)
+	if rel == "" {
+		rel = "."
+	}
+	if !filepath.IsLocal(rel) {
+		return nil, ErrOutsideWorkspace
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return nil, ErrGitProtected
+		}
+	}
+	info, err := w.root.Lstat(rel)
+	if err != nil {
+		return nil, fmt.Errorf("lstat %s: %w", rel, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%w: %s", errNotDir, rel)
+	}
+	f, err := w.root.Open(rel)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", rel, err)
+	}
+	defer f.Close() //nolint:errcheck
+	entries, err := f.ReadDir(limit)
+	if err != nil {
+		return nil, fmt.Errorf("read directory %s: %w", rel, err)
+	}
+	out := make([]DisplayEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Name() == ".git" {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		child := entry.Name()
+		if rel != "." {
+			child = filepath.Join(rel, entry.Name())
+		}
+		out = append(out, DisplayEntry{Name: entry.Name(), Dir: entry.IsDir(), Rel: child})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Dir != out[j].Dir {
+			return out[i].Dir
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+// ReadDisplayFile reads a workspace-contained regular file for display. It
+// rejects symlink components, .git components, non-regular files, and files
+// over max bytes. It is read-only and never creates or edits a path.
+func (w *Workspace) ReadDisplayFile(rel string, max int64) ([]byte, error) {
+	rel = filepath.Clean(rel)
+	if rel == "" || !filepath.IsLocal(rel) {
+		return nil, ErrOutsideWorkspace
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return nil, ErrGitProtected
+		}
+	}
+	info, err := w.lstatComponents(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s", errNotRegular, rel)
+	}
+	if info.Size() > max {
+		return nil, fmt.Errorf("%w: %s is %d bytes, limit %d", ErrTooLarge, rel, info.Size(), max)
+	}
+	f, err := w.root.Open(rel)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", rel, err)
+	}
+	defer f.Close() //nolint:errcheck
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", rel, err)
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, rel, max)
+	}
+	return data, nil
 }

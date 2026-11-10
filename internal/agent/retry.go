@@ -50,6 +50,9 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 
 	var lastErr error
 	for attempt := 1; attempt <= maxModelAttempts; attempt++ {
+		if err := r.emit(ModelStarted{Turn: turn, Attempt: attempt}); err != nil {
+			return completion{}, err
+		}
 		resp, latency, emitted, err := r.completeOnce(ctx, req)
 		if err == nil {
 			return completion{resp: resp, attempt: attempt, latency: latency, streamed: resp.Streamed, emitted: emitted}, nil
@@ -87,6 +90,10 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 		if err := r.record(session.TypeModelRetry, turn, "", payload); err != nil {
 			return completion{}, fmt.Errorf("%w: %w", errEventStore, err)
 		}
+		if err := r.notice(turn, NoticeRetry, fmt.Sprintf("model call attempt %d failed (%s %d); retrying in %s",
+			attempt, class, status, delay)); err != nil {
+			return completion{}, err
+		}
 		if r.cfg.Logger != nil {
 			r.cfg.Logger.Warn("retrying model call",
 				"attempt", attempt,
@@ -108,6 +115,9 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 func (r *Runner) callModelOnce(ctx context.Context, req model.Request, turn, estimatedInputTokens int) (completion, error) {
 	if err := r.recordModelRequest(req, turn, estimatedInputTokens); err != nil {
 		return completion{}, fmt.Errorf("%w: %w", errEventStore, err)
+	}
+	if err := r.emit(ModelStarted{Turn: turn, Attempt: 1}); err != nil {
+		return completion{}, err
 	}
 	resp, latency, emitted, err := r.completeOnce(ctx, req)
 	if err != nil {
@@ -134,7 +144,7 @@ func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Res
 					return nil
 				}
 				emitted = true
-				return r.emitText(delta)
+				return r.emit(TextDelta{Text: delta})
 			})
 			return resp, time.Since(start), emitted, err
 		}

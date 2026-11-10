@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-09
 - **Status:** normative for all Go code in this repository
-- **Toolchain:** Go 1.27.3; zero runtime dependencies
+- **Toolchain:** Go 1.27.3; stdlib-first, with the approved TUI exception
 - **Related:** [system architecture](architecture.md), [bare-minimum harness research](agent-harness-minimum.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
@@ -23,9 +23,13 @@ only with a recorded reason; **MAY** = optional.
 - The module is `aharness` for a local binary. Before publishing or installing
   from a URL, change the module to the repository import path (for example
   `git.sr.ht/~user/aharness`).
-- Runtime dependencies: **zero**. The standard library is the default answer.
-  A new runtime dependency MUST be justified in review against a stdlib
-  alternative.
+- Runtime dependencies: **stdlib by default**. The standard library is the
+  default answer; a new runtime dependency MUST be justified in review against
+  a stdlib alternative. The approved exception is the TUI stack in §3: Bubble
+  Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt` (plus
+  their direct support packages for color profiles, cell types, ANSI helpers,
+  and terminal detection). No dependency may be added outside that recorded
+  decision without a new review.
 - Development tools are not runtime dependencies: `goimports`/`gofmt`, `go vet`,
   `golangci-lint`, `govulncheck`. Pin them in CI; do not commit a `tool`
   directive unless the team explicitly chooses that tradeoff.
@@ -68,6 +72,20 @@ repository's package structure. The rules below apply to every package.
   a JSON Schema validator, a UUID library, a retry/backoff library,
   SQLite/ORM, a dependency-injection framework, or a generic worker-pool
   library.
+- The TUI exception is closed and scoped. Approved modules:
+  `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`,
+  `charm.land/lipgloss/v2`, `charm.land/glamour/v2`,
+  `github.com/NimbleMarkets/ntcharts/v2`, and `github.com/charmbracelet/x/vt`.
+  The TUI also directly imports their support packages
+  (`colorprofile`, `ultraviolet`, `x/ansi`) and `golang.org/x/term`. The
+  justification, alternatives, and risk are in
+  [tui-build.md §2.8](tui-build.md#28-package-layout-and-wiring); the
+  shipped caps and protocol are in [tui.md](tui.md). Do not add a second
+  application framework, a theme system, or another markdown/chart library.
+  Binary impact is measured and recorded: a `-trimpath` build grew from
+  11,671,823 bytes at the last stdlib-only v1 revision to 26,127,685 bytes
+  with the full TUI stack (+13.8 MiB, +124%), and `go list -m all` has 53
+  modules. Re-measure on dependency changes and record the result.
 - Test-only exception: `github.com/google/go-cmp` MAY be added if struct diffs
   become materially harder to read. It is the only sanctioned test dependency;
   do not add testify.

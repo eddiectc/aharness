@@ -56,10 +56,11 @@ type Config struct {
 
 	Interactive bool
 	Stream      bool
-	// EmitText receives assistant-text deltas and non-streamed response text
-	// when Stream is set. It is display-only and never transcript state.
-	EmitText func(string) error
-	// Steering delivers plain stdin lines consumed at turn boundaries. A nil
+	// Display receives display-only progress on the runner goroutine. It must
+	// not block, call the runner, or write the session log. A nil callback
+	// disables display events.
+	Display func(DisplayEvent) error
+	// Steering delivers TUI steering lines consumed at turn boundaries. A nil
 	// channel disables steering.
 	Steering <-chan string
 	// Controller registers the in-flight operation so an interactive first
@@ -153,9 +154,9 @@ type Projection struct {
 // ErrProjectionTooLarge means compaction could not fit the input budget.
 var ErrProjectionTooLarge = errors.New("projection exceeds input budget")
 
-// errStreamOutput marks a display write failure while streaming. It is an
-// internal failure, not a provider failure.
-var errStreamOutput = errors.New("stream output failed")
+// errDisplay marks a display-callback failure. It is an internal failure, not
+// a provider failure.
+var errDisplay = errors.New("display output failed")
 
 // completer, toolset, and eventStore are consumer-side interfaces for loop
 // tests. Production wires the concrete adapters, registry, and store.

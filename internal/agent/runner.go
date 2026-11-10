@@ -143,7 +143,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 
 	// Repair every unpaired call before the new run starts so the pairing
 	// invariant holds even after a crash.
-	if err := r.repairPending(state.Pending); err != nil {
+	repaired, err := r.repairPending(state.Pending)
+	if err != nil {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
@@ -158,6 +159,41 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
+	}
+	if err := r.emit(RunStarted{
+		Turn:           st.turns,
+		ResumedFromSeq: opts.ResumedFromSeq,
+		Model:          r.cfg.Model,
+		Dialect:        r.cfg.Dialect,
+	}); err != nil {
+		if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
+		res.Err = err
+		return r.finishResult(&res, st, StopInternalError, "failed to display the run start")
+	}
+	for _, call := range repaired {
+		if err := r.emit(ToolCompleted{
+			Turn:   call.Turn,
+			CallID: call.CallID,
+			Name:   call.Name,
+			OK:     false,
+			Code:   tools.CodeCanceled,
+			Error:  repairMessage,
+		}); err != nil {
+			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
+			res.Err = err
+			return r.finishResult(&res, st, StopInternalError, "failed to display a repaired tool result")
+		}
+		if err := r.notice(call.Turn, NoticeRepair, fmt.Sprintf("repaired unpaired tool call %s (%s) with a canceled result", call.CallID, call.Name)); err != nil {
+			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
+			res.Err = err
+			return r.finishResult(&res, st, StopInternalError, "failed to display a repair notice")
+		}
 	}
 
 	if opts.TaskSet {
@@ -218,8 +254,10 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 }
 
 // repairPending pairs unpaired tool calls with a canceled result before a new
-// run starts. The message does not claim the side effect did not happen.
-func (r *Runner) repairPending(pending []PendingCall) error {
+// run starts. The message does not claim the side effect did not happen. It
+// returns the repaired calls so the display can note them after the run
+// starts.
+func (r *Runner) repairPending(pending []PendingCall) ([]PendingCall, error) {
 	for _, call := range pending {
 		payload := toolResultData{
 			CallID: call.CallID,
@@ -229,10 +267,10 @@ func (r *Runner) repairPending(pending []PendingCall) error {
 			Error:  repairMessage,
 		}
 		if err := r.recordToolResult(call.Turn, payload); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return pending, nil
 }
 
 func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
@@ -342,14 +380,30 @@ func (r *Runner) beginOperation(ctx context.Context) (context.Context, func()) {
 	return r.cfg.Controller.BeginOperation(ctx)
 }
 
-func (r *Runner) emitText(text string) error {
-	if text == "" || r.cfg.EmitText == nil {
+// emit delivers one display-only event. A nil display callback is disabled.
+func (r *Runner) emit(ev DisplayEvent) error {
+	if r.cfg.Display == nil {
 		return nil
 	}
-	if err := r.cfg.EmitText(text); err != nil {
-		return fmt.Errorf("%w: %w", errStreamOutput, err)
+	if err := r.cfg.Display(sanitizeDisplayEvent(ev)); err != nil {
+		return fmt.Errorf("%w: %w", errDisplay, err)
 	}
 	return nil
+}
+
+// notice emits a capped display-only notice.
+func (r *Runner) notice(turn int, kind NoticeKind, text string) error {
+	return r.emit(Notice{Turn: turn, Kind: kind, Text: capText(text, maxErrorEventBytes)})
+}
+
+// failDisplay records a display failure when possible and makes it terminal.
+func (r *Runner) failDisplay(res *Result, st *runState, err error, action string) (bool, error) {
+	if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
+		res.Err = errors.Join(err, rerr)
+	} else {
+		res.Err = err
+	}
+	return r.finishTerminal(res, st, StopInternalError, action)
 }
 
 // executeTurn performs one model call and any resulting tool calls. It reports
@@ -372,13 +426,8 @@ func (r *Runner) executeTurn(ctx context.Context, res *Result, st *runState, pro
 			res.Err = err
 			return r.finishTerminal(res, st, StopInternalError, "failed to record a model event")
 		}
-		if errors.Is(err, errStreamOutput) {
-			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
-				res.Err = errors.Join(err, rerr)
-				return r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
-			}
-			res.Err = err
-			return r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
+		if errors.Is(err, errDisplay) {
+			return r.failDisplay(res, st, err, "failed to display model progress")
 		}
 		if ctx.Err() != nil {
 			return r.finishContext(res, st, ctx)
@@ -426,6 +475,9 @@ func (r *Runner) handleModelInterrupt(res *Result, st *runState, err error) (boo
 	if rerr := r.sync(); rerr != nil {
 		res.Err = rerr
 		return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
+	}
+	if rerr := r.notice(st.turns, NoticeInterrupt, "interrupted the model call before it completed"); rerr != nil {
+		return r.failDisplay(res, st, rerr, "failed to display a model interrupt")
 	}
 	if rerr := r.recordUserMessage(st.turns, interruptHint, sourceInterruptHint); rerr != nil {
 		res.Err = rerr
@@ -491,14 +543,8 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a model event")
 			return completion{}, done, ferr
 		}
-		if errors.Is(err, errStreamOutput) {
-			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
-				res.Err = errors.Join(err, rerr)
-				done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
-				return completion{}, done, ferr
-			}
-			res.Err = err
-			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
+		if errors.Is(err, errDisplay) {
+			done, ferr := r.failDisplay(res, st, err, "failed to display model progress")
 			return completion{}, done, ferr
 		}
 		if ctx.Err() != nil {
@@ -558,9 +604,27 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 		res.Err = errors.New(message)
 		return r.finishTerminal(res, st, StopProtocolError, message)
 	}
+	// A streamed response that produced no deltas is displayed once here,
+	// before the canonical ResponseCompleted event.
+	if r.cfg.Stream && !comp.emitted && comp.resp.Text != "" {
+		if err := r.emit(TextDelta{Text: comp.resp.Text}); err != nil {
+			return r.failDisplay(res, st, err, "failed to display the model response")
+		}
+	}
 	if err := r.recordResponse(comp, turn); err != nil {
 		res.Err = err
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the model response")
+	}
+	if err := r.emit(ResponseCompleted{
+		Turn:         turn,
+		Text:         cleanText(comp.resp.Text),
+		ToolCalls:    comp.resp.ToolCalls,
+		FinishReason: comp.resp.FinishReason,
+		Usage:        comp.resp.Usage,
+		Latency:      comp.latency,
+		Streamed:     comp.streamed,
+	}); err != nil {
+		return r.failDisplay(res, st, err, "failed to display the model response")
 	}
 	st.usage.InputTokens += comp.resp.Usage.InputTokens
 	st.usage.OutputTokens += comp.resp.Usage.OutputTokens
@@ -580,19 +644,6 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 			"streamed", comp.streamed,
 			"latency_ms", comp.latency.Milliseconds(),
 		)
-	}
-
-	// When streaming was requested, a response that produced no deltas is
-	// printed once here. A fallback non-streaming adapter lands in this path.
-	if r.cfg.Stream && !comp.emitted && comp.resp.Text != "" {
-		if err := r.emitText(comp.resp.Text); err != nil {
-			if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
-				res.Err = errors.Join(err, rerr)
-				return r.finishTerminal(res, st, StopInternalError, "failed to record a stream output error")
-			}
-			res.Err = err
-			return r.finishTerminal(res, st, StopInternalError, "failed to write streamed output")
-		}
 	}
 
 	if len(comp.resp.ToolCalls) == 0 {
@@ -669,6 +720,13 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			return r.finishContext(res, st, ctx)
 		}
 
+		if err := r.emit(ToolStarted{Turn: turn, Call: call}); err != nil {
+			if aerr := r.appendUnexecuted(calls[i:], turn, tools.CodeCanceled, "run canceled after a display failure"); aerr != nil {
+				err = errors.Join(err, aerr)
+			}
+			return r.failDisplay(res, st, err, "failed to display a tool start")
+		}
+
 		started := time.Now()
 		opCtx, finish := r.beginOperation(ctx)
 		result, panicked := safeExecute(opCtx, r.tools, call)
@@ -684,6 +742,9 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
 			}
 			r.logToolResult(call, result, payload)
+			if err := r.emit(toolCompletedEvent(turn, call, payload)); err != nil {
+				return r.failDisplay(res, st, err, "failed to display a tool result")
+			}
 			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeInternal, "tool call not executed after a recovered panic"); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
@@ -709,6 +770,12 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
 		}
 		r.logToolResult(call, result, payload)
+		if err := r.emit(toolCompletedEvent(turn, call, payload)); err != nil {
+			if aerr := r.appendUnexecuted(calls[i+1:], turn, tools.CodeCanceled, "run canceled after a display failure"); aerr != nil {
+				err = errors.Join(err, aerr)
+			}
+			return r.failDisplay(res, st, err, "failed to display a tool result")
+		}
 
 		if interrupted {
 			if err := r.record(session.TypeInterrupt, st.turns, "", interruptData{
@@ -723,6 +790,9 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			if err := r.sync(); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to sync the session log")
+			}
+			if err := r.notice(st.turns, NoticeInterrupt, fmt.Sprintf("interrupted tool call %s (%s)", call.ID, call.Name)); err != nil {
+				return r.failDisplay(res, st, err, "failed to display a tool interrupt")
 			}
 			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeCanceled, toolNotStartedMessage); err != nil {
 				res.Err = err
@@ -845,6 +915,11 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 		res.Err = errors.Join(res.Err, failures)
 		return *res, res.Err
 	}
+	// A RunFinished display failure is returned to the caller but does not
+	// rewrite the already-durable terminal status.
+	if err := r.emit(RunFinished{Result: *res, Reason: reason, Duration: time.Since(st.start)}); err != nil {
+		res.Err = errors.Join(res.Err, err)
+	}
 	return *res, res.Err
 }
 
@@ -868,13 +943,18 @@ func (r *Runner) record(typ session.EventType, turn int, role string, payload an
 }
 
 func (r *Runner) recordUserMessage(turn int, text, source string) error {
+	cappedText := capText(text, maxEventTextBytes)
+	cappedSource := capText(source, maxEventTextBytes)
 	if err := r.record(session.TypeUserMessage, turn, string(model.RoleUser), userMessageData{
-		Text:   capText(text, maxEventTextBytes),
-		Source: capText(source, maxEventTextBytes),
+		Text:   cappedText,
+		Source: cappedSource,
 	}); err != nil {
 		return err
 	}
-	return r.sync()
+	if err := r.sync(); err != nil {
+		return err
+	}
+	return r.emit(MessageRecorded{Turn: turn, Source: cappedSource, Text: cappedText})
 }
 
 func (r *Runner) recordToolResult(turn int, payload toolResultData) error {
@@ -892,16 +972,23 @@ func (r *Runner) sync() error {
 }
 
 func (r *Runner) recordLimit(turn int, kind string, configured, observed int64) error {
-	return r.record(session.TypeLimit, turn, "", limitData{Kind: kind, Configured: configured, Observed: observed})
+	if err := r.record(session.TypeLimit, turn, "", limitData{Kind: kind, Configured: configured, Observed: observed}); err != nil {
+		return err
+	}
+	return r.notice(turn, NoticeLimit, fmt.Sprintf("limit %s: configured %d, observed %d", kind, configured, observed))
 }
 
 func (r *Runner) recordCompaction(turn int, proj Projection, policy string) error {
-	return r.record(session.TypeCompaction, turn, "", compactionData{
+	if err := r.record(session.TypeCompaction, turn, "", compactionData{
 		BeforeTokens:  proj.BeforeTokens,
 		AfterTokens:   proj.AfterTokens,
 		ElidedResults: proj.ElidedResults,
 		Policy:        policy,
-	})
+	}); err != nil {
+		return err
+	}
+	return r.notice(turn, NoticeCompaction, fmt.Sprintf("context compacted (%s): %d -> %d tokens, %d tool results elided",
+		policy, proj.BeforeTokens, proj.AfterTokens, proj.ElidedResults))
 }
 
 func (r *Runner) recordError(turn int, class, message string) error {
@@ -909,12 +996,16 @@ func (r *Runner) recordError(turn int, class, message string) error {
 }
 
 func (r *Runner) recordErrorWithPartial(turn int, class, message, partial string, partialBytes int) error {
-	return r.record(session.TypeError, turn, "", errorData{
+	cappedMessage := capText(message, maxErrorEventBytes)
+	if err := r.record(session.TypeError, turn, "", errorData{
 		Class:        class,
-		Message:      capText(message, maxErrorEventBytes),
+		Message:      cappedMessage,
 		PartialText:  capText(partial, maxPartialTextBytes),
 		PartialBytes: partialBytes,
-	})
+	}); err != nil {
+		return err
+	}
+	return r.notice(turn, NoticeError, cappedMessage)
 }
 
 func (r *Runner) recordResponse(comp completion, turn int) error {
@@ -1007,6 +1098,26 @@ func toolResultEvent(call model.ToolCall, result tools.Result, duration time.Dur
 	}
 }
 
+func toolCompletedEvent(turn int, call model.ToolCall, payload toolResultData) ToolCompleted {
+	exitCode := 0
+	if payload.ExitCode != nil {
+		exitCode = *payload.ExitCode
+	}
+	return ToolCompleted{
+		Turn:      turn,
+		CallID:    payload.CallID,
+		Name:      payload.Name,
+		OK:        payload.OK,
+		Code:      payload.Code,
+		Output:    payload.Output,
+		Error:     payload.Error,
+		ExitCode:  exitCode,
+		Duration:  time.Duration(payload.DurationMS) * time.Millisecond,
+		TimedOut:  payload.TimedOut,
+		Truncated: payload.Truncated,
+	}
+}
+
 func (r *Runner) appendUnexecuted(calls []model.ToolCall, turn int, code tools.Code, message string) error {
 	for _, call := range calls {
 		payload := toolResultData{
@@ -1017,6 +1128,9 @@ func (r *Runner) appendUnexecuted(calls []model.ToolCall, turn int, code tools.C
 			Error:  message,
 		}
 		if err := r.recordToolResult(turn, payload); err != nil {
+			return err
+		}
+		if err := r.emit(toolCompletedEvent(turn, call, payload)); err != nil {
 			return err
 		}
 	}

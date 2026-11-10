@@ -1,6 +1,23 @@
 package main
 
-import "io"
+import (
+	"io"
+
+	"aharness/internal/agent"
+)
+
+// textDisplay adapts the runner display stream to the batch stdout sink. It
+// handles only assistant text deltas; every other event is ignored.
+func textDisplay(sink *textSink) func(agent.DisplayEvent) error {
+	return func(ev agent.DisplayEvent) error {
+		delta, ok := ev.(agent.TextDelta)
+		if !ok {
+			return nil
+		}
+		_, err := sink.Write([]byte(delta.Text))
+		return err
+	}
+}
 
 // textSink writes streamed assistant text and remembers whether a trailing
 // newline is needed. Streaming stdout carries text as it arrives; the final
