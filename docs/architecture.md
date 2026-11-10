@@ -31,8 +31,9 @@ the only persisted truth.
 ## 2. Provider and model
 
 v0 supports one provider, `opencode-go`, through two OpenAI wire dialects:
-Chat Completions and Responses. The initial models are `crouton-alpha-free` and
-`deepseek-v4.1-flash`; the model registry assigns each to one dialect. `-model`
+Chat Completions and Responses. The initial models are `crouton-alpha-free`,
+`deepseek-v4.1-flash`, and `muse-spark-1.3-contributor`; the model registry
+assigns each to one dialect. `-model`
 (or `AHARNESS_MODEL`) is required; there is no automatic fallback, routing, or
 provider matrix.
 
@@ -51,17 +52,24 @@ configuration or discover credentials implicitly.
 ### 2.1 Wire format and SDKs
 
 v0 ships two dialect adapters over plain HTTP against the same `opencode-go`
-base URL:
+base URL, `https://opencode.ai/inference/go/v1`:
 
 - **Chat Completions:** `POST <base>/chat/completions`.
 - **Responses:** `POST <base>/responses`.
 
-The model registry assigns each initial model to one dialect; the exact mapping
-is an open prerequisite. It is a small table in `cmd`, not user-configurable in
-v0. Anthropic and Gemini are deferred. If a model misbehaves through a dialect,
-fix that adapter or add its native dialect behind the same canonical model; do
-not change the loop. The wire dialect is not the internal schema; both adapters
-map into the canonical model (Section 2.2).
+The model registry maps each initial model to its documented OpenAI dialect:
+
+| Model | Dialect |
+|---|---|
+| `deepseek-v4.1-flash` | `openai-chat` |
+| `crouton-alpha-free` | `openai-responses` |
+| `muse-spark-1.3-contributor` | `openai-responses` |
+
+It is a small table in `cmd`, not user-configurable in v0. Anthropic and Gemini
+are deferred. If a model misbehaves through a dialect, fix that adapter or add
+its native dialect behind the same canonical model; do not change the loop. The
+wire dialect is not the internal schema; both adapters map into the canonical
+model (Section 2.2).
 
 Do not use an OpenCode SDK at this boundary. The published Go SDKs
 (`opencode-sdk-go` and its community forks) are generated clients for the
@@ -81,15 +89,19 @@ self-identifying `User-Agent: aharness/<version>`. An empty token omits the
 `Authorization` header, supporting local no-auth endpoints and tests. OpenCode
 Go requires the session header; the value is the run's UUIDv7 session ID. The
 base URL is a constructor argument so tests and local deployments can point the
-adapters at another OpenAI-compatible server; the v0 CLI keeps the hosted URL.
+adapters at another OpenAI-compatible server. The v0 CLI defaults to the hosted
+URL and exposes `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` for
+integration tests and local endpoints; this is the resolution of
+[v0-build.md §4.3 item 4](v0-build.md#43-prerequisites-and-resolutions). Production runs
+leave it at the default.
 
 Both adapters send the full projected input on every call and keep no
 server-side conversation state. The Responses adapter sets `store: false` and
-never uses `previous_response_id`. If its model requires reasoning items or
-encrypted content across tool rounds, that continuation is adapter-owned and
-remains an open v0 prerequisite
-([v0-build.md §4.3](v0-build.md#43-open-prerequisites)); the canonical model
-never carries raw provider shapes.
+never uses `previous_response_id`. If a future Responses model requires
+reasoning items or encrypted content across tool rounds, that continuation is
+adapter-owned; the v0 `muse-spark-1.3-contributor` smoke did not require one
+([v0-build.md §4.3](v0-build.md#43-prerequisites-and-resolutions)). The
+canonical model never carries raw provider shapes.
 
 ### 2.2 Canonical model and dialect adapters
 
@@ -140,8 +152,8 @@ Normalization rules:
   and context overflow); adapters map HTTP statuses and provider error bodies.
 - Both adapters replay the canonical projection; the Responses adapter sets
   `store: false` and never uses `previous_response_id`. A bounded
-  adapter-owned continuation for reasoning items is a v0 open prerequisite, not
-  a canonical message.
+  adapter-owned continuation for reasoning items remains a future-model
+  concern, not a canonical message; the v0 Responses smoke did not need one.
 
 Provider responses are decoded with `encoding/json/v2` defaults: duplicate
 object names and invalid UTF-8 are rejected and map to `protocol_error`; unknown
@@ -602,11 +614,16 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   `XDG_STATE_HOME`. The harness creates the directory with mode 0700 if needed;
   it must be writable, or start-up fails with exit 2.
 - `-model` or `AHARNESS_MODEL` is required. Accepted values:
-  `crouton-alpha-free`, `deepseek-v4.1-flash`. The provider is fixed to
-  `opencode-go` in v0. The model registry maps each accepted model ID to its
-  dialect (`openai-chat` or `openai-responses`); the selected dialect is
-  recorded in `session_start`. The exact mapping is an open prerequisite
-  ([v0-build.md §4.3](v0-build.md#43-open-prerequisites)).
+  `crouton-alpha-free`, `deepseek-v4.1-flash`, `muse-spark-1.3-contributor`.
+  The provider is fixed to `opencode-go` in v0. The model registry is fixed:
+  `crouton-alpha-free` and `muse-spark-1.3-contributor` use
+  `openai-responses`; `deepseek-v4.1-flash` uses `openai-chat`. The selected
+  dialect is recorded in `session_start`.
+- `-provider-base-url` defaults to `AHARNESS_PROVIDER_BASE_URL`, then the
+  hosted base URL (`https://opencode.ai/inference/go/v1`). It exists for
+  integration tests and local OpenAI-compatible endpoints; production runs
+  leave it at the default. Do not intercept the hosted URL with a proxy or a
+  hosts-file override.
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
   optional. When set, the selected adapter sends it as a Bearer token; when
   unset or empty, it omits `Authorization`, supporting local no-auth endpoints
@@ -614,7 +631,12 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   token as `provider_error` (401); local no-auth endpoints run without one.
   Never logged and never passed to tools. The adapter sends the run's session ID
   in the required `x-opencode-session` header and identifies itself as
-  `aharness/<version>` in `User-Agent` (Section 2.1).
+  `aharness/<version>` in `User-Agent` (Section 2.1). OpenCode documents
+  free-tier chat models as restricted to OpenCode clients; other clients
+  receive `403`. Use the Go Responses model
+  `muse-spark-1.3-contributor` for the Responses smoke; the workspace must
+  allow paid endpoints that train on request data
+  ([v0-build.md §4.3](v0-build.md#43-prerequisites-and-resolutions)).
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
 - `-max-turns`, `-max-total-tokens`, `-max-context-tokens`, `-session-timeout`,

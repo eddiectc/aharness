@@ -1,0 +1,62 @@
+package model
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+// ErrContextOverflow marks a provider rejection caused by an input that does
+// not fit the model context window.
+var ErrContextOverflow = errors.New("model context overflow")
+
+// HTTPError is a non-success HTTP response from a provider.
+type HTTPError struct {
+	StatusCode    int
+	Status        string
+	Body          string
+	RetryAfter    time.Duration
+	RetryAfterSet bool
+}
+
+func (e *HTTPError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("provider returned %s", e.Status)
+	}
+	return fmt.Sprintf("provider returned %s: %s", e.Status, e.Body)
+}
+
+// Retryable reports whether the response is a transient server or rate-limit
+// failure.
+func (e *HTTPError) Retryable() bool {
+	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
+// TransportError wraps a connection-level failure before a response arrives.
+type TransportError struct {
+	Err error
+}
+
+func (e *TransportError) Error() string { return "provider transport: " + e.Err.Error() }
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// ProtocolError wraps malformed or schema-invalid provider JSON.
+type ProtocolError struct {
+	Err error
+}
+
+func (e *ProtocolError) Error() string { return "provider protocol: " + e.Err.Error() }
+func (e *ProtocolError) Unwrap() error { return e.Err }
+
+// ContextOverflowError wraps the provider error that indicated context
+// overflow. It satisfies errors.Is(err, ErrContextOverflow).
+type ContextOverflowError struct {
+	Err error
+}
+
+func (e *ContextOverflowError) Error() string { return "provider context overflow: " + e.Err.Error() }
+func (e *ContextOverflowError) Unwrap() error { return e.Err }
+func (e *ContextOverflowError) Is(target error) bool {
+	return target == ErrContextOverflow
+}

@@ -3,7 +3,8 @@
 - **Date:** 2026-11-09
 - **Source:** [Bare-Minimum Agent Harness](agent-harness-minimum.md)
 - **Target:** Go 1.27.3, module `aharness` (see [`go.mod`](../go.mod))
-- **Status:** greenfield implementation plan
+- **Status:** v0 complete; both dialect smoke runs passed (2026-11-09 and
+  2026-11-10).
 - **Architecture:** [System architecture and contracts](architecture.md)
 - **Testing strategy:** [v0 testing strategy](testing-strategy.md)
 - **Definition of done:** [v0 definition of done](definition-of-done.md)
@@ -63,8 +64,8 @@ done](definition-of-done.md) is satisfied.
 |---|---|---|
 | **M0 — Foundation** | Five-package layout; config parsing in `cmd`; workspace policy in `tools`; session event types plus JSONL store using `encoding/json/v2` and `jsontext`; UUIDv7 session IDs; fake model; minimal single-turn runner path for the fake completer; CLI wiring; `-version`; signal handling; `.golangci.yml` with the standard's targeted linters. | `goimports -l .`, `go vet ./...`, `golangci-lint run`, `go test -race -count=1 ./...`, `mkdir -p bin && go build -trimpath -o bin/aharness ./cmd/aharness`, and `govulncheck ./...` pass. A scripted run injects a fake completer, writes a valid session log, and exits 0 without network access. |
 | **M1 — Loop and tools** | Runner with the tool loop and all terminal states; concrete tool registry and four tools; argument validation; `os.Root` containment plus symlink policy; result codes; pairing; sequential multi-call handling; repeated-failure stop based on codes; panic pairing then `internal_error`. | A scripted model reads, edits, searches, runs a command, and finishes. Unknown/invalid/timeout/panic cases each produce exactly one error result; a panic also stops with `internal_error`. Path traversal, absolute-path conversion, and symlink escapes are rejected; `.git` components are blocked. |
-| **M2 — Provider and context** | Two concrete dialect adapters — OpenAI Chat Completions and OpenAI Responses — over the shared `opencode-go` base URL; both initial models; required `x-opencode-session` and `User-Agent` headers; retry/backoff; token usage accounting; `agent.Project`; truncation; deterministic compaction; provider error mapping; strict duplicate-name/UTF-8 decoding with unknown response members ignored. | Mock-provider tests cover both dialects: 429→success, 401 fast-fail, malformed/duplicate-key/invalid-UTF-8 JSON, and context overflow→compaction. Both model IDs complete a tool-call round trip through their assigned adapter. A real model for each dialect completes a sample task with an explicit confirmed `-max-context-tokens`. A forced large history compacts below the limit and preserves pairing. |
-| **M3 — Hardening** | Process-group `Cancel`/`WaitDelay`; explicit environment allowlist with harness-owned `HOME`/`TMPDIR`; per-session work-directory cleanup on normal, error, and signal paths; UTF-8 sanitization; session durability; signal cleanup; secret sentinel tests; startup config logging; manual smoke procedure. | Kill/timeout tests pass. SIGTERM leaves no child process. Provider token is absent from child environments and logs. The log lands in the configured state directory with modes 0700/0600. A run that reaches a harness terminal path removes its per-session `<state>/work/<session-id>` subtree, unless cleanup fails and reports the leftover path; cleanup is tested on normal, error, and signal paths. A smoke run with each model completes the sample task and produces a usable trace. |
+| **M2 — Provider and context** | Two concrete dialect adapters — OpenAI Chat Completions and OpenAI Responses — over the shared `opencode-go` base URL; all initial models; required `x-opencode-session` and `User-Agent` headers; retry/backoff; token usage accounting; `agent.Project`; truncation; deterministic compaction; provider error mapping; strict duplicate-name/UTF-8 decoding with unknown response members ignored. | Mock-provider tests cover both dialects: 429→success, 401 fast-fail, malformed/duplicate-key/invalid-UTF-8 JSON, and context overflow→compaction. Every initial model ID completes a tool-call round trip through its assigned adapter. A real model for each dialect completes a sample task with an explicit confirmed `-max-context-tokens`. A forced large history compacts below the limit and preserves pairing. |
+| **M3 — Hardening** | Process-group `Cancel`/`WaitDelay`; explicit environment allowlist with harness-owned `HOME`/`TMPDIR`; per-session work-directory cleanup on normal, error, and signal paths; UTF-8 sanitization; session durability; signal cleanup; secret sentinel tests; startup config logging; manual smoke procedure. | Kill/timeout tests pass. SIGTERM leaves no child process. Provider token is absent from child environments and logs. The log lands in the configured state directory with modes 0700/0600. A run that reaches a harness terminal path removes its per-session `<state>/work/<session-id>` subtree, unless cleanup fails and reports the leftover path; cleanup is tested on normal, error, and signal paths. A smoke run for each implemented dialect completes the sample task and produces a usable trace. |
 
 Every milestone is gated by the coding standard's §8 checks; do not defer lint,
 vet, race, or vulnerability checks to M3. Run `go fix ./...` before review and
@@ -85,7 +86,7 @@ covers unit, integration, and manual smoke checks.
 | # | Decision | Rationale | Reversal risk |
 |---|---|---|---|
 | D1 | Go standard library only at runtime, including Go 1.27 `os.Root`, `uuid`, and `encoding/json/v2`; a test-only `go-cmp` exception is allowed by the coding standard. | Small, auditable, no dependency supply chain. | Low; concrete types and package boundaries isolate most code. |
-| D2 | One provider (`opencode-go`) with two dialect adapters — OpenAI Chat Completions and OpenAI Responses — and two initial models, each mapped to its dialect. | Each test model is exposed through its OpenAI dialect; sharing one base URL and canonical model avoids a provider matrix while proving the adapter boundary. | Medium; prompts/tool-call mapping are adapter-specific, but the loop sees only the canonical model. |
+| D2 | One provider (`opencode-go`) with two dialect adapters — OpenAI Chat Completions and OpenAI Responses — and three initial models, each mapped to its dialect. | Each test model is exposed through its OpenAI dialect; sharing one base URL and canonical model avoids a provider matrix while proving the adapter boundary. | Medium; prompts/tool-call mapping are adapter-specific, but the loop sees only the canonical model. |
 | D3 | Tools execute sequentially; no provider-side parallel guarantee. | Simpler correctness and deterministic logs; avoids concurrent writes. | Low; dispatcher can fan out later. |
 | D4 | Deterministic compaction only, no summarization model call. | Predictable, cheap, testable; satisfies Tier 1. | Low; summarization can replace a policy function later. |
 | D5 | No built-in isolation or approval. | The harness owns the loop, not the boundary; external isolation supplies it when needed. | High if built-in isolation is later required; it changes the process and tool contract. |
@@ -118,34 +119,41 @@ covers unit, integration, and manual smoke checks.
 | Child process outlives the harness. | Process groups, `Cancel`, and `WaitDelay` on timeout/signal; a deliberately backgrounded grandchild on normal exit MAY survive, so use external isolation for hard containment. |
 | Model context window is unknown. | Acceptance runs MUST set `-max-context-tokens` explicitly; the 200,000 default logs a warning until confirmed. |
 
-### 4.3 Open prerequisites
+### 4.3 Prerequisites and resolutions
 
-1. **Provider integration:** confirm the model-to-dialect mapping, the
-   Responses path on the hosted endpoint, that each dialect preserves tool
-   calls for its assigned model, and whether the endpoint requires auth and the
-   exact credential source behind `AHARNESS_PROVIDER_TOKEN`; local no-auth
-   endpoints may omit the token ([architecture.md §2.1](architecture.md)). The
-   dialects and headers are fixed there; the base URL is a constructor
-   argument. Do not add a provider SDK.
-2. **Model limits:** confirm the context window for `crouton-alpha-free` and
-   `deepseek-v4.1-flash`. Until confirmed, acceptance runs MUST set
+1. **Provider integration (resolved):**
+   The Go-specific gateway base is `https://opencode.ai/inference/go/v1`;
+   Chat Completions is `https://opencode.ai/inference/go/v1/chat/completions`
+   and Responses is `https://opencode.ai/inference/go/v1/responses`. The fixed
+   registry maps
+   `deepseek-v4.1-flash` to Chat Completions, and `crouton-alpha-free` and
+   `muse-spark-1.3-contributor` to Responses. Auth is a Bearer OpenCode Console
+   API key or Go subscription; free-tier chat models, including
+   `crouton-alpha-free`, are restricted to OpenCode clients and receive `403`
+   from other clients even with an API key. The Chat Completions tool-call
+   round trip was confirmed manually against `deepseek-v4.1-flash` on
+   2026-11-09; the Responses smoke passed with `muse-spark-1.3-contributor` on
+   2026-11-10. The Go Responses model requires the workspace privacy setting
+   that allows paid endpoints to train on request data. Do not add a provider
+   SDK.
+2. **Model limits:** OpenCode model metadata reports `deepseek-v4.1-flash` at
+   1,000,000 context and 384,000 output tokens, and
+   `muse-spark-1.3-contributor` at 1,048,576 context and 131,072 output tokens;
+   the `crouton-alpha-free` window is not published. Acceptance runs MUST set
    `-max-context-tokens` explicitly; the 200,000 default is provisional.
-3. **State directory:** confirm the XDG default is writable on the target
-   systems, or document the required `-state-dir`. An unwritable state directory
-   is a startup config error (exit 2).
-4. **Integration-test transport:** the testing strategy runs the built binary
-   against a fake `opencode-go` server, but the CLI keeps the hosted base URL
-   and each adapter's base URL is only a constructor argument. Settle this
-   before M0 freezes the CLI/config surface: either integration tests invoke
-   `cmd/aharness`'s `run` in-process, or the CLI exposes an explicit base-URL
-   override used by tests and local endpoints. Do not intercept the hosted URL
-   with a proxy or hosts-file override.
-5. **Responses continuation:** confirm whether the Responses model requires
-   reasoning items or encrypted content to be replayed across tool-call rounds
-   when `store:false`. If it does, choose a bounded adapter-owned continuation
-   carried alongside the canonical projection and persisted in the session log,
-   or server-side chaining with `previous_response_id`; do not drop reasoning
-   silently.
+3. **State directory (resolved):** the XDG default is writable on the target
+   system; the real smoke runs wrote session logs under
+   `$HOME/.local/state/aharness`. `-state-dir` remains the override. An
+   unwritable state directory is a startup config error (exit 2).
+4. **Integration-test transport (resolved):** the CLI exposes
+   `-provider-base-url` and `AHARNESS_PROVIDER_BASE_URL`, defaulting to the
+   hosted URL; the built-binary integration tests point it at a fake server.
+   Do not intercept the hosted URL with a proxy or hosts-file override.
+5. **Responses continuation (resolved for v0):** the
+   `muse-spark-1.3-contributor` smoke completed with `store:false` full replay
+   and no adapter-owned continuation. Revisit this check before accepting a
+   different Responses model that returns reasoning items requiring replay; do
+   not add raw provider shapes to the canonical model.
 
 ### 4.4 Assumptions expensive to reverse
 
@@ -153,8 +161,9 @@ The decisions above name the chosen design; D5 (no built-in isolation) is
 already the highest-cost reversal. This table names the remaining assumptions
 the plan inherits without deciding, where a late correction would cross a
 package, the persisted log, the CLI, or the tool/prompt contract. Provider
-dialect, auth, and model IDs are covered by §4.3; two rows repeat §4.3 items
-because their failure mode would change the log or test surface. The most
+dialect, auth, and model IDs are covered by §4.3; the Responses row is retained
+as a future-model check because its failure mode would change the log or test
+surface. The most
 expensive reversals are contracts that outlive the binary — the session log,
 the CLI surface, and the prompt/tool material — so confirm each before the
 milestone that freezes it.
@@ -162,14 +171,13 @@ milestone that freezes it.
 | Assumption | If it is false | Confirm by |
 |---|---|---|
 | v0 targets Unix-like hosts; `/bin/sh`, process groups, `SIGINT`/`SIGTERM`, and `//go:build unix` command handling are sufficient. | `run_command`, signal handling, and parts of path/search behavior need per-OS implementations; Windows remains unclaimed. | M0/M1, before the CLI contract freezes. |
-| Built-binary integration tests can redirect the adapters to a fake server while normal runs use the hosted URL. | The testing strategy's "build the binary and run it against a fake server" check cannot run; the test must move in-process or the CLI needs a test/local base-URL override. | M0 (§4.3 item 4). |
-| The Responses model accepts full input replay with `store:false` and does not require reasoning-item or encrypted-content continuation for tool rounds. | The adapter needs a continuation mechanism or server-side response chaining; the canonical request/response and session log contract change. | M2, with a real Responses call (§4.3 item 5). |
+| The Responses model accepts full input replay with `store:false` and does not require reasoning-item or encrypted-content continuation for tool rounds. | The adapter needs a continuation mechanism or server-side response chaining; the canonical request/response and session log contract change. | Confirmed for `muse-spark-1.3-contributor` (2026-11-10); revisit for other Responses models (§4.3 item 5). |
 | The CLI surface — flag and environment names, exit codes, the stdout/stderr split, and the state-directory/session-file layout — is a stable public contract from the first release. | Scripts, CI, and operational tooling break; renames need aliases and a migration period, and changed exit codes fail silently in automation. | M0, before the CLI/config surface freezes. |
 | The session envelope and tool result codes evolve additively within `v=1`: readers ignore unknown event types, fields, and codes, and old logs stay decodable. | Resume/fork or external consumers need a schema migration or `v` bump, and old traces cannot be replayed faithfully. | M0 for the envelope and reader tolerance; M1 for result codes. |
 | Session durability ends at turn boundaries: `Sync` at every turn and on exit, with a torn final line tolerated on read; a crash may lose events appended since the last `Sync` but never invalidates earlier lines. | Per-event fsync, checkpoints, or a write-ahead scheme becomes necessary; the store contract, write latency, and recovery rules change. | M0. |
 | Recorded prompt and toolset versions stay compiled into the binary, so a session log can be re-projected with the prompt and schemas it recorded. | Logs must embed the full prompt and schemas, or exact replay/resume is dropped or migrated; every prompt change adds permanent replay code. | M1/M2, before `prompt-v0` and `toolset-v0` are frozen. |
 | The four-tool set, its schemas, descriptions, and ACI behavior — including create-via-`edit_file`, no dedicated write/delete/move tool, and text-only completion with no `finish` tool — are versioned prompt material; changing them after fixtures exist invalidates behavioral baselines. | Toolset and prompt versions change; adapter fixtures and recorded traces must be regenerated, and prompt-quality comparisons lose their baseline. | M1/M2, before fixtures are recorded. |
-| The projection constants (`ceil(bytes/4)`, 8 tokens per message, 16 per tool schema, four verbatim turns, oldest-result-first elision) are conservative for both models and their real tokenizers. | Compaction either elides useful context too early or still overflows; the one-shot provider-overflow retry may not save the run. | M2 with provider-reported usage, then the smoke run. |
+| The projection constants (`ceil(bytes/4)`, 8 tokens per message, 16 per tool schema, four verbatim turns, oldest-result-first elision) are conservative for the models in use and their real tokenizers. | Compaction either elides useful context too early or still overflows; the one-shot provider-overflow retry may not save the run. | M2 with provider-reported usage, then the smoke run. |
 | `os.Root` plus same-directory temp-file/rename semantics cover every file-tool operation on the target filesystem. | Edit/write/search need OS-specific fallbacks or stronger containment checks, and the containment tests change. | M1. |
 | Secret handling is scoped to the provider token and transport headers; the harness does not detect arbitrary secrets in tool arguments, command output, or file contents before logging them. | A general secret-scrubbing contract changes the log's redaction policy, and already-written logs cannot be recalled. | M0 for the policy; M3 for the sentinel tests. |
 

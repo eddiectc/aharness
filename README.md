@@ -4,8 +4,9 @@ aharness is a small coding-agent harness written in Go. It takes one task, runs
 a bounded model/tool loop against a workspace, appends every event to a JSONL
 session log, and exits with a final answer or a typed stop reason.
 
-- **Status:** pre-v0. The documents in [`docs/`](docs) are the contract; there
-  is no runnable binary yet. Progress is tracked by the
+- **Status:** v0 complete. Both implemented dialects passed the real-provider
+  smoke: `deepseek-v4.1-flash` (Chat Completions) and
+  `muse-spark-1.3-contributor` (Responses). Progress is tracked by the
   [v0 build plan](docs/v0-build.md).
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** Go standard library only at runtime; see the
@@ -14,8 +15,9 @@ session log, and exits with a final answer or a typed stop reason.
 ## What v0 includes
 
 - One provider (`opencode-go`) behind a canonical model, with OpenAI Chat
-  Completions and Responses adapters, and the `crouton-alpha-free` and
-  `deepseek-v4.1-flash` models mapped to their dialects.
+  Completions and Responses adapters, and the `crouton-alpha-free`,
+  `deepseek-v4.1-flash`, and `muse-spark-1.3-contributor` models mapped to
+  their dialects.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only JSONL session log; the model input is a projection rebuilt
@@ -40,10 +42,9 @@ summarization, and built-in evals. See [v0 scope](docs/v0-build.md#1-scope).
 | [agent-harness-minimum.md](docs/agent-harness-minimum.md) | Research rationale and primary sources behind the design |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents working in this repository |
 
-## Build and run (planned for v0)
+## Build and run
 
 The CLI is specified in [architecture.md §9](docs/architecture.md#9-cli-and-configuration).
-Once the implementation lands:
 
 ```sh
 go build -trimpath -o bin/aharness ./cmd/aharness
@@ -54,10 +55,14 @@ export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
   -workspace /path/to/repo
 ```
 
+`make build` and `make test` wrap the same build and race-test commands.
+
 Exactly one of `-task` or `-task-file` is required, and `-model` (or
 `AHARNESS_MODEL`) is required. Session logs default to
 `$XDG_STATE_HOME/aharness` (or `~/.local/state/aharness`), outside the
-workspace; `-state-dir` overrides it.
+workspace; `-state-dir` overrides it. `-provider-base-url` (or
+`AHARNESS_PROVIDER_BASE_URL`) points the adapters at a fake or local
+OpenAI-compatible server; normal runs leave it at the hosted default.
 
 ## Isolation
 

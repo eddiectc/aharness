@@ -56,11 +56,13 @@ diagnostic, not a gate.
 ## 2. Integration tests
 
 - Build the binary and run it against a fake `opencode-go` server in a temp
-  workspace and temp state directory.
+  workspace and temp state directory. Point the binary at the fake server with
+  `-provider-base-url` or `AHARNESS_PROVIDER_BASE_URL`; the default remains the
+  hosted URL.
 - Assert the persisted log, stdout final text, stderr progress, exit code, and
   that the run removed `<state>/work/<session-id>`.
-- Exercise both model IDs through their assigned dialect path (Chat Completions
-  or Responses) and verify the adapter sends the selected model,
+- Exercise every accepted model ID through its assigned dialect path (Chat
+  Completions or Responses) and verify the adapter sends the selected model,
   `x-opencode-session`, and a self-identifying `User-Agent`; include a
   tool-call round trip for each dialect so translation quirks surface.
 - Cover 429→success, 401 fast-fail, malformed/duplicate-key/invalid-UTF-8 JSON,
@@ -75,9 +77,14 @@ diagnostic, not a gate.
 
 ## 3. Manual smoke
 
-Run the built binary against the real `opencode-go` provider with each model on a
-small temporary repository; set `AHARNESS_PROVIDER_TOKEN` if the endpoint
-requires auth, and set `-max-context-tokens` to the confirmed window. Verify one
+Run the built binary against the real `opencode-go` provider with each
+implemented dialect on a small temporary repository; set
+`AHARNESS_PROVIDER_TOKEN` if the endpoint
+requires auth, and set `-max-context-tokens` to the confirmed window. OpenCode
+currently restricts `crouton-alpha-free` to OpenCode clients; use
+`muse-spark-1.3-contributor` for the Responses smoke. It requires a Go
+subscription and the workspace privacy setting that allows paid endpoints to
+train on request data. Verify one
 read, one edit, one search, and one test command, inspect the raw session log,
 and confirm the run removed `<state>/work/<session-id>`. Optionally repeat the
 run inside an external sandbox to confirm the harness behaves the same with or
@@ -85,4 +92,7 @@ without isolation.
 
 This is a manual check, not a built-in eval suite. External benchmarking and
 eval infrastructure are out of scope for v0.
+
+The v0 smoke passed for `deepseek-v4.1-flash` (2026-11-09) and
+`muse-spark-1.3-contributor` (2026-11-10).
 
