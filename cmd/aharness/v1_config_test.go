@@ -165,8 +165,9 @@ func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
 	if cfg.BaseURL != v1OldBaseURL {
 		t.Fatalf("base URL = %q, want the recorded old base %q", cfg.BaseURL, v1OldBaseURL)
 	}
-	if cfg.MaxTurns != state.MaxTurns || cfg.MaxTotalTokens != state.MaxTotalTokens {
-		t.Fatalf("budgets = %d/%d", cfg.MaxTurns, cfg.MaxTotalTokens)
+	if cfg.MaxTurns != 0 || cfg.MaxTotalTokens != 0 || cfg.SessionTimeout != 0 || cfg.ModelTimeout != 0 {
+		t.Fatalf("run budgets = %d/%d/%s/%s, want all zero (recorded values are historical)",
+			cfg.MaxTurns, cfg.MaxTotalTokens, cfg.SessionTimeout, cfg.ModelTimeout)
 	}
 	if cfg.MaxContextTokens != 200_000 {
 		t.Fatalf("MaxContextTokens = %d, want 200000", cfg.MaxContextTokens)
@@ -182,9 +183,6 @@ func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
 	wantMargin := agent.SafetyMargin(200_000)
 	if cfg.Limits.SafetyMargin != wantMargin {
 		t.Fatalf("safety margin = %d, want %d", cfg.Limits.SafetyMargin, wantMargin)
-	}
-	if cfg.SessionTimeout != state.SessionTimeout || cfg.ModelTimeout != state.ModelTimeout {
-		t.Fatalf("timeouts = %s/%s", cfg.SessionTimeout, cfg.ModelTimeout)
 	}
 	if cfg.PromptVersion != agent.PromptVersion || cfg.ToolsetVersion != tools.Version {
 		t.Fatalf("versions = %q/%q", cfg.PromptVersion, cfg.ToolsetVersion)
@@ -343,7 +341,7 @@ func TestApplySessionDefaultsOverrides(t *testing.T) {
 		"-workspace", t.TempDir(),
 		"-provider-base-url", "http://override.example/v1",
 	}
-	args = append(args, "-max-turns", "200", "-max-total-tokens", "5000000", "-max-context-tokens", "120000", "-max-output-tokens", "4096", "-session-timeout", "2m")
+	args = append(args, "-max-turns", "200", "-max-total-tokens", "5000000", "-max-context-tokens", "120000", "-max-output-tokens", "4096", "-session-timeout", "2m", "-model-timeout", "3s")
 	cfg := cfgTestParseOK(t, args, nil)
 	cfg.ModelsDevURL = fake.URL()
 	source, err := newCatalogSource(cfg)
@@ -363,8 +361,8 @@ func TestApplySessionDefaultsOverrides(t *testing.T) {
 	if cfg.MaxTurns != 200 || cfg.MaxTotalTokens != 5_000_000 {
 		t.Fatalf("budgets = %d/%d", cfg.MaxTurns, cfg.MaxTotalTokens)
 	}
-	if cfg.MaxContextTokens != 120_000 || cfg.MaxOutputTokens != 4096 || cfg.SessionTimeout != 2*time.Minute {
-		t.Fatalf("context/output/timeout = %d/%d/%s", cfg.MaxContextTokens, cfg.MaxOutputTokens, cfg.SessionTimeout)
+	if cfg.MaxContextTokens != 120_000 || cfg.MaxOutputTokens != 4096 || cfg.SessionTimeout != 2*time.Minute || cfg.ModelTimeout != 3*time.Second {
+		t.Fatalf("context/output/timeouts = %d/%d/%s/%s", cfg.MaxContextTokens, cfg.MaxOutputTokens, cfg.SessionTimeout, cfg.ModelTimeout)
 	}
 	if cfg.Limits.MaxInputTokens != 114_000 {
 		t.Fatalf("MaxInputTokens = %d, want 114000", cfg.Limits.MaxInputTokens)
@@ -461,6 +459,10 @@ func TestValidateSessionRules(t *testing.T) {
 	state.LastRunStatus = agent.StopCompleted
 	state.Turns = 77
 	cfg = makeCfg(t, "-task", "continue")
+	if err := validateSessionRules(&cfg, state); err != nil {
+		t.Fatalf("recorded turn budget was enforced without a flag: %v", err)
+	}
+	cfg = makeCfg(t, "-task", "continue", "-max-turns", "77")
 	if err := validateSessionRules(&cfg, state); err == nil || !strings.Contains(err.Error(), "turn limit") {
 		t.Fatalf("turn limit error = %v", err)
 	}
@@ -472,6 +474,10 @@ func TestValidateSessionRules(t *testing.T) {
 	state = v1State()
 	state.Usage = model.Usage{InputTokens: 2_000_000, OutputTokens: 0}
 	cfg = makeCfg(t)
+	if err := validateSessionRules(&cfg, state); err != nil {
+		t.Fatalf("recorded token budget was enforced without a flag: %v", err)
+	}
+	cfg = makeCfg(t, "-max-total-tokens", "2000000")
 	if err := validateSessionRules(&cfg, state); err == nil || !strings.Contains(err.Error(), "token limit") {
 		t.Fatalf("token limit error = %v", err)
 	}

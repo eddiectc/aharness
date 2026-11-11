@@ -46,13 +46,18 @@ type Config struct {
 	ToolsetVersion string
 	HarnessVersion string
 
-	MaxTurns       int
+	// MaxTurns is the cumulative model-turn budget; 0 means unlimited.
+	MaxTurns int
+	// MaxTotalTokens is the cumulative input+output token budget; 0 means
+	// unlimited.
 	MaxTotalTokens int
 
-	Limits         Limits
+	Limits Limits
+	// SessionTimeout bounds one run's wall clock; 0 means no deadline.
 	SessionTimeout time.Duration
-	ModelTimeout   time.Duration
-	LogRequests    bool
+	// ModelTimeout bounds one model attempt; 0 means no harness deadline.
+	ModelTimeout time.Duration
+	LogRequests  bool
 
 	Interactive bool
 	Stream      bool

@@ -254,8 +254,8 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 		"trace:      " + detailsTrace(m),
 		"workspace:  " + SanitizeLine(m.info.Workspace),
 		"model:      " + SanitizeLine(m.info.Model) + " (" + SanitizeLine(m.info.Dialect) + ")",
-		"turns:      " + fmt.Sprintf("%d/%d", m.info.Turns, m.info.MaxTurns),
-		"tokens:     " + fmt.Sprintf("%d/%d", m.info.Usage.Total(), m.info.MaxTotalTokens),
+		"turns:      " + formatTurnBudget(m.info.Turns, m.info.MaxTurns),
+		"tokens:     " + formatTokenBudget(m.info.Usage.Total(), m.info.MaxTotalTokens),
 		"run:        " + fmt.Sprintf("%d", m.run.number),
 		"",
 		t.label.Render("terminal"),
@@ -282,7 +282,10 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 			"state dir:  "+SanitizeLine(d.StateDir),
 			"max ctx:    "+fmt.Sprintf("%d", d.MaxContextTokens),
 			"max output: "+maxOutput,
-			"timeouts:   "+fmt.Sprintf("run %s, model %s", d.SessionTimeout, d.ModelTimeout),
+			"max turns:  "+formatMaxTurns(m.info.MaxTurns),
+			"total tokens: "+formatMaxTokens(m.info.MaxTotalTokens),
+			"run timeout:  "+formatTimeout(d.SessionTimeout),
+			"model timeout: "+formatTimeout(d.ModelTimeout),
 		)
 	}
 	m.overlay.help = lines

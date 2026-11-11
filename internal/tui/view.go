@@ -134,8 +134,8 @@ func (m *App) headerLine() string {
 
 func (m *App) statusLine() string {
 	t := newTheme(m.noColor)
-	turns := fmt.Sprintf("turns %d/%d", m.info.Turns, m.info.MaxTurns)
-	tokens := fmt.Sprintf("tokens %s/%s", humanTokens(m.info.Usage.Total()), humanTokens(m.info.MaxTotalTokens))
+	turns := "turns " + formatTurnBudget(m.info.Turns, m.info.MaxTurns)
+	tokens := "tokens " + formatTokenBudget(m.info.Usage.Total(), m.info.MaxTotalTokens)
 	state := string(m.currentState())
 	renderMode := "rich"
 	if !m.rich {
@@ -429,6 +429,48 @@ func humanTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+}
+
+// formatTurnBudget renders cumulative turns with an explicit positive budget.
+// A zero budget means unlimited and omits the ratio.
+func formatTurnBudget(turns, maxTurns int) string {
+	if maxTurns > 0 {
+		return fmt.Sprintf("%d/%d", turns, maxTurns)
+	}
+	return fmt.Sprintf("%d", turns)
+}
+
+// formatTokenBudget renders cumulative tokens with an explicit positive budget.
+// A zero budget means unlimited and omits the ratio.
+func formatTokenBudget(used, maxTokens int) string {
+	if maxTokens > 0 {
+		return fmt.Sprintf("%s/%s", humanTokens(used), humanTokens(maxTokens))
+	}
+	return humanTokens(used)
+}
+
+// formatMaxTurns labels a configured cumulative turn budget.
+func formatMaxTurns(configured int) string {
+	if configured <= 0 {
+		return "unlimited"
+	}
+	return fmt.Sprintf("%d", configured)
+}
+
+// formatMaxTokens labels a configured cumulative token budget.
+func formatMaxTokens(configured int) string {
+	if configured <= 0 {
+		return "unlimited"
+	}
+	return humanTokens(configured)
+}
+
+// formatTimeout labels a configured per-run or per-call deadline.
+func formatTimeout(d time.Duration) string {
+	if d <= 0 {
+		return "none"
+	}
+	return d.String()
 }
 
 func formatElapsed(d time.Duration) string {

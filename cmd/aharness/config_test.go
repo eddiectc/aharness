@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"aharness/internal/agent"
@@ -145,17 +146,21 @@ func TestConfigDefaults(t *testing.T) {
 	if !cfg.modelSet {
 		t.Error("modelSet = false, want true for -model")
 	}
-	if cfg.MaxTurns != defaultMaxTurns {
-		t.Errorf("MaxTurns = %d, want %d", cfg.MaxTurns, defaultMaxTurns)
+	if cfg.MaxTurns != 0 {
+		t.Errorf("MaxTurns = %d, want 0 (unlimited)", cfg.MaxTurns)
 	}
-	if cfg.MaxTotalTokens != defaultMaxTotalTokens {
-		t.Errorf("MaxTotalTokens = %d, want %d", cfg.MaxTotalTokens, defaultMaxTotalTokens)
+	if cfg.MaxTotalTokens != 0 {
+		t.Errorf("MaxTotalTokens = %d, want 0 (unlimited)", cfg.MaxTotalTokens)
 	}
-	if cfg.SessionTimeout != defaultSessionTimeout {
-		t.Errorf("SessionTimeout = %s, want %s", cfg.SessionTimeout, defaultSessionTimeout)
+	if cfg.SessionTimeout != 0 {
+		t.Errorf("SessionTimeout = %s, want 0 (no deadline)", cfg.SessionTimeout)
 	}
-	if cfg.ModelTimeout != defaultModelTimeout {
-		t.Errorf("ModelTimeout = %s, want %s", cfg.ModelTimeout, defaultModelTimeout)
+	if cfg.ModelTimeout != 0 {
+		t.Errorf("ModelTimeout = %s, want 0 (no deadline)", cfg.ModelTimeout)
+	}
+	if cfg.maxTurnsSet || cfg.maxTotalTokensSet || cfg.sessionTimeoutSet || cfg.modelTimeoutSet {
+		t.Errorf("explicit budgets = turns %t tokens %t session %t model %t, want all false",
+			cfg.maxTurnsSet, cfg.maxTotalTokensSet, cfg.sessionTimeoutSet, cfg.modelTimeoutSet)
 	}
 	if cfg.LogRequests {
 		t.Error("LogRequests = true, want false")
@@ -746,15 +751,13 @@ func TestConfigValidation(t *testing.T) {
 		flag string
 		want string
 	}{
-		{"max turns zero", "-max-turns=0", "max turns"},
-		{"max turns negative", "-max-turns=-1", "max turns"},
-		{"max total tokens zero", "-max-total-tokens=0", "max total tokens"},
-		{"max total tokens negative", "-max-total-tokens=-1", "max total tokens"},
+		{"max turns negative", "-max-turns=-1", "max turns must not be negative"},
+		{"max total tokens negative", "-max-total-tokens=-1", "max total tokens must not be negative"},
 		{"max context tokens zero", "-max-context-tokens=0", "max context tokens"},
 		{"max context tokens negative", "-max-context-tokens=-1", "max context tokens"},
 		{"max output tokens negative", "-max-output-tokens=-1", "max output tokens"},
-		{"session timeout zero", "-session-timeout=0s", "session timeout"},
-		{"session timeout negative", "-session-timeout=-1s", "session timeout"},
+		{"session timeout negative", "-session-timeout=-1s", "session timeout must not be negative"},
+		{"model timeout negative", "-model-timeout=-1s", "model timeout must not be negative"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -764,6 +767,32 @@ func TestConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigRunBudgets(t *testing.T) {
+	t.Run("explicit zero is unlimited", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t,
+			"-max-turns=0", "-max-total-tokens=0", "-session-timeout=0s", "-model-timeout=0s"), nil)
+		if cfg.MaxTurns != 0 || cfg.MaxTotalTokens != 0 || cfg.SessionTimeout != 0 || cfg.ModelTimeout != 0 {
+			t.Fatalf("budgets = %d/%d/%s/%s, want all zero",
+				cfg.MaxTurns, cfg.MaxTotalTokens, cfg.SessionTimeout, cfg.ModelTimeout)
+		}
+		if !cfg.maxTurnsSet || !cfg.maxTotalTokensSet || !cfg.sessionTimeoutSet || !cfg.modelTimeoutSet {
+			t.Fatalf("explicit budgets = turns %t tokens %t session %t model %t, want all true",
+				cfg.maxTurnsSet, cfg.maxTotalTokensSet, cfg.sessionTimeoutSet, cfg.modelTimeoutSet)
+		}
+	})
+
+	t.Run("explicit positive values", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t,
+			"-max-turns=7", "-max-total-tokens=123456", "-session-timeout=2m", "-model-timeout=1500ms"), nil)
+		if cfg.MaxTurns != 7 || cfg.MaxTotalTokens != 123456 {
+			t.Fatalf("budgets = %d/%d, want 7/123456", cfg.MaxTurns, cfg.MaxTotalTokens)
+		}
+		if cfg.SessionTimeout != 2*time.Minute || cfg.ModelTimeout != 1500*time.Millisecond {
+			t.Fatalf("timeouts = %s/%s, want 2m0s/1.5s", cfg.SessionTimeout, cfg.ModelTimeout)
+		}
+	})
 }
 
 func TestConfigLimitBoundary(t *testing.T) {

@@ -445,9 +445,10 @@ schema version.
   known payloads are errors.
 - **Run model.** One process owns one session and one lock. Each submitted
   message while idle starts one run; `run_start.ResumedFromSeq` is the current
-  last sequence. Cumulative turns/tokens and the per-run clock follow v1; the
-  model/dialect are per-run and recorded in `run_start`. The model picker changes
-  only the next run.
+  last sequence. Cumulative turns/tokens and the per-run clock are tracked;
+  their budgets are enforced only when explicitly configured; the model/dialect
+  are per-run and recorded in `run_start`. The model picker changes only the
+  next run.
 - **Modes.** Terminal default is TUI; `-batch` forces the v1 one-shot CLI;
   `-ui-json` runs the same Bubble Tea program with fake input/output and an
   `x/vt` emulator. TTY/`TERM` checks run before session creation for the TUI.
@@ -467,8 +468,10 @@ schema version.
    requires exactly one task source and a model listed in the discovered
    catalog. A resume or fork resolves the session under `<state>/sessions`,
    validates the v2 log, inherits the recorded provider/model/dialect/base
-   URL/limits unless explicitly overridden, requires the workspace to match,
-   and enforces the task matrix and inherited cumulative limits. Resume/fork
+   URL/context/output values unless explicitly overridden, ignores the recorded
+   run budgets (`max_turns`, `max_total_tokens`, `session_timeout_ms`, and
+   `model_timeout_ms`), requires the workspace to match, and enforces the task
+   matrix plus only explicit positive turn/token flags. Resume/fork
    without an explicit model uses the recorded values and skips the catalog; an
    explicit model is resolved through the catalog, and an explicit provider
    that differs from the record is a config error. Config failures exit 2; a
@@ -486,12 +489,15 @@ schema version.
 3. Remove and recreate `<state>/work/<session-id>` before the run. A failure to
    clear a stale directory is a startup failure (exit 1), not a silent reuse.
 4. Append `run_start` with a UUIDv7 `run_id`, `resumed_from_seq`, effective
-   model/dialect/base URL/limits, prompt/toolset/harness versions, and
+   model/dialect/base URL/context/output values, the recorded run budgets
+   (`0` unless explicitly set), prompt/toolset/harness versions, and
    `interactive`/`stream`; sync. Append the task `user_message` when this run has
    one, with its source, and sync.
 5. Consume any already-pending steering lines as `user_message` events with
    `source=steer`, then check the cumulative turn/token budgets and the per-run
-   wall clock. A reached limit appends `limit` and terminates.
+   wall clock only when the corresponding flag is explicit and positive. A
+   reached explicit limit appends `limit` and terminates; otherwise those
+   budgets are unlimited.
 6. Rebuild the model input from the event log through `agent.Project`.
 7. Call the model with retries (Section 8). With `-stream`, use the adapter's
    `CompleteStream` and emit display-only deltas; otherwise use `Complete`. Each
@@ -518,8 +524,8 @@ schema version.
    with `internal_error`. A TUI tool interruption pairs the interrupted
    call and every unstarted call in that response with `code=canceled`, appends
    `interrupt`, and continues; the model sees the results.
-10. Increment the turn counter and repeat from step 5. Stop when a limit is
-    reached, a fatal error occurs, or the run is canceled.
+10. Increment the turn counter and repeat from step 5. Stop when an explicit
+    limit is reached, a fatal error occurs, or the run is canceled.
 11. On termination of an initialized run, emit exactly one `final` event with
     the terminal status and the last assistant text emitted in this run, if any,
     then append `run_end` with the run and cumulative turns/usage and the run
@@ -543,9 +549,9 @@ steering. `SIGINT` is the batch interruption mechanism; the TUI uses `Esc`,
 | Status | Meaning | Exit code |
 |---|---|---|
 | `completed` | Model returned a final message with no tool calls and a `stop`/absent finish reason. | 0 |
-| `max_turns` | Cumulative model-call limit reached (`turns >= max_turns`). | 2 |
-| `token_limit` | Cumulative token budget reached, repeated consecutive output-length truncation, or an unrecoverable context overflow. | 2 |
-| `time_limit` | Per-run wall-clock deadline reached. | 2 |
+| `max_turns` | Explicit positive `-max-turns` reached (`turns >= max_turns`). | 2 |
+| `token_limit` | Explicit positive `-max-total-tokens` reached, repeated consecutive output-length truncation, or an unrecoverable context overflow. | 2 |
+| `time_limit` | Explicit positive `-session-timeout` reached. A parent context deadline without an explicit flag also stops with `time_limit` but emits no `limit` event. | 2 |
 | `provider_error` | Non-retryable provider failure, content filter, or retries exhausted. | 3 |
 | `protocol_error` | Model response cannot be paired or parsed safely, including missing or duplicate tool-call IDs, malformed streams, missing usage, or an over-cap response. | 4 |
 | `stuck` | Repeated identical tool failures (same tool, canonical arguments, stable result code) crossed the threshold. | 4 |
@@ -555,7 +561,9 @@ steering. `SIGINT` is the batch interruption mechanism; the TUI uses `Esc`,
 Every terminal state of an initialized run emits exactly one `final` event with
 the status and the last assistant text emitted in that run, if any, followed by
 one `run_end` event with a human-readable reason, run and cumulative totals, and
-the run duration. v1 does not emit `session_end`. If the log write itself fails,
+the run duration. Terminal statuses recorded by older logs (`max_turns`,
+`time_limit`) remain decodable and renderable even when the current invocation
+sets no budget. v1 does not emit `session_end`. If the log write itself fails,
 the run exits `internal_error`; the harness does not claim durability.
 Pre-session config/usage failures exit 2 and produce no session events. A
 resumed or forked run's `final` event and stdout carry only that run's assistant
@@ -736,9 +744,10 @@ it on every turn. Compaction never mutates the log.
 - Model-based summarization is deferred. Dropping old tool output satisfies the
   source's Tier 1 requirement and is easier to reason about.
 - Cumulative totals include every model response's input and output tokens,
-  including retries. The session logs token usage; dollar-cost tracking is out
-  of scope. A 1,000,000-token context can consume the 2,000,000-token cumulative
-  budget in roughly two full-context calls.
+  including retries, and are recorded regardless of whether a budget is set.
+  The session logs token usage; dollar-cost tracking is out of scope. When
+  `-max-total-tokens` is explicit, a 1,000,000-token context can consume that
+  cumulative budget in roughly two full-context calls.
 
 ## 7. Session log
 
@@ -807,8 +816,8 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, limits, max turns/total tokens, timeouts, harness version, plus optional `parent_session`/`parent_seq`. |
-| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, limits, prompt/toolset/harness versions, `interactive`, `stream`. |
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, plus optional `parent_session`/`parent_seq`. |
+| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage, latency, attempt, `streamed`; 1 MiB total canonical content. |
@@ -945,10 +954,10 @@ empty token for local no-auth endpoints and tests (Section 2.1).
     eagerly; `-stream` is implied and `-stream=false` is a config error.
   - Batch new session: exactly one of `-task`/`-task-file`; `-model` required.
   - Batch `-resume`: at most one task source; a task is required if the last run
-    ended `completed`; model/workspace/limits are inherited unless explicitly
-    set.
-  - Batch `-fork`: exactly one task source; model/workspace/limits inherited
+    ended `completed`; model/workspace/context/output limits are inherited
     unless explicitly set.
+  - Batch `-fork`: exactly one task source; model/workspace/context/output
+    limits inherited unless explicitly set.
   - `-resume` and `-fork` are mutually exclusive.
   - Batch `-stream` without a task is allowed only with `-resume`.
 - `-workspace` defaults to `AHARNESS_WORKSPACE`, then the current directory for
@@ -980,14 +989,23 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   endpoints that train on request data.
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
-- `-max-turns`, `-max-total-tokens`, `-max-context-tokens`, `-session-timeout`,
-  and `-max-output-tokens` override defaults or inherited values. Validate
-  positive values where a zero is not the documented sentinel.
-  `AHARNESS_MAX_CONTEXT_TOKENS` sets the context window explicitly. For a new
-  session, context defaults to the catalog `limit.context`;
-  `-max-context-tokens` defaults to 0 (unset), an explicit positive value is
-  clamped down to the model ceiling with a warning, and an explicit zero or
-  negative value is a config error. The input cap is
+- `-max-turns`, `-max-total-tokens`, `-session-timeout`, `-model-timeout`,
+  `-max-context-tokens`, and `-max-output-tokens` are CLI flags. The four run
+  budgets and `-max-output-tokens` have no environment variable;
+  `-max-context-tokens` also honors `AHARNESS_MAX_CONTEXT_TOKENS`. The four run
+  budgets default to `0`: `-max-turns` and
+  `-max-total-tokens` are unlimited, and `-session-timeout`/`-model-timeout`
+  impose no deadline. An omitted flag or an explicit `0` is unlimited; an
+  explicit positive value enforces the existing check; a negative value is a
+  config error. Recorded run budgets are historical: resume/fork does not
+  inherit or enforce `max_turns`, `max_total_tokens`, `session_timeout_ms`, or
+  `model_timeout_ms`, and new `session_start`/`run_start` events record `0`
+  unless the corresponding flag is explicit. At-or-over session checks apply
+  only to an explicit positive turn/token flag. `AHARNESS_MAX_CONTEXT_TOKENS`
+  sets the context window explicitly. For a new session, context defaults to
+  the catalog `limit.context`; `-max-context-tokens` defaults to 0 (unset), an
+  explicit positive value is clamped down to the model ceiling with a warning,
+  and an explicit zero or negative value is a config error. The input cap is
   `min(model.limit.input, context - safety_margin)` when the catalog supplies an
   input limit, otherwise `context - safety_margin`. `-max-output-tokens`
   defaults to 0 (unset): the request omits `max_tokens` / `max_output_tokens`.
@@ -998,12 +1016,13 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   the requested value.
 - Prompt and toolset versions are selected from `session_start` and must be
   supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
-- Effective limits are inherited from the last run unless overridden. On
-  resume/fork, the recorded model/dialect/base URL/limits are used without a
-  catalog fetch unless the model is explicit. An explicit provider different
-  from the recorded provider is a config error. A resume or fork already at an
-  inherited turn/token limit fails at config validation unless that limit is
-  raised.
+- Effective context/output values and the recorded base URL are inherited from
+  the last run unless overridden. On resume/fork, the recorded
+  model/dialect/base URL/context/output values are used without a catalog fetch
+  unless the model is explicit. An explicit provider different from the
+  recorded provider is a config error. Recorded run budgets are not inherited:
+  an explicit positive `-max-turns` or `-max-total-tokens` on resume/fork fails
+  at config validation when the run is already at or over it.
 - Exit codes: `completed` 0, limits 2, provider 3, protocol/stuck 4,
   interrupted 130, internal 1. A missing/invalid/locked session, a workspace
   mismatch, an unsupported prompt/toolset version, a task-rule violation, an
@@ -1040,12 +1059,12 @@ Defaults are deliberately conservative and easy to change:
 | Catalog cache TTL | 24 hours |
 | Catalog request timeout | 15 seconds |
 | Catalog response body | 16 MiB |
-| Max turns | 30 |
+| Max turns | 0 (unlimited; `-max-turns`) |
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
 | Max output tokens per call | 0 (unset; the request field is omitted) |
-| Max total tokens | 2,000,000 |
-| Max run wall clock | 60 minutes |
-| Model call timeout | 300 seconds |
+| Max total tokens | 0 (unlimited; `-max-total-tokens`) |
+| Max run wall clock | 0 (none; `-session-timeout`) |
+| Model call timeout | 0 (none; `-model-timeout`) |
 | `run_command` timeout | 120 seconds (max 600) |
 | Tool result cap | 32 KiB file tools; 64 KiB command output |
 | `read_file` window | 100 lines (max 500) |

@@ -101,6 +101,11 @@ func TestInspectReconstructsCumulativeStateAndPending(t *testing.T) {
 	if state.LastEventSeq != 6 || state.PromptVersion != PromptVersion || state.ToolsetVersion != tools.Version {
 		t.Fatalf("state = %+v", state)
 	}
+	if state.MaxTurns != 10 || state.MaxTotalTokens != 1_000_000 ||
+		state.SessionTimeout != time.Hour || state.ModelTimeout != 10*time.Second {
+		t.Fatalf("recorded budgets = %d/%d/%s/%s, want the historical values",
+			state.MaxTurns, state.MaxTotalTokens, state.SessionTimeout, state.ModelTimeout)
+	}
 }
 
 func TestInspectCrashHasNoEndedRun(t *testing.T) {

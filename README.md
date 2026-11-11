@@ -1,8 +1,10 @@
 # aharness
 
 aharness is a small coding-agent harness written in Go. It takes one task, runs
-a bounded model/tool loop against a workspace, appends every event to a JSONL
-session log, and exits with a final answer or a typed stop reason.
+a model/tool loop against a workspace, appends every event to a JSONL session
+log, and exits with a final answer or a typed stop reason. The loop is bounded
+by the model context window, termination policies, and errors; run budgets are
+opt-in and unlimited by default.
 
 - **Status:** v1 implementation complete (M0–M3), the post-v1 TUI
   (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented, and
@@ -51,8 +53,9 @@ session log, and exits with a final answer or a typed stop reason.
 - `Esc` interrupts only the in-flight operation, the first `Ctrl-C` does the
   same, the second cancels the run, and `Ctrl-D` quits. `SIGTERM`/`SIGHUP`
   cancel, write terminal events, restore the terminal, and exit 130.
-- Explicit cumulative turn/token budgets, a per-run wall clock, context
-  projection with deterministic compaction, and typed stop reasons.
+- Opt-in cumulative turn/token budgets, an optional per-run wall clock and
+  per-call model timeout, context projection with deterministic compaction, and
+  typed stop reasons. Run budgets default to unlimited (no deadline).
 - One binary configured by flags and environment; no daemon, config file, or
   provider matrix.
 
@@ -73,7 +76,7 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [v1-build.md](docs/v1-build.md) | v1 scope, contract deltas, milestones, decisions, and costly-to-reverse assumptions |
 | [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
 | [model-discovery-build.md](docs/model-discovery-build.md) | Implemented `-provider` and opencode-go model/limit/dialect discovery from models.dev; catalog cache, revalidation, refresh, and listing |
-| [limits-removal-build.md](docs/limits-removal-build.md) | Planned removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
+| [limits-removal-build.md](docs/limits-removal-build.md) | Implemented removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
@@ -134,7 +137,8 @@ cap from models.dev, with the normalized catalog cached at
 `AHARNESS_PROVIDER_BASE_URL`) overrides the discovered base URL and can point
 the adapters at a fake or local OpenAI-compatible server; normal runs use the
 catalog URL. Resume/fork inherit the recorded provider, model, dialect, base
-URL, and limits without a catalog fetch; an explicit model change re-resolves
+URL, and context/output limits without a catalog fetch; recorded run budgets
+are historical and are not inherited. An explicit model change re-resolves
 through the catalog.
 
 ## Isolation

@@ -311,14 +311,15 @@ func (r *Runner) currentLimits(st *runState) Limits {
 func (r *Runner) checkLimits(ctx context.Context, st *runState) (StopReason, string, error) {
 	if err := ctx.Err(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			configured := int64(0)
+			reason := "context deadline reached"
 			if r.cfg.SessionTimeout > 0 {
-				configured = r.cfg.SessionTimeout.Milliseconds()
+				observed := time.Since(st.start)
+				if rerr := r.recordLimit(st.turns, limitSessionTimeout, r.cfg.SessionTimeout.Milliseconds(), observed.Milliseconds()); rerr != nil {
+					return StopInternalError, "", rerr
+				}
+				reason = fmt.Sprintf("session deadline reached (-session-timeout %s, elapsed %s)", r.cfg.SessionTimeout, observed.Round(time.Millisecond))
 			}
-			if rerr := r.recordLimit(st.turns, limitSessionTimeout, configured, time.Since(st.start).Milliseconds()); rerr != nil {
-				return StopInternalError, "", rerr
-			}
-			return StopTimeLimit, "session deadline reached", nil
+			return StopTimeLimit, reason, nil
 		}
 		return StopInterrupted, "interrupted by signal", nil
 	}
@@ -326,20 +327,20 @@ func (r *Runner) checkLimits(ctx context.Context, st *runState) (StopReason, str
 		if err := r.recordLimit(st.turns, limitMaxTurns, int64(r.cfg.MaxTurns), int64(st.turns)); err != nil {
 			return StopInternalError, "", err
 		}
-		return StopMaxTurns, fmt.Sprintf("turn limit reached (%d)", r.cfg.MaxTurns), nil
+		return StopMaxTurns, fmt.Sprintf("turn limit reached (-max-turns %d, turns %d)", r.cfg.MaxTurns, st.turns), nil
 	}
 	if r.cfg.SessionTimeout > 0 && time.Since(st.start) >= r.cfg.SessionTimeout {
-		observed := time.Since(st.start).Milliseconds()
-		if err := r.recordLimit(st.turns, limitSessionTimeout, r.cfg.SessionTimeout.Milliseconds(), observed); err != nil {
+		observed := time.Since(st.start)
+		if err := r.recordLimit(st.turns, limitSessionTimeout, r.cfg.SessionTimeout.Milliseconds(), observed.Milliseconds()); err != nil {
 			return StopInternalError, "", err
 		}
-		return StopTimeLimit, "session deadline reached", nil
+		return StopTimeLimit, fmt.Sprintf("session deadline reached (-session-timeout %s, elapsed %s)", r.cfg.SessionTimeout, observed.Round(time.Millisecond)), nil
 	}
 	if r.cfg.MaxTotalTokens > 0 && st.usage.Total() >= r.cfg.MaxTotalTokens {
 		if err := r.recordLimit(st.turns, limitMaxTotalTokens, int64(r.cfg.MaxTotalTokens), int64(st.usage.Total())); err != nil {
 			return StopInternalError, "", err
 		}
-		return StopTokenLimit, "total token budget reached", nil
+		return StopTokenLimit, fmt.Sprintf("total token budget reached (-max-total-tokens %d, tokens %d)", r.cfg.MaxTotalTokens, st.usage.Total()), nil
 	}
 	return "", "", nil
 }
@@ -863,16 +864,17 @@ func (r *Runner) finishContext(res *Result, st *runState, ctx context.Context) (
 	cerr := ctx.Err()
 	switch {
 	case errors.Is(cerr, context.DeadlineExceeded):
-		configured := int64(0)
+		reason := "context deadline reached"
 		if r.cfg.SessionTimeout > 0 {
-			configured = r.cfg.SessionTimeout.Milliseconds()
+			observed := time.Since(st.start)
+			if err := r.recordLimit(st.turns, limitSessionTimeout, r.cfg.SessionTimeout.Milliseconds(), observed.Milliseconds()); err != nil {
+				res.Err = err
+				done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a limit event")
+				return done, ferr
+			}
+			reason = fmt.Sprintf("session deadline reached (-session-timeout %s, elapsed %s)", r.cfg.SessionTimeout, observed.Round(time.Millisecond))
 		}
-		if err := r.recordLimit(st.turns, limitSessionTimeout, configured, time.Since(st.start).Milliseconds()); err != nil {
-			res.Err = err
-			done, ferr := r.finishTerminal(res, st, StopInternalError, "failed to record a limit event")
-			return done, ferr
-		}
-		done, err := r.finishTerminal(res, st, StopTimeLimit, "session deadline reached")
+		done, err := r.finishTerminal(res, st, StopTimeLimit, reason)
 		return done, err
 	case errors.Is(cerr, context.Canceled):
 		done, err := r.finishTerminal(res, st, StopInterrupted, "interrupted by signal")

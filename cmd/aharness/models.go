@@ -297,18 +297,8 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 	if err := validateBaseURL(cfg.BaseURL); err != nil {
 		return err
 	}
-	if !cfg.maxTurnsSet && state.MaxTurns > 0 {
-		cfg.MaxTurns = state.MaxTurns
-	}
-	if !cfg.maxTotalTokensSet && state.MaxTotalTokens > 0 {
-		cfg.MaxTotalTokens = state.MaxTotalTokens
-	}
-	if !cfg.sessionTimeoutSet && state.SessionTimeout > 0 {
-		cfg.SessionTimeout = state.SessionTimeout
-	}
-	if state.ModelTimeout > 0 {
-		cfg.ModelTimeout = state.ModelTimeout
-	}
+	// Recorded run budgets are historical metadata. Only explicit flags
+	// configure the new run; an omitted flag means unlimited.
 	// An unset output flag inherits the recorded budget, including 0 (no
 	// harness cap). An explicit 0 clears an inherited budget.
 	if !cfg.maxOutputSet {

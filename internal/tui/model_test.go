@@ -565,6 +565,92 @@ func TestDetailsOverlayOutputBudget(t *testing.T) {
 	}
 }
 
+func TestStatusLineUnlimitedBudgets(t *testing.T) {
+	host := newManualHost()
+	host.info.MaxTurns = 0
+	host.info.MaxTotalTokens = 0
+	host.info.Turns = 31
+	host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+	app := newTestApp(t, host)
+	line := app.statusLine()
+	if !strings.Contains(line, "turns 31") || strings.Contains(line, "turns 31/") {
+		t.Fatalf("status turns = %q, want an unlimited count", line)
+	}
+	if !strings.Contains(line, "tokens 2.1M") || strings.Contains(line, "tokens 2.1M/") {
+		t.Fatalf("status tokens = %q, want an unlimited count", line)
+	}
+}
+
+func TestStatusLineExplicitBudgets(t *testing.T) {
+	host := newManualHost()
+	host.info.Turns = 31
+	host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+	app := newTestApp(t, host)
+	line := app.statusLine()
+	if !strings.Contains(line, "turns 31/30") {
+		t.Fatalf("status = %q, want the turn ratio", line)
+	}
+	if !strings.Contains(line, "tokens 2.1M/2.0M") {
+		t.Fatalf("status = %q, want the token ratio", line)
+	}
+}
+
+func TestDetailsOverlayRunBudgets(t *testing.T) {
+	t.Run("unlimited", func(t *testing.T) {
+		host := newManualHost()
+		host.info.MaxTurns = 0
+		host.info.MaxTotalTokens = 0
+		host.info.Turns = 31
+		host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+		details := &detailsHost{manualHost: host, details: Details{Provider: "opencode-go", MaxContextTokens: 200_000}}
+		app := newTestApp(t, details)
+		press(t, app, "ctrl+x")
+		text := strings.Join(app.overlay.help, "\n")
+		for _, want := range []string{
+			"turns:      31",
+			"tokens:     2.1M",
+			"max turns:  unlimited",
+			"total tokens: unlimited",
+			"run timeout:  none",
+			"model timeout: none",
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("details missing %q:\n%s", want, text)
+			}
+		}
+		if strings.Contains(text, "31/0") || strings.Contains(text, "2.1M/0") {
+			t.Fatalf("details contain a zero ratio:\n%s", text)
+		}
+	})
+
+	t.Run("explicit", func(t *testing.T) {
+		host := newManualHost()
+		host.info.Turns = 31
+		host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+		details := &detailsHost{manualHost: host, details: Details{
+			Provider:         "opencode-go",
+			MaxContextTokens: 200_000,
+			SessionTimeout:   13 * time.Minute,
+			ModelTimeout:     42 * time.Second,
+		}}
+		app := newTestApp(t, details)
+		press(t, app, "ctrl+x")
+		text := strings.Join(app.overlay.help, "\n")
+		for _, want := range []string{
+			"turns:      31/30",
+			"tokens:     2.1M/2.0M",
+			"max turns:  30",
+			"total tokens: 2.0M",
+			"run timeout:  13m0s",
+			"model timeout: 42s",
+		} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("details missing %q:\n%s", want, text)
+			}
+		}
+	})
+}
+
 func TestCtrlROutsideModelPickerTogglesRendering(t *testing.T) {
 	host := &refreshingHost{manualHost: newManualHost()}
 	app, _ := newTestAppWithEvents(t, host)

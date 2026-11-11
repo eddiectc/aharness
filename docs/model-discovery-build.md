@@ -394,8 +394,9 @@ Let `context` be the effective context window and
   `context - margin`. The output budget is not subtracted.
 - Reject the model/configuration when `input <= 0`.
 - `CompactionTarget` remains the input cap.
-- The cumulative `-max-turns`, `-max-total-tokens`, `-session-timeout`, and
-  `-model-timeout` values are unchanged.
+- Run-budget defaults and replay semantics are owned by
+  [limits-removal-build.md](limits-removal-build.md): turns, total tokens, run
+  wall clock, and the model-call timeout are opt-in and unlimited by default.
 
 The output budget is intentionally unset by default. A fixed default (8,192 in
 v1) is an artificial cap: reaching it produces a `length` response, and the
@@ -773,10 +774,10 @@ Add or change these rows in [limits.md](limits.md):
 | TUI catalog refresh | `Ctrl-R` in the model picker; idle only; no `-ui-json` protocol version change. |
 
 Remove the provisional 200,000 context default and its warning for new
-sessions. Existing sessions keep their recorded limits; new sessions use the
-catalog. Keep the cumulative turn/token and wall-clock budgets unchanged, and
-note that a 1,000,000-token context can consume the 2,000,000-token budget
-quickly.
+sessions. Existing sessions keep their recorded context/output values and base
+URL; new sessions use the catalog. Run-budget defaults and replay semantics are
+owned by [limits-removal-build.md](limits-removal-build.md): the turn, token,
+and wall-clock budgets are opt-in and unlimited by default.
 
 ## 8. Risks and assumptions
 
@@ -804,12 +805,15 @@ quickly.
   harness reports `length` and context-overflow outcomes through the existing
   continuation and compaction-retry paths. Operators who want a fixed budget
   pass `-max-output-tokens`; the harness does not synthesize one.
-- **Uncapped output can consume the run budget quickly.** Long responses count
-  against the cumulative 2M-token budget and the wall clock; the existing run
-  budgets still bound a runaway model.
-- **The cumulative token budget may bind earlier.** A 1M-context model can
-  consume the 2M budget in roughly two full-context calls. This plan leaves the
-  budget unchanged; acceptance runs should set it explicitly.
+- **Uncapped output can consume an explicit run budget quickly.** Long
+  responses count against the cumulative token budget and wall clock only when
+  those flags are set; by default the run is unbounded, so the operator owns
+  cost and latency.
+- **An explicit cumulative token budget may bind earlier.** A 1M-context model
+  can consume a 2M explicit budget in roughly two full-context calls. The
+  opt-in default and replay semantics belong to
+  [limits-removal-build.md](limits-removal-build.md); acceptance runs should set
+  the budget explicitly.
 - **Host allowlist maintenance.** If OpenCode changes the inference host, the
   discovered base URL validation must be updated with the docs.
 - **Catalog size.** `api.json` was 5.8 MiB on 2026-11-10; the 16 MiB cap leaves

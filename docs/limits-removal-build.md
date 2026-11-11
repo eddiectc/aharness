@@ -1,9 +1,9 @@
 # aharness default run-limit removal build plan
 
 - **Date:** 2026-11-11
-- **Status:** proposed; implementation not started. This document is normative
-  for the unbounded-run contract until implementation updates the architecture,
-  limits, testing strategy, and TUI docs.
+- **Status:** implemented (2026-11-11). The architecture, limits, testing
+  strategy, and TUI docs now describe the unbounded-run contract; §11 records
+  the implementation deviations from this plan.
 - **Source:** the shipped v1 run budgets and the output-cap decision in
   [model-discovery-build.md](model-discovery-build.md) §3.4.
 - **Target:** Go 1.27.3, module `aharness`.
@@ -80,28 +80,28 @@
 
 ### 1.4 Definition of done
 
-- [ ] Defaults are `0` for max turns, max total tokens, session timeout, and
+- [x] Defaults are `0` for max turns, max total tokens, session timeout, and
       model timeout; no run is stopped by those budgets unless a flag is
       explicit.
-- [ ] Explicit positive values still enforce the existing checks and emit the
+- [x] Explicit positive values still enforce the existing checks and emit the
       existing `limit`/stop statuses; `0` or an omitted flag is unlimited;
       negative values are config errors.
-- [ ] Resume/fork of a log with recorded `30`/`2,000,000`/`60m`/`300s` does not
+- [x] Resume/fork of a log with recorded `30`/`2,000,000`/`60m`/`300s` does not
       inherit those budgets; the new `run_start` records `0` unless a flag is
       explicit.
-- [ ] A default run can exceed 30 turns and 2,000,000 cumulative tokens and has
+- [x] A default run can exceed 30 turns and 2,000,000 cumulative tokens and has
       no harness wall-clock or per-call deadline. It still stops on completion,
       error, interruption, context-fit failure, repeated truncation, or stuck
       detection.
-- [ ] The TUI shows unlimited values without `0/0` ratios and the details
+- [x] The TUI shows unlimited values without `0/0` ratios and the details
       overlay distinguishes `unlimited` from an explicit budget.
-- [ ] `session_start`/`run_start` remain v2 and record `0` for unlimited; old
+- [x] `session_start`/`run_start` remain v2 and record `0` for unlimited; old
       logs decode, and old `max_turns`/`time_limit` terminal states still
       render.
-- [ ] Context compaction, safety margin, retries, and stuck detection are
+- [x] Context compaction, safety margin, retries, and stuck detection are
       unchanged and covered by tests.
-- [ ] Unit, integration, fuzz, race, build, lint, and vulnerability gates pass.
-- [ ] README, architecture, limits, testing-strategy, and TUI docs are updated.
+- [x] Unit, integration, fuzz, race, build, lint, and vulnerability gates pass.
+- [x] README, architecture, limits, testing-strategy, and TUI docs are updated.
 
 ## 2. Current state
 
@@ -394,3 +394,23 @@ recorded run budgets on old logs are historical and are not re-enforced.
   milestone/date and any deviations.
 - `docs/model-discovery-build.md`: cross-reference this plan for the run-budget
   boundary if both are revised together.
+
+## 11. Implementation deviations
+
+The plan landed as written except for the following; the contract above remains
+the record.
+
+- **Runner guards needed no rewrite.** `internal/agent/runner.go` already
+  guarded the turn/token budgets, the run deadline, and the model deadline with
+  `> 0`. Implementation only verified those guards and retained the
+  explicit-budget paths.
+- **Parent-context deadline without `-session-timeout`.** When the run context
+  carries a deadline from its parent but no explicit `-session-timeout` is set,
+  the run still terminates with `time_limit`; it emits no `limit` event because
+  no configured budget was crossed. With an explicit timeout, the existing
+  `session_timeout` limit event is emitted.
+- **TUI details layout.** The overlay shows the observed `turns: N` and
+  `tokens: <human>` under the session block and the configured labels
+  `max turns: unlimited`, `total tokens: unlimited`, `run timeout: none`, and
+  `model timeout: none` under configuration, rather than mixing observed and
+  configured values in one row.

@@ -163,13 +163,3 @@ func SupportsPrompt(version string) bool { return version == PromptVersion }
 
 // SupportsToolset reports whether this binary can replay a toolset version.
 func SupportsToolset(version string) bool { return version == tools.Version }
-
-// MaxTurnsReached reports whether the cumulative state is already at or beyond
-// an inherited turn limit.
-func (s State) MaxTurnsReached() bool { return s.MaxTurns > 0 && s.Turns >= s.MaxTurns }
-
-// TokenBudgetReached reports whether the cumulative state is already at or
-// beyond an inherited token budget.
-func (s State) TokenBudgetReached() bool {
-	return s.MaxTotalTokens > 0 && s.Usage.Total() >= s.MaxTotalTokens
-}

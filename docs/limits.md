@@ -9,16 +9,16 @@
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
 tokens, or durations as noted. A value of **—** means the limit does not exist.
-"No separate cap" means the value is bounded only by an enclosing limit (the
-session deadline, the session line cap, disk, or process memory), not by its
-own constant.
+"No separate cap" means the value is bounded only by an enclosing limit (an
+explicit session deadline, the session line cap, disk, or process memory), not
+by its own constant.
 
 ## 1. Session budgets and timeouts
 
 | Limit | v1 value | Behavior |
 |---|---|---|
-| Max turns | 30 | Checked before each model call; counts successful model responses. Resume reconstructs it from the log; cumulative across runs. |
-| Max total tokens | 2,000,000 | Cumulative over the session; resume reconstructs it from the log. A retry that succeeds counts once. A 1,000,000-token context can consume this budget in roughly two full-context calls. |
+| Max turns | 0 (unlimited) | Opt-in `-max-turns`. When explicit and positive, checked before each model call; counts successful model responses. Resume reconstructs cumulative turns from the log but does not inherit the budget. |
+| Max total tokens | 0 (unlimited) | Opt-in `-max-total-tokens`. When explicit and positive, cumulative over the session; a retry that succeeds counts once. Recorded budgets are historical and are not inherited. |
 | Max context tokens | Catalog `limit.context` | Per call. `-max-context-tokens` defaults to 0 (unset); an explicit positive value is clamped down to the model ceiling with a warning. |
 | Max output tokens | Unset (0) | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is invalid. |
 | Advertised output ceiling | Catalog `limit.output` | Display/validation metadata only; never a request budget and never an eligibility gate. |
@@ -35,10 +35,10 @@ own constant.
 | Catalog cache version | 1 | A version mismatch or corrupt entry is ignored and treated as absent. |
 | Model ID | at most 256 bytes | Valid UTF-8 with no control characters; used only as a JSON value/map key, never a path. |
 | Discovered base URL | HTTPS `opencode.ai` | Host must be `opencode.ai` with no userinfo, query, or fragment; an explicit `-provider-base-url` wins. |
-| Session wall clock | 60 minutes | Per run; checked before each turn. Resume starts a fresh clock. |
-| Model call timeout | 300 seconds | Per call; fixed, not a CLI flag. |
+| Session wall clock | 0 (none) | Opt-in `-session-timeout`; per run, checked before each turn. `0` or an omitted flag imposes no deadline; a parent context deadline may still stop the run. |
+| Model call timeout | 0 (none) | Opt-in `-model-timeout`; per model attempt. `0` or an omitted flag imposes no harness deadline; the HTTP client timeout remains the outer network bound. |
 | HTTP client timeout | 5 minutes | Outer bound on a provider request, including body reads. |
-| Transport attempts | 5 total (initial + 4 retries) | 429, 5xx, transport failures, and a per-call timeout while the run context is alive. |
+| Transport attempts | 5 total (initial + 4 retries) | 429, 5xx, transport failures, and an explicit `-model-timeout` expiry while the run context is alive. |
 | Retry backoff | 1s base, 30s max, 25% jitter | Context-aware sleep. |
 | `Retry-After` cap | 60 seconds | Longer values are clamped. |
 | Streaming retry | only before the first display delta | A retry after output would duplicate stdout and could duplicate tool calls. |
@@ -50,9 +50,11 @@ own constant.
 | Token estimate | `ceil(bytes/4) + 8/message + 16/tool schema` | Conservative; provider usage is authoritative for totals. |
 
 Existing sessions keep their recorded context, output, and base URL values;
-new sessions use the catalog. The cumulative turn/token and wall-clock budgets
-are unchanged, so a 1,000,000-token context can consume the 2,000,000-token
-budget quickly.
+new sessions use the catalog. Recorded `max_turns`, `max_total_tokens`,
+`session_timeout_ms`, and `model_timeout_ms` are historical metadata and are
+not inherited on resume/fork; only an explicit positive flag enforces a run
+budget. When `-max-total-tokens` is explicit, a 1,000,000-token context can
+consume that cumulative budget quickly.
 
 ## 2. Provider transport and streaming
 
@@ -128,8 +130,8 @@ Other event payloads:
 | `run_command` | Process group | whole group killed | On timeout, cancellation, or interactive interrupt. |
 | `run_command` | stdin | nil | Commands cannot wait for interactive input. |
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, harness `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
-| File tools | Per-call timeout | no separate cap | Bounded by the run deadline and file/result caps. |
-| `search` | Walk time | no separate cap | Bounded by the run deadline and result cap. |
+| File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
+| `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration
@@ -139,12 +141,12 @@ Other event payloads:
 | `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
 | `-list-models` | off | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS` and exits; no session, task, or token. No separate output cap; bounded by the catalog size. |
 | `-refresh-models` | off | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |
-| `-max-turns` | 30 | Must be positive; cumulative. |
-| `-max-total-tokens` | 2,000,000 | Must be positive; cumulative. |
+| `-max-turns` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
+| `-max-total-tokens` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
 | `-max-context-tokens` | 0 (unset) | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
 | `-max-output-tokens` | 0 (unset) | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
-| `-session-timeout` | 60 minutes | Must be positive; per run. |
-| Model call timeout | 300 seconds | Fixed; no CLI flag. |
+| `-session-timeout` | 0 (none) | Per run when explicit and positive; `0`/omitted no deadline; negative is a config error. |
+| `-model-timeout` | 0 (none) | Per model attempt when explicit and positive; `0`/omitted no harness deadline; negative is a config error. |
 | `-task` / `-task-file` | no read cap | Effective transcript text is 64 KiB. |
 | Steering message | 64 KiB | TUI composer submission while a run is active. |
 | Session selection | UUIDv7 ID | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
@@ -198,12 +200,14 @@ constant:
 
 - Total session log size and total state-directory size.
 - `-task`/`-task-file` read size; the transcript truncates at 64 KiB.
-- Search walk time and file-tool execution time; the run deadline applies.
+- Search walk time and file-tool execution time; any explicit run deadline
+  applies.
 - Command length, `old_string`/`new_string` length, and search pattern/glob
   length; these are indirectly bounded by the model-response cap and tool
   result caps.
 - Number of tool calls per response; bounded by the response cap.
-- Number of events per session; bounded by turn, token, and time budgets.
+- Number of events per session; bounded by the turn, token, and time budgets
+  only when those explicit flags are set.
 - Number of concurrent sessions; one process per session, no global cap.
 - Child process memory and CPU; external isolation is the boundary.
 - Workspace size; file tools enforce their own file-size caps.

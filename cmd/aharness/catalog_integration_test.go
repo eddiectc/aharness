@@ -27,19 +27,27 @@ type recordedLimits struct {
 }
 
 type recordedSessionStart struct {
-	Provider string         `json:"provider"`
-	Dialect  string         `json:"dialect"`
-	Model    string         `json:"model"`
-	BaseURL  string         `json:"base_url"`
-	Limits   recordedLimits `json:"limits"`
+	Provider         string         `json:"provider"`
+	Dialect          string         `json:"dialect"`
+	Model            string         `json:"model"`
+	BaseURL          string         `json:"base_url"`
+	Limits           recordedLimits `json:"limits"`
+	MaxTurns         int            `json:"max_turns"`
+	MaxTotalTokens   int            `json:"max_total_tokens"`
+	SessionTimeoutMS int64          `json:"session_timeout_ms"`
+	ModelTimeoutMS   int64          `json:"model_timeout_ms"`
 }
 
 type recordedRunStart struct {
-	Provider string         `json:"provider"`
-	Dialect  string         `json:"dialect"`
-	Model    string         `json:"model"`
-	BaseURL  string         `json:"base_url"`
-	Limits   recordedLimits `json:"limits"`
+	Provider         string         `json:"provider"`
+	Dialect          string         `json:"dialect"`
+	Model            string         `json:"model"`
+	BaseURL          string         `json:"base_url"`
+	Limits           recordedLimits `json:"limits"`
+	MaxTurns         int            `json:"max_turns"`
+	MaxTotalTokens   int            `json:"max_total_tokens"`
+	SessionTimeoutMS int64          `json:"session_timeout_ms"`
+	ModelTimeoutMS   int64          `json:"model_timeout_ms"`
 }
 
 // recordedSession decodes the session_start and every run_start payload.

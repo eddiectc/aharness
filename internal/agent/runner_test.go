@@ -208,6 +208,10 @@ func TestRunMaxTurns(t *testing.T) {
 	}
 	assertExactlyOne(t, store, session.TypeFinal)
 	assertExactlyOne(t, store, session.TypeRunEnd)
+	end := decodePayload[runEndData](t, eventsByType(store, session.TypeRunEnd)[0])
+	if !strings.Contains(end.Reason, "-max-turns 2") || !strings.Contains(end.Reason, "turns 2") {
+		t.Fatalf("run_end reason = %q, want the flag and observed turn", end.Reason)
+	}
 }
 
 func TestRunTotalTokenLimit(t *testing.T) {
@@ -232,6 +236,87 @@ func TestRunTotalTokenLimit(t *testing.T) {
 	data := decodePayload[limitData](t, limits[0])
 	if data.Kind != limitMaxTotalTokens || data.Configured != 10 || data.Observed != 12 {
 		t.Fatalf("limit = %+v", data)
+	}
+	assertExactlyOne(t, store, session.TypeRunEnd)
+	end := decodePayload[runEndData](t, eventsByType(store, session.TypeRunEnd)[0])
+	if !strings.Contains(end.Reason, "-max-total-tokens 10") || !strings.Contains(end.Reason, "tokens 12") {
+		t.Fatalf("run_end reason = %q, want the flag and observed tokens", end.Reason)
+	}
+}
+
+func TestRunUnlimitedBudgetsExceedOldDefaults(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxTurns = 0
+	cfg.MaxTotalTokens = 0
+	cfg.SessionTimeout = 0
+	cfg.ModelTimeout = 0
+
+	var steps []scriptStep
+	for i := range 31 {
+		steps = append(steps, scriptStep{resp: model.Response{
+			ToolCalls:    []model.ToolCall{toolCall(fmt.Sprintf("call_%d", i), "read_file", `{}`)},
+			FinishReason: model.FinishToolCalls,
+			Usage:        model.Usage{InputTokens: 70_000},
+		}})
+	}
+	steps = append(steps, scriptStep{resp: model.Response{
+		Text:         "done",
+		FinishReason: model.FinishStop,
+	}})
+
+	comp := &fakeCompleter{steps: steps}
+	store, res, err := runTask(t, cfg, comp, &fakeToolset{})
+	if err != nil {
+		t.Fatalf("Run error = %v, want nil", err)
+	}
+	if res.Status != StopCompleted || res.CumulativeTurns != 32 {
+		t.Fatalf("result = %+v, want a completed 32-turn run", res)
+	}
+	if res.CumulativeUsage.Total() <= 2_000_000 {
+		t.Fatalf("cumulative usage = %d, want more than the old 2,000,000 budget", res.CumulativeUsage.Total())
+	}
+	if comp.calls != 32 {
+		t.Fatalf("model calls = %d, want 32", comp.calls)
+	}
+	if got := countEvents(store, session.TypeLimit); got != 0 {
+		t.Fatalf("limit events = %d, want none", got)
+	}
+	starts := eventsByType(store, session.TypeRunStart)
+	if len(starts) != 1 {
+		t.Fatalf("run_start events = %d, want 1", len(starts))
+	}
+	start := decodePayload[runStartData](t, starts[0])
+	if start.MaxTurns != 0 || start.MaxTotalTokens != 0 || start.SessionTimeoutMS != 0 || start.ModelTimeoutMS != 0 {
+		t.Fatalf("run_start budgets = %d/%d/%d/%d, want zeros",
+			start.MaxTurns, start.MaxTotalTokens, start.SessionTimeoutMS, start.ModelTimeoutMS)
+	}
+	assertExactlyOne(t, store, session.TypeFinal)
+	assertExactlyOne(t, store, session.TypeRunEnd)
+}
+
+type deadlineProbe struct {
+	hadDeadline bool
+}
+
+func (p *deadlineProbe) Complete(ctx context.Context, _ model.Request) (model.Response, error) {
+	_, p.hadDeadline = ctx.Deadline()
+	return model.Response{Text: "done", FinishReason: model.FinishStop}, nil
+}
+
+func TestRunModelTimeoutZeroHasNoDeadline(t *testing.T) {
+	cfg := testConfig()
+	cfg.SessionTimeout = 0
+	cfg.ModelTimeout = 0
+	probe := &deadlineProbe{}
+	_, res, err := runTask(t, cfg, probe, &fakeToolset{})
+	if err != nil {
+		t.Fatalf("Run error = %v, want nil", err)
+	}
+	if probe.hadDeadline {
+		t.Fatal("model call received a harness deadline with -model-timeout=0")
+	}
+	if res.Status != StopCompleted {
+		t.Fatalf("status = %q, want %q", res.Status, StopCompleted)
 	}
 }
 
@@ -615,6 +700,10 @@ func TestRunSessionTimeoutMapsToTimeLimit(t *testing.T) {
 		}
 		assertExactlyOne(t, store, session.TypeFinal)
 		assertExactlyOne(t, store, session.TypeRunEnd)
+		end := decodePayload[runEndData](t, eventsByType(store, session.TypeRunEnd)[0])
+		if !strings.Contains(end.Reason, "-session-timeout 5s") {
+			t.Fatalf("run_end reason = %q, want the flag", end.Reason)
+		}
 	})
 }
 
@@ -628,6 +717,38 @@ func TestRunParentDeadlineMapsToTimeLimit(t *testing.T) {
 		runner := newRunner(cfg, comp, &fakeToolset{}, store)
 		startTestSession(t, runner)
 		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		outcome := make(chan runOutcome, 1)
+		go func() {
+			res, err := runner.Run(ctx, defaultRunOptions())
+			outcome <- runOutcome{res: res, err: err}
+		}()
+		got := <-outcome
+		if got.err != nil {
+			t.Fatalf("Run error = %v, want nil", got.err)
+		}
+		if got.res.Status != StopTimeLimit {
+			t.Fatalf("status = %q, want %q", got.res.Status, StopTimeLimit)
+		}
+		limits := eventsByType(store, session.TypeLimit)
+		if len(limits) != 0 {
+			t.Fatalf("limit events = %d, want none without an explicit budget", len(limits))
+		}
+		assertExactlyOne(t, store, session.TypeFinal)
+		assertExactlyOne(t, store, session.TypeRunEnd)
+	})
+}
+
+func TestRunParentDeadlineExplicitSessionTimeoutEvents(t *testing.T) {
+	synctestTest(t, func(t *testing.T) {
+		cfg := testConfig()
+		cfg.SessionTimeout = 5 * time.Second
+		cfg.ModelTimeout = 0
+		comp := &fakeCompleter{steps: []scriptStep{{blockOnContext: true}}}
+		store := &fakeStore{}
+		runner := newRunner(cfg, comp, &fakeToolset{}, store)
+		startTestSession(t, runner)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 		outcome := make(chan runOutcome, 1)
 		go func() {

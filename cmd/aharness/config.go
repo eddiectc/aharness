@@ -21,10 +21,12 @@ import (
 const (
 	providerName = "opencode-go"
 
-	defaultMaxTurns       = 30
-	defaultMaxTotalTokens = 2_000_000
-	defaultSessionTimeout = 60 * time.Minute
-	defaultModelTimeout   = 300 * time.Second
+	// Run budgets default to unlimited. A zero value disables the
+	// corresponding check; each flag accepts an explicit positive budget.
+	defaultMaxTurns       = 0
+	defaultMaxTotalTokens = 0
+	defaultSessionTimeout = time.Duration(0)
+	defaultModelTimeout   = time.Duration(0)
 
 	defaultUISizeWidth  = 100
 	defaultUISizeHeight = 30
@@ -103,6 +105,7 @@ type config struct {
 	maxContextValue   int
 	maxOutputSet      bool
 	sessionTimeoutSet bool
+	modelTimeoutSet   bool
 }
 
 // envSettings is the environment layer of the flag defaults. It is parsed
@@ -193,6 +196,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxContextTokens int
 		maxOutputTokens  int
 		sessionTimeout   time.Duration
+		modelTimeout     time.Duration
 		providerBaseURL  string
 		showVersion      bool
 	)
@@ -214,10 +218,11 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.BoolVar(&uiJSON, "ui-json", false, "run the TUI headlessly with the versioned JSONL protocol")
 	fs.StringVar(&uiSize, "ui-size", fmt.Sprintf("%dx%d", defaultUISizeWidth, defaultUISizeHeight), "initial -ui-json frame size (WxH, 20x5-500x200)")
 	fs.BoolVar(&stream, "stream", false, "stream assistant text in batch mode (implied in TUI modes)")
-	fs.IntVar(&maxTurns, "max-turns", defaultMaxTurns, "maximum cumulative model turns")
-	fs.IntVar(&maxTotalTokens, "max-total-tokens", defaultMaxTotalTokens, "cumulative token budget")
+	fs.IntVar(&maxTurns, "max-turns", defaultMaxTurns, "maximum cumulative model turns (0: unlimited; negative is invalid)")
+	fs.IntVar(&maxTotalTokens, "max-total-tokens", defaultMaxTotalTokens, "cumulative token budget (0: unlimited; negative is invalid)")
 	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window (0: use the model catalog)")
-	fs.DurationVar(&sessionTimeout, "session-timeout", defaultSessionTimeout, "per-run wall-clock timeout")
+	fs.DurationVar(&sessionTimeout, "session-timeout", defaultSessionTimeout, "per-run wall-clock timeout (0: no deadline; negative is invalid)")
+	fs.DurationVar(&modelTimeout, "model-timeout", defaultModelTimeout, "per-model-call harness timeout (0: no deadline; negative is invalid)")
 	fs.IntVar(&maxOutputTokens, "max-output-tokens", 0, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
@@ -320,7 +325,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		MaxOutputTokens:   maxOutputTokens,
 		ModelsDevURL:      env.modelsDevURL,
 		SessionTimeout:    sessionTimeout,
-		ModelTimeout:      defaultModelTimeout,
+		ModelTimeout:      modelTimeout,
 		LogRequests:       env.logRequests,
 		ResumeID:          resumeID,
 		ForkID:            forkID,
@@ -342,6 +347,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxContextSet:     env.maxContextSet || visited["max-context-tokens"],
 		maxOutputSet:      visited["max-output-tokens"],
 		sessionTimeoutSet: visited["session-timeout"],
+		modelTimeoutSet:   visited["model-timeout"],
 	}
 	if cfg.maxContextSet {
 		cfg.maxContextValue = maxContextTokens
@@ -596,13 +602,14 @@ func validateBaseURL(raw string) error {
 }
 
 // validateExplicitValues rejects explicitly set values that are invalid even
-// before session inheritance.
+// before session inheritance. Run budgets accept zero (unlimited) and reject
+// negative values.
 func validateExplicitValues(cfg *config) error {
-	if cfg.maxTurnsSet && cfg.MaxTurns <= 0 {
-		return fmt.Errorf("max turns must be positive, got %d", cfg.MaxTurns)
+	if cfg.maxTurnsSet && cfg.MaxTurns < 0 {
+		return fmt.Errorf("max turns must not be negative, got %d", cfg.MaxTurns)
 	}
-	if cfg.maxTotalTokensSet && cfg.MaxTotalTokens <= 0 {
-		return fmt.Errorf("max total tokens must be positive, got %d", cfg.MaxTotalTokens)
+	if cfg.maxTotalTokensSet && cfg.MaxTotalTokens < 0 {
+		return fmt.Errorf("max total tokens must not be negative, got %d", cfg.MaxTotalTokens)
 	}
 	if cfg.maxContextSet && cfg.MaxContextTokens <= 0 {
 		return fmt.Errorf("max context tokens must be positive, got %d", cfg.MaxContextTokens)
@@ -610,26 +617,29 @@ func validateExplicitValues(cfg *config) error {
 	if cfg.maxOutputSet && cfg.MaxOutputTokens < 0 {
 		return fmt.Errorf("max output tokens must not be negative, got %d", cfg.MaxOutputTokens)
 	}
-	if cfg.sessionTimeoutSet && cfg.SessionTimeout <= 0 {
-		return fmt.Errorf("session timeout must be positive, got %s", cfg.SessionTimeout)
+	if cfg.sessionTimeoutSet && cfg.SessionTimeout < 0 {
+		return fmt.Errorf("session timeout must not be negative, got %s", cfg.SessionTimeout)
+	}
+	if cfg.modelTimeoutSet && cfg.ModelTimeout < 0 {
+		return fmt.Errorf("model timeout must not be negative, got %s", cfg.ModelTimeout)
 	}
 	return nil
 }
 
-// validateCumulative checks the values known before the catalog supplies the
-// per-call context window.
+// validateCumulative rejects negative cumulative run budgets. Zero is the
+// documented unlimited/sentinel value.
 func validateCumulative(cfg *config) error {
-	if cfg.MaxTurns <= 0 {
-		return fmt.Errorf("max turns must be positive, got %d", cfg.MaxTurns)
+	if cfg.MaxTurns < 0 {
+		return fmt.Errorf("max turns must not be negative, got %d", cfg.MaxTurns)
 	}
-	if cfg.MaxTotalTokens <= 0 {
-		return fmt.Errorf("max total tokens must be positive, got %d", cfg.MaxTotalTokens)
+	if cfg.MaxTotalTokens < 0 {
+		return fmt.Errorf("max total tokens must not be negative, got %d", cfg.MaxTotalTokens)
 	}
-	if cfg.SessionTimeout <= 0 {
-		return fmt.Errorf("session timeout must be positive, got %s", cfg.SessionTimeout)
+	if cfg.SessionTimeout < 0 {
+		return fmt.Errorf("session timeout must not be negative, got %s", cfg.SessionTimeout)
 	}
-	if cfg.ModelTimeout <= 0 {
-		return fmt.Errorf("model timeout must be positive, got %s", cfg.ModelTimeout)
+	if cfg.ModelTimeout < 0 {
+		return fmt.Errorf("model timeout must not be negative, got %s", cfg.ModelTimeout)
 	}
 	return nil
 }
@@ -666,8 +676,9 @@ func validateEffective(cfg *config) error {
 	return nil
 }
 
-// validateSessionRules enforces task rules and inherited cumulative limits
-// after the session state is known.
+// validateSessionRules enforces task rules and any explicit run budget after
+// the session state is known. Recorded budgets are historical and do not
+// participate; zero means unlimited.
 func validateSessionRules(cfg *config, state agent.State) error {
 	if cfg.Mode == ModeBatch {
 		if cfg.ResumeID != "" {
@@ -679,10 +690,10 @@ func validateSessionRules(cfg *config, state agent.State) error {
 			return errors.New("-fork requires a task")
 		}
 	}
-	if state.Turns >= cfg.MaxTurns {
+	if cfg.MaxTurns > 0 && state.Turns >= cfg.MaxTurns {
 		return fmt.Errorf("session is at its turn limit (%d >= %d); raise -max-turns", state.Turns, cfg.MaxTurns)
 	}
-	if state.Usage.Total() >= cfg.MaxTotalTokens {
+	if cfg.MaxTotalTokens > 0 && state.Usage.Total() >= cfg.MaxTotalTokens {
 		return fmt.Errorf("session is at its token limit (%d >= %d); raise -max-total-tokens", state.Usage.Total(), cfg.MaxTotalTokens)
 	}
 	return nil

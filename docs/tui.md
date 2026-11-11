@@ -104,6 +104,24 @@ fetch and, on success, expands the picker to the usable catalog and enables
 switching. A recorded model absent from the catalog is still shown and usable
 from the session record; switching to another model requires catalog metadata.
 
+## Status line and details
+
+The status line shows `turns N` and `tokens N` while those budgets are
+unlimited; it shows `turns N/M` and `tokens N/M` only when the corresponding
+`-max-turns` / `-max-total-tokens` flag is explicit and positive. Unlimited
+values never render as `0/0`.
+
+The details overlay (`Ctrl-X`) shows the observed `turns: N` and
+`tokens: <human>` under the session block, and the configured limits under
+configuration: `max turns: unlimited` (or the integer), `total tokens:
+unlimited` (or a human token count), `run timeout: none` (or a duration), and
+`model timeout: none` (or a duration). Unlimited values never render as `0s`.
+
+A resumed or forked session shows the new run's effective values, which are
+unlimited by default; historical recorded budgets are not shown as the current
+configuration. No new key or `-ui-json` protocol version is involved; frames
+carry the same labels.
+
 ## `-ui-json` protocol v1
 
 Every stdin line is one JSON object with `"v":1` and `"type"`. Unknown fields

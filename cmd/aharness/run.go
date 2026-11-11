@@ -315,6 +315,8 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		"max_turns", cfg.MaxTurns,
 		"max_context_tokens", cfg.MaxContextTokens,
 		"max_total_tokens", cfg.MaxTotalTokens,
+		"session_timeout_ms", cfg.SessionTimeout.Milliseconds(),
+		"model_timeout_ms", cfg.ModelTimeout.Milliseconds(),
 	)
 	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
 		logger.Warn("provider token is unset; hosted OpenCode Go requires AHARNESS_PROVIDER_TOKEN")

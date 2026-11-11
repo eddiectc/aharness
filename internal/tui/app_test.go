@@ -118,6 +118,21 @@ func updateApp(t *testing.T, app *App, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+func TestRunLineRendersLegacyLimitStatuses(t *testing.T) {
+	app := newTestApp(t, newManualHost())
+	theme := newTheme(true)
+	for _, status := range []agent.StopReason{agent.StopMaxTurns, agent.StopTimeLimit} {
+		line := app.renderRunLine(theme, &transcriptItem{
+			run:    1,
+			status: status,
+			reason: "legacy reason",
+		})
+		if !strings.Contains(line, string(status)) || !strings.Contains(line, "legacy reason") {
+			t.Fatalf("run line = %q, want the legacy status and reason", line)
+		}
+	}
+}
+
 func finishRun(t *testing.T, app *App, result agent.Result) {
 	t.Helper()
 	cmd := updateApp(t, app, runDoneMsg{run: app.run.number, result: result})

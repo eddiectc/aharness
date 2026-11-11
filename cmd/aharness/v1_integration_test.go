@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"aharness/internal/model"
 	"aharness/internal/session"
 )
 
@@ -407,6 +408,117 @@ func TestBinaryResumeAfterLimit(t *testing.T) {
 	}
 	if got := headers[1].Get("x-opencode-session"); got != first.id {
 		t.Fatalf("resumed x-opencode-session = %q, want %q", got, first.id)
+	}
+}
+
+func TestBinaryUnlimitedRunExceedsOldBudgets(t *testing.T) {
+	bin := buildHarness(t)
+	const toolTurns = 31
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if call <= toolTurns {
+			resp := chatToolCallResponse()
+			resp["usage"] = map[string]any{"prompt_tokens": 70_000, "completion_tokens": 0}
+			writeJSON(w, 200, resp)
+			return
+		}
+		writeJSON(w, 200, chatFinalResponse("unlimited done"))
+	})
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "hello.txt"), []byte("hello from file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state")
+	run := runHarness(t, bin, workspace, stateDir, f.url,
+		"-task", "run past the old defaults",
+		"-model", "deepseek-v4.1-flash",
+	)
+	if run.exit != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", run.exit, run.stdout, run.stderr)
+	}
+	if !strings.Contains(run.stdout, "unlimited done") {
+		t.Fatalf("stdout = %q, want the final answer", run.stdout)
+	}
+	events := readSessionEvents(t, sessionPathFor(stateDir, run.id))
+	if got := countEventType(events, session.TypeLimit); got != 0 {
+		t.Fatalf("limit events = %d, want none", got)
+	}
+	sessionStart, starts := recordedSession(t, sessionPathFor(stateDir, run.id))
+	if len(starts) != 1 {
+		t.Fatalf("run_start events = %d, want 1", len(starts))
+	}
+	rs := starts[0]
+	if rs.MaxTurns != 0 || rs.MaxTotalTokens != 0 || rs.SessionTimeoutMS != 0 || rs.ModelTimeoutMS != 0 {
+		t.Fatalf("run_start budgets = %d/%d/%d/%d, want zeros",
+			rs.MaxTurns, rs.MaxTotalTokens, rs.SessionTimeoutMS, rs.ModelTimeoutMS)
+	}
+	if sessionStart.MaxTurns != 0 || sessionStart.MaxTotalTokens != 0 ||
+		sessionStart.SessionTimeoutMS != 0 || sessionStart.ModelTimeoutMS != 0 {
+		t.Fatalf("session_start budgets = %d/%d/%d/%d, want zeros",
+			sessionStart.MaxTurns, sessionStart.MaxTotalTokens, sessionStart.SessionTimeoutMS, sessionStart.ModelTimeoutMS)
+	}
+	var end struct {
+		Status string      `json:"status"`
+		Turns  int         `json:"turns"`
+		Usage  model.Usage `json:"usage"`
+	}
+	for _, ev := range events {
+		if ev.Type != session.TypeRunEnd {
+			continue
+		}
+		if err := jsonv2.Unmarshal(ev.Data, &end); err != nil {
+			t.Fatalf("decode run_end: %v", err)
+		}
+	}
+	if end.Status != "completed" || end.Turns <= toolTurns {
+		t.Fatalf("run_end = %+v, want a completed run beyond %d turns", end, toolTurns)
+	}
+	if end.Usage.Total() <= 2_000_000 {
+		t.Fatalf("cumulative usage = %d, want more than 2,000,000", end.Usage.Total())
+	}
+}
+
+func TestBinaryResumeIgnoresRecordedBudgets(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if call == 1 {
+			writeJSON(w, 200, chatToolCallResponse())
+			return
+		}
+		writeJSON(w, 200, chatFinalResponse("resumed unbounded"))
+	})
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "hello.txt"), []byte("hello from file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state")
+	first := runHarness(t, bin, workspace, stateDir, f.url,
+		"-task", "stop at one turn",
+		"-model", "deepseek-v4.1-flash",
+		"-max-turns", "1",
+	)
+	if first.exit != 2 {
+		t.Fatalf("first exit = %d, want 2\nstderr:\n%s", first.exit, first.stderr)
+	}
+	second := runHarness(t, bin, workspace, stateDir, "",
+		"-resume", first.id,
+	)
+	if second.exit != 0 {
+		t.Fatalf("resume exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", second.exit, second.stdout, second.stderr)
+	}
+	if !strings.Contains(second.stdout, "resumed unbounded") {
+		t.Fatalf("stdout = %q, want the resumed answer", second.stdout)
+	}
+	_, starts := recordedSession(t, sessionPathFor(stateDir, first.id))
+	if len(starts) != 2 {
+		t.Fatalf("run_start events = %d, want 2", len(starts))
+	}
+	if starts[0].MaxTurns != 1 {
+		t.Fatalf("first run_start max_turns = %d, want the explicit 1", starts[0].MaxTurns)
+	}
+	resumed := starts[1]
+	if resumed.MaxTurns != 0 || resumed.MaxTotalTokens != 0 || resumed.SessionTimeoutMS != 0 || resumed.ModelTimeoutMS != 0 {
+		t.Fatalf("resumed run_start budgets = %d/%d/%d/%d, want zeros",
+			resumed.MaxTurns, resumed.MaxTotalTokens, resumed.SessionTimeoutMS, resumed.ModelTimeoutMS)
 	}
 }
 

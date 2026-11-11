@@ -40,14 +40,22 @@ real timeouts for subprocess and signal tests.
   validation; UUID validation; exclusive and shared `flock`; torn-final repair
   versus corrupt-final rejection; valid final line without a newline; fork copy
   with new session/seq and preserved payloads/timestamps; `session_repair`.
-- Resume/fork state: cumulative turns/usage reconstruction; pending-call
-  detection; pending-call repair before `run_start`; task matrix; inherited
-  model/workspace/base URL/limits; explicit overrides; cumulative-limit checks;
-  workspace mismatch; unsupported prompt/toolset; parent immutability.
+- Resume/fork state: cumulative turns/usage reconstruction; recorded run
+  budgets (`max_turns`, `max_total_tokens`, `session_timeout_ms`,
+  `model_timeout_ms`) ignored for enforcement; pending-call detection;
+  pending-call repair before `run_start`; task matrix; inherited
+  model/workspace/base URL/context/output values; explicit overrides; at-or-over
+  checks only for explicit positive turn/token flags; workspace mismatch;
+  unsupported prompt/toolset; parent immutability.
 - Loop: scripted model sequences for all terminal states; every call paired;
   panic paired then `internal_error`; duplicate call IDs stop with
   `protocol_error`; code-based stuck detection; one `final` and one `run_end`
-  per run; run-local output and usage with cumulative totals.
+  per run; run-local output and usage with cumulative totals. Unlimited
+  turns/tokens produce no budget event; explicit turn/token limits and explicit
+  session/model timeouts still enforce their documented stop/retry outcomes,
+  and `limit` is emitted only for an explicit positive budget;
+  `-session-timeout`/`-model-timeout` `0` means no deadline while an explicit
+  value enforces one.
 - Streaming loop: deltas emitted once, no reprint after deltas, non-streaming
   fallback printed once, retry before the first delta, no retry after a delta,
   partial error fields, and oversized responses rejected before tools.
@@ -61,7 +69,10 @@ real timeouts for subprocess and signal tests.
   unacknowledged requeue, first/second `Ctrl-C`, `Ctrl-D`, `Esc`, overlay
   focus/restore, rich/raw toggle, table/file/model/image overlays, model picker
   next-run-only, workspace containment, sanitizer, and raw Option-`[`/Option-`]`
-  input through a fake input pipe.
+  input through a fake input pipe. Status line renders `turns N`/`tokens N`
+  for unlimited budgets and `N/M` only for explicit positive budgets, never
+  `0/0`; the details overlay renders `unlimited`/`none`; old `max_turns`/
+  `time_limit` terminal states still render.
 - Headless UI: `-ui-json` decode/encode, caps, `wait` conditions/timeouts,
   frame/style/cursor/image metadata, SVG determinism, forced glyph mode, and
   no ANSI/raw image bytes. `x/vt` cell/style fixtures cover wide/CJK, combining
@@ -78,7 +89,9 @@ real timeouts for subprocess and signal tests.
 - Config: new flags; mutual exclusion; task rules; inheritance; explicit
   overrides; provider validation and precedence; list/refresh terminal actions;
   model resolution and provider mismatch; base-URL credential/query/fragment
-  rejection; exit-code mapping.
+  rejection; exit-code mapping; unlimited `0` defaults for turns/tokens/session
+  timeout/model timeout; explicit `0` and explicit positive values; negative
+  rejection naming the flag; recorded-budget ignoring on resume/fork.
 
 Tests follow the coding standard: table-driven where cases share logic; no
 assert or mock frameworks; fakes at consumer interfaces; `httptest` for the
@@ -111,11 +124,17 @@ diagnostic, not a gate.
   resuming a log with a recorded budget and `-max-output-tokens 0` omits the
   field; a provider `length` or context-overflow response follows the existing
   continuation and compaction-retry paths.
+- Run budgets: a default run exceeds the old 30-turn and 2M-token thresholds
+  and completes without a `limit` event; explicit turn/token/session/model
+  timeout flags still stop with the existing statuses and exit codes; resuming
+  or forking a log with recorded budgets ignores those values and the new
+  `run_start` records `0`.
 - Streaming: for both dialects, a delta is visible on stdout while the fake
   provider is still blocked; the log has one `model_response` with
   `streamed=true`; no delta events are written.
 - Resume: a limit-stopped run resumes under the same session ID with inherited
-  model/workspace/base URL/limits; a torn final line is repaired and recorded;
+  model/workspace/base URL/context/output values; recorded run budgets are not
+  inherited; a torn final line is repaired and recorded;
   the same session log gains a second `run_start` and `final`. Resume/fork with
   the catalog server down and no explicit model still starts from the recorded
   values; an explicit model change resolves through the catalog; an explicit
@@ -206,7 +225,16 @@ a coding agent would: pipe a command script, parse frames/events/styles/images,
 request `snapshot`, inspect the SVG, and confirm the session log is the durable
 record. Use `AHARNESS_LOG_REQUESTS=1` to confirm a default request body has no
 `max_tokens` / `max_output_tokens` field; exercise one explicit output budget
-and one provider `length`/context-overflow outcome. Record the real terminal,
+and one provider `length`/context-overflow outcome.
+
+For run budgets: confirm a default run can exceed the old 30-turn and 2M-token
+thresholds without a `limit` event and without a wall-clock or per-call
+deadline; resume or fork a seeded log with recorded budgets and confirm it
+continues unbounded and the new `run_start` records `0`; exercise explicit
+`-max-turns`, `-max-total-tokens`, `-session-timeout`, and `-model-timeout`
+values and confirm each still stops or retries as documented. Confirm the TUI
+status line shows `turns N`/`tokens N` and the details overlay shows
+`unlimited`/`none` for the defaults. Record the real terminal,
 `TERM`, exit code, and `stty -a` before/after.
 
 For the TUI manual matrix, use at least one local emulator and tmux at 80x24 and
