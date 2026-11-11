@@ -773,7 +773,7 @@ Add or change these rows in [limits.md](../limits.md):
 | Catalog stale fallback | Allowed only for implicit or `-list-models` refresh failure, with a warning. Explicit refresh never falls back. |
 | Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R`; unconditional GET; reuses the 15-second timeout, 16 MiB body cap, and 0600 cache policy; failure exits 3/4 (CLI) or notifies (TUI); no new budget. |
 | Catalog cache file | `<state>/cache/models.dev/<provider>.json`; file 0600, directory 0700. |
-| Catalog cache version | 2; mismatches are ignored and refetched. Version 2 adds normalized `reasoning` / `reasoning_efforts` from [thinking effort](thinking-effort-build.md). |
+| Catalog cache version | 3; mismatches are ignored and refetched. Version 2 adds normalized `reasoning` / `reasoning_efforts` from [thinking effort](thinking-effort-build.md); version 3 adds the optional normalized `cost` snapshot from [agent tooling](agent-tooling-build.md). |
 | Model ID | At most 256 bytes; valid UTF-8; no control characters. |
 | Discovered base URL | HTTPS, host `opencode.ai`, no userinfo/query/fragment. |
 | `-provider` | `opencode-go` only; unknown values are config errors. |

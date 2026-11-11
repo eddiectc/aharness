@@ -1053,3 +1053,14 @@ func TestRunArgsHelp(t *testing.T) {
 		t.Errorf("stderr = %q, want usage text", stderr.String())
 	}
 }
+
+func TestConfigRequireUsage(t *testing.T) {
+	cfg := cfgTestParseOK(t, cfgTestArgs(t), nil)
+	if cfg.RequireUsage {
+		t.Error("RequireUsage default = true, want false")
+	}
+	cfg = cfgTestParseOK(t, cfgTestArgs(t, "-require-usage"), nil)
+	if !cfg.RequireUsage {
+		t.Error("RequireUsage with -require-usage = false, want true")
+	}
+}

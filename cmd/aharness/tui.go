@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/colorprofile"
 
@@ -45,13 +46,15 @@ func (r *hostRun) Done() <-chan agent.Result { return r.done }
 // tuiHost implements tui.Host over the session store, workspace, provider
 // adapter, and runner. It owns the session lock for the process lifetime.
 type tuiHost struct {
-	cfg       config
-	store     *session.Store
-	ws        *tools.Workspace
-	sessionID string
-	source    model.CatalogSource
-	catalog   map[string]model.CatalogModel
-	models    []tui.ModelChoice
+	cfg              config
+	store            *session.Store
+	ws               *tools.Workspace
+	sessionID        string
+	source           model.CatalogSource
+	catalog          map[string]model.CatalogModel
+	catalogSource    string
+	catalogFetchedAt time.Time
+	models           []tui.ModelChoice
 
 	mu             sync.Mutex
 	info           tui.Info
@@ -129,6 +132,8 @@ func (h *tuiHost) setCatalogLocked(cat model.Catalog) {
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i].ID < choices[j].ID })
 	h.catalog = cat.Models
+	h.catalogSource = cat.Source
+	h.catalogFetchedAt = cat.FetchedAt
 	h.models = choices
 }
 
@@ -184,6 +189,7 @@ func (h *tuiHost) SelectModel(id string) (tui.ModelChoice, error) {
 		// Keep the recorded fallback's exact limits, but prefer loaded catalog
 		// metadata so a re-selection still carries the advertised efforts.
 		if m, ok := h.catalog[id]; ok && m.Unavailable == "" {
+			h.cfg.Pricing = m.Pricing(h.catalogSource, h.catalogFetchedAt)
 			return modelChoice(m), nil
 		}
 		return h.recordedChoiceLocked(true), nil
@@ -198,6 +204,7 @@ func (h *tuiHost) SelectModel(id string) (tui.ModelChoice, error) {
 	if err := applyCatalogModel(&h.cfg, m, func(text string) { h.pendingWarning = text }); err != nil {
 		return tui.ModelChoice{}, err
 	}
+	h.cfg.Pricing = m.Pricing(h.catalogSource, h.catalogFetchedAt)
 	if err := validateEffective(&h.cfg); err != nil {
 		return tui.ModelChoice{}, err
 	}
@@ -284,6 +291,7 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 			h.mu.Unlock()
 			return nil, err
 		}
+		h.cfg.Pricing = m.Pricing(h.catalogSource, h.catalogFetchedAt)
 		if m.Deprecated {
 			warn("model " + m.ID + " is deprecated")
 		}
@@ -327,7 +335,7 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 			return display(ev)
 		}
 	}
-	registry := tools.NewRegistry(h.ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir})
+	registry := tools.NewRegistry(h.ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir, WorkDir: workDir})
 	runner := agent.New(rcfg, newCompleterFor(dialect, h.cfg, h.sessionID), registry, h.store)
 	run := &hostRun{
 		ctx:      runCtx,
@@ -387,6 +395,8 @@ func (h *tuiHost) run(run *hostRun, runner *agent.Runner, opts agent.RunOptions,
 	}
 	h.info.Turns = result.CumulativeTurns
 	h.info.Usage = result.CumulativeUsage
+	h.info.CostMicroUSD = result.CostMicroUSD
+	h.info.CostComplete = result.CostComplete
 	h.info.Model = modelName
 	h.info.Dialect = string(dialect)
 	h.lastStatus = result.Status
@@ -596,6 +606,8 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		MaxTotalTokens: cfg.MaxTotalTokens,
 		Turns:          state.Turns,
 		Usage:          state.Usage,
+		CostMicroUSD:   state.CostMicroUSD,
+		CostComplete:   state.CostComplete,
 		ThinkingEffort: cfg.ThinkingEffort,
 	}
 	ctx := context.Background()

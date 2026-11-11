@@ -1,0 +1,1 @@
+ParseBool in parse.go should accept yes/true/no/false case-insensitively and ignore surrounding whitespace, returning a descriptive error otherwise. Fix the failing test without modifying parse_test.go.

@@ -9,8 +9,8 @@ import (
 	"aharness/internal/model"
 )
 
-// Version is the v0 toolset/prompt version.
-const Version = "toolset-v0"
+// Version is the current toolset/prompt version.
+const Version = "toolset-v1"
 
 // Code is a stable, model-visible tool result code.
 type Code string
@@ -65,10 +65,13 @@ var (
 	ErrTooLarge         = errors.New("file too large")
 )
 
-// Options configures harness-owned process paths for run_command.
+// Options configures harness-owned process paths for run_command. WorkDir is
+// the per-run work directory used to spill oversized command output; an empty
+// WorkDir disables spilling.
 type Options struct {
 	HomeDir string
 	TmpDir  string
+	WorkDir string
 }
 
 // Schema returns the canonical declaration for one tool.

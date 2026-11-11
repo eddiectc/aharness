@@ -98,7 +98,7 @@ func TestOpenAIChatCompleteStream(t *testing.T) {
 	if resp.FinishReason != FinishToolCalls {
 		t.Errorf("finish = %q, want %q", resp.FinishReason, FinishToolCalls)
 	}
-	if resp.Usage != (Usage{InputTokens: 11, OutputTokens: 7}) {
+	if resp.Usage != (Usage{InputTokens: 11, OutputTokens: 7, Reported: true}) {
 		t.Errorf("usage = %+v", resp.Usage)
 	}
 }
@@ -294,7 +294,7 @@ func TestOpenAIResponsesCompleteStream(t *testing.T) {
 	if resp.FinishReason != FinishToolCalls {
 		t.Errorf("finish = %q, want %q", resp.FinishReason, FinishToolCalls)
 	}
-	if resp.Usage != (Usage{InputTokens: 11, OutputTokens: 7}) {
+	if resp.Usage != (Usage{InputTokens: 11, OutputTokens: 7, Reported: true}) {
 		t.Errorf("usage = %+v", resp.Usage)
 	}
 }

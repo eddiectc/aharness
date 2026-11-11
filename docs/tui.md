@@ -161,17 +161,24 @@ while those budgets are unlimited; it shows `turns N/M` and `tokens N/M` only
 when the corresponding `-max-turns` / `-max-total-tokens` flag is explicit and
 positive. Unlimited values never render as `0/0`.
 
-The details overlay (`Ctrl-X`) shows the observed `turns: N` and
-`tokens: <human>` under the session block, the effective `thinking effort:
-<value>` (or `provider default`), and the configured limits under
+The details overlay (`Ctrl-X`) shows the observed `turns: N`,
+`tokens: <human>`, and `cost: $<micro-USD>` under the session block, the
+effective `thinking effort: <value>` (or `provider default`), and the
+configured limits under
 configuration: `max turns: unlimited` (or the integer), `total tokens:
 unlimited` (or a human token count), `run timeout: none` (or a duration), and
 `model timeout: none` (or a duration). Unlimited values never render as `0s`.
 
 A resumed or forked session shows the new run's effective values, which are
 unlimited by default; historical recorded budgets are not shown as the current
-configuration. No new key or `-ui-json` protocol version is involved; frames
-carry the same labels.
+configuration. The cost line is an observational catalog-price estimate and
+is marked `(incomplete)` when any model response lacked a price. No new key or
+`-ui-json` protocol version is involved; frames carry the same labels.
+
+Usage objects in `-ui-json` frames may carry the additive optional members
+`cached_input_tokens`, `cache_write_input_tokens`,
+`reasoning_output_tokens`, `reported`, and `cost_micro_usd`; older consumers
+ignore them and the protocol version stays 1.
 
 ## `-ui-json` protocol v1
 

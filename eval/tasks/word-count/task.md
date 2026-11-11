@@ -1,0 +1,1 @@
+Words in count.go should count whitespace-separated words and return 0 for empty or whitespace-only text. It currently splits on single spaces and counts empty fields. Fix it; do not modify count_test.go.

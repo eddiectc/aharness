@@ -183,7 +183,17 @@ Normalization rules:
   `function_call.call_id` for correlation, not the output item `id`.
 - Canonical finish reasons are `stop`, `length`, `tool_calls`,
   `content_filter`, and `other`; adapters map dialect-specific stop reasons.
-- Canonical usage is input and output tokens; adapters map dialect usage fields.
+- Canonical usage has input and output totals plus three additive subsets:
+  cached input, cache-write input, and reasoning output. Cached and cache-write
+  tokens are disjoint subsets of input; reasoning tokens are a subset of
+  output. `Total()` remains input+output and never adds a subset. `Reported`
+  distinguishes a provider-supplied usage object (including an all-zero
+  object) from an absent one. Adapters reject a usage object whose subsets
+  exceed their totals as `protocol_error`. The Chat adapter prefers
+  `prompt_tokens_details.cached_tokens` and falls back to
+  `prompt_cache_hit_tokens`; both dialects map cache-write and reasoning
+  details when present. Old v2 logs decode with `reported=false` and zero
+  subsets.
 - Canonical errors are typed (`HTTPError`, `TransportError`, `ProtocolError`,
   and context overflow); adapters map HTTP statuses and provider error bodies.
 - Both adapters replay the canonical projection; the Responses adapter sets
@@ -323,6 +333,13 @@ adapter fell back to non-streaming, the response text is printed once. Without
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
+`cmd/aharness-eval/` is development measurement tooling, not shipped runtime.
+It is a separate `main` package that imports only the standard library and
+`internal/session`; it is outside the runtime package graph and does not add a
+provider, tool, or agent dependency. Its task fixtures, price file, and results
+live under the top-level `eval/` tree. The shipped `cmd/aharness` binary never
+imports the eval driver.
+
 ```text
 go.mod
 cmd/aharness/
@@ -370,6 +387,7 @@ internal/tools/
   edit.go
   search.go
   command.go
+  command_spill.go # per-run oversized-output capture
   command_unix.go
   schemas.go
   output.go
@@ -677,9 +695,13 @@ All tools share these rules:
   failure. A non-zero command exit is `ok=true` with an `exit_code`; `ok=false`
   is reserved for dispatch, validation, timeout, cancellation, panic, spawn
   failures, and file restrictions such as binary or too large.
-- Tool results are capped before entering the transcript. Head and tail are kept
-  with an explicit `[truncated N bytes]` marker; the full raw output is not sent
-  to the model. Command output is sanitized to valid UTF-8 before encoding.
+- Tool results are capped before entering the transcript. File-content results
+  are head-only and contiguous: `read_file` never keeps a head and tail that
+  hide middle lines, and `search` keeps a head window. Command output keeps head
+  and tail with an explicit `[truncated N bytes]` marker; oversized command
+  output is also spilled to a harness-owned file. The full raw output is not
+  sent to the model. Command output is sanitized to valid UTF-8 before
+  encoding.
 - Tool calls are never automatically retried. Side effects are not idempotent;
   the model decides whether to retry after seeing the error.
 
@@ -709,13 +731,21 @@ func (w *Workspace) rel(p string) (string, error) {
 
 | Tool | Inputs | Behavior and limits |
 |---|---|---|
-| `read_file` | `path`, `offset` (1-based, default 1), `limit` (default 100, max 500) | Returns numbered lines plus a `lines X–Y of Z` header; line counting splits on `\n` (a trailing newline adds no line, an empty file has zero lines), and bytes are preserved. Rejects binary/non-UTF-8 files and files over 2 MiB. Result cap 32 KiB. |
+| `read_file` | `path`, `offset` (1-based, default 1), `limit` (default 2000, max 4000) | Returns one contiguous numbered line window plus a `lines X–Y of Z` header describing the lines actually delivered; line counting splits on `\n` (a trailing newline adds no line, an empty file has zero lines), and bytes are preserved. When `B < Z`, the result ends with `continue with offset=B+1`. A byte-capped page keeps whole lines and sets `truncated`; a single line that cannot fit is delivered as a rune-safe prefix with `[line N truncated at X bytes]` and no misleading continuation. Result cap 60 KiB, chosen so the rendered result and marker stay under the 64 KiB tool-result field cap. Rejects binary/non-UTF-8 files and files over 2 MiB. |
 | `edit_file` | `path`, `old_string`, `new_string`, `replace_all` (default false) | Requires a unique exact byte match unless `replace_all`; zero or multiple matches are actionable errors; `old_string == new_string` is an error. Rejects a symlink anywhere in the path. Writes atomically via an `O_EXCL` temp file in the same directory plus rename; preserves mode with fchmod; preserves bytes, including CRLF. Creates a file only when it does not exist and `old_string` is empty, using mode 0644 and requiring the parent directory to exist; an existing file with an empty `old_string` is an error. Rejects an edit whose resulting file would exceed 2 MiB. Returns a short diff summary. |
-| `search` | `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, and files over 1 MiB. Returns `path:line: text`, with long lines clipped, and marks capped results. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `path.Match` globs do not support `**`. |
-| `run_command` | `command`, `cwd` (default workspace root), `timeout_ms` (default 120000, max 600000) | Runs `/bin/sh -c` in its own process group with `Setpgid`, a `Cancel` that kills the group, and `WaitDelay`; stdin is nil. Captures stdout and stderr separately, sanitizes to valid UTF-8, and caps at 64 KiB combined with head+tail. Returns `exit_code`, `timed_out`, and labeled streams. Non-zero exit is a normal result (`ok=true`). On timeout or cancellation, kills the whole process group. Rejects `cwd` outside the workspace. |
+| `search` | `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, symlinks, and files over 1 MiB, and reports skipped counts by reason. Returns `path:line: text`, with long lines clipped. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `**` matches zero or more whole path segments; `*` does not cross `/`. Output is capped at 60 KiB head-only. A result-count cap is marked `[results capped at N]` and does not set `truncated`; dropped bytes do. |
+| `run_command` | `command`, `cwd` (default workspace root), `timeout_ms` (default 120000, max 600000) | Runs `/bin/sh -c` in its own process group with `Setpgid`, a `Cancel` that kills the group, and `WaitDelay`; stdin is nil. Captures stdout and stderr separately, sanitizes to valid UTF-8, and caps at 64 KiB combined with head+tail. When combined output exceeds the cap, the full combined stream is written to a unique `<state>/work/<session-id>/tool-output/*.log` file (directory 0700, file 0600, `O_EXCL`, no symlink following); the inline result ends with `full output: <absolute path>` and `details` records `spilled`/`path`. The per-run work cleanup removes the file; after resume the path is historical and its content is gone. Returns `exit_code`, `timed_out`, and labeled streams. Non-zero exit is a normal result (`ok=true`). On timeout or cancellation, kills the whole process group. Rejects `cwd` outside the workspace. |
 
-`search` is implemented with a Go walk; v1 does not shell out to `rg`; measure
-before adding it.
+`search` is implemented with a Go walk; the harness does not shell out to `rg`;
+measure before adding it.
+
+Tool descriptions are versioned prompt material. New sessions record
+`toolset-v1`; the frozen `toolset-v0` declaration set remains available so a
+session that recorded v0 replays with the descriptions it was created under.
+`tools.SchemasFor(version)` selects the set, `agent.Project` carries it in
+`Projection.Schemas`, and the runner sends that set, so resume/fork never
+silently upgrades prompt material. An unknown version is a replay error. The
+system prompt and `PromptVersion` are unchanged.
 
 `edit_file` writes atomically: create a temp file in the same directory with
 `O_CREATE|O_EXCL` and a random name, write, call `f.Chmod(existingMode)` through
@@ -769,6 +799,10 @@ it on every turn. Compaction never mutates the log.
    reserve or subtract an output budget.
 7. If the projection cannot fit after compaction, the run stops with
    `token_limit` before the model call.
+8. The tool schemas are selected from the session's recorded toolset version,
+   carried in `Projection.Schemas`, and used both for the request and for the
+   per-schema token estimate. A resumed v0 session never silently receives v1
+   descriptions.
 
 ### 6.2 Budget policy
 
@@ -800,9 +834,21 @@ it on every turn. Compaction never mutates the log.
   source's Tier 1 requirement and is easier to reason about.
 - Cumulative totals include every model response's input and output tokens,
   including retries, and are recorded regardless of whether a budget is set.
-  The session logs token usage; dollar-cost tracking is out of scope. When
-  `-max-total-tokens` is explicit, a 1,000,000-token context can consume that
-  cumulative budget in roughly two full-context calls.
+  The session additionally records an observational dollar estimate from the
+  catalog price snapshot; it is not a billing authority and never changes a
+  budget decision. When `-max-total-tokens` is explicit, a 1,000,000-token
+  context can consume that cumulative budget in roughly two full-context
+  calls.
+- `run_start` records the effective `pricing` snapshot (`available`,
+  `currency=USD`, `unit=per_million_tokens`, the four integer micro-USD rates,
+  source URL, and fetch time). `model_response` records `cost_micro_usd` only
+  when the snapshot can price that response. `run_end` records
+  `run_cost_micro_usd`, cumulative `cost_micro_usd`, and separate
+  `run_cost_complete`/`cost_complete` flags; a response without a price makes
+  the corresponding flag false. Cache-read falls back to the input rate when
+  the catalog omits it; reasoning is already inside output tokens and is not
+  charged twice. The runtime does not model provider time-of-day tiers; the
+  eval driver owns peak pricing.
 
 ## 7. Session log
 
@@ -872,10 +918,10 @@ it on every turn. Compaction never mutates the log.
 | Event type | Scope | Payload |
 |---|---|---|
 | `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, plus optional `parent_session`/`parent_seq`. |
-| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`. |
+| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`, `require_usage`, and the effective `pricing` snapshot. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
-| `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage, latency, attempt, `streamed`; 1 MiB total canonical content. |
+| `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage with cached/cache-write/reasoning subsets and `reported`, optional `cost_micro_usd`, latency, attempt, `streamed`; 1 MiB total canonical content. |
 | `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |
 | `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag. |
 | `compaction` | as needed | Before/after token estimate, elided result count, policy. |
@@ -884,7 +930,7 @@ it on every turn. Compaction never mutates the log.
 | `error` | as needed | Fatal error class and message; optional capped partial text and partial byte count for a failed stream. |
 | `session_repair` | on resume | Discarded bytes, last good `seq`, reason. |
 | `final` | once per run | Terminal status and last assistant text for this run, if any. |
-| `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration. |
+| `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration, estimated run/cumulative cost, and cost-completeness flags. |
 
 v1 uses `run_end` and does not emit `session_end`. The projection ignores every
 run/control event. `seq` and `turn` continue across runs. A run without a
@@ -1005,9 +1051,10 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   HTTPS except for loopback HTTP. A request times out after 15 seconds and caps
   the response body at 16 MiB. The normalized cache is
   `<state>/cache/models.dev/<provider>.json` with file mode 0600 and directory
-  mode 0700, and cache version 2. Version 2 adds the normalized `reasoning` and
-  `reasoning_efforts` fields; a version 1 cache is rejected and refetched rather
-  than trusted without the capability data. A fresh entry is used for 24 hours
+  mode 0700, and cache version 3. Version 2 adds the normalized `reasoning` and
+  `reasoning_efforts` fields; version 3 adds the optional normalized `cost`
+  object (integer micro-USD per one million tokens). An older cache is rejected
+  and refetched rather than trusted without the newer data. A fresh entry is used for 24 hours
   without a network request; a stale entry triggers a conditional GET. An
   implicit or `-list-models` refresh failure falls back to a stale valid cache
   with a warning; no valid cache is a provider (3) or protocol (4) error naming
@@ -1085,6 +1132,15 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   config error. The catalog's advertised output ceiling is informational only.
   A provider rejection of an explicit output budget is a provider error naming
   the requested value.
+- `-require-usage` (default false) turns a completed buffered model response
+  with `reported=false` into a terminal `protocol_error` before any tool
+  executes. The `model_response` is already durable, so the transcript remains
+  paired. The default preserves compatibility with local OpenAI-compatible
+  endpoints that omit usage; a present empty usage object is reported and
+  accepted as zeros, and streamed paths still require usage. The flag is
+  per-run and is not inherited on resume/fork; `run_start.require_usage`
+  records the effective value. Eval runs set it so a silent zero is never
+  averaged into an experiment.
 - `-thinking-effort` / `AHARNESS_THINKING_EFFORT` selects the provider-neutral
   reasoning effort carried by every model call in the run. Accepted values are
   model-specific and discovered from the catalog; there is no harness-wide
@@ -1170,13 +1226,15 @@ Defaults are deliberately conservative and easy to change:
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
 | Max output tokens per call | 0 (unset; the request field is omitted) |
 | Thinking effort | unset (provider/model default; `-thinking-effort` / `AHARNESS_THINKING_EFFORT`) |
+| Usage strictness | permissive (`-require-usage` off; missing buffered usage records `reported=false`) |
+| Toolset version | `toolset-v1` for new sessions; `toolset-v0` replay supported |
 | Max total tokens | 0 (unlimited; `-max-total-tokens`) |
 | Max run wall clock | 0 (none; `-session-timeout`) |
 | Model call timeout | 0 (none; `-model-timeout`) |
 | `run_command` timeout | 120 seconds (max 600) |
-| Tool result cap | 32 KiB file tools; 64 KiB command output |
-| `read_file` window | 100 lines (max 500) |
-| `search` results | 100 (max 200) |
+| Tool result cap | 60 KiB file tools; 64 KiB command output plus a spill path |
+| `read_file` window | 2,000 lines (max 4,000), contiguous, 60 KiB |
+| `search` results | 100 (max 200); 60 KiB head-only |
 
 ## 10. Limits and timeouts
 
@@ -1186,10 +1244,10 @@ reference and the code constant.
 
 The main values are the defaults in §9 plus: a 15-second catalog request
 timeout and 16 MiB catalog body cap, a 24-hour catalog cache TTL (cache version
-2), a 32-byte cap per thinking-effort value and at most 16 normalized values
+3), a 32-byte cap per thinking-effort value and at most 16 normalized values
 per model, a 5% (minimum 1,000-token) context safety margin; 4 retained turns;
 5 transport attempts with 1s base, 30s max, and 25% jitter; a 60s
-`Retry-After` cap; 32 KiB file-tool results; 64 KiB command output; a 1 MiB
+`Retry-After` cap; 60 KiB file-tool results; 64 KiB command output; a 1 MiB
 non-streaming provider response; a 4 MiB SSE event; a 1 MiB assembled response;
 an 8 MiB total stream; 64 KiB partial text; a 1 MiB debug request; a 64 KiB
 model-response event-text cap except for the fully recorded `model_response`;

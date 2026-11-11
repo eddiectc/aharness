@@ -5,6 +5,8 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 )
 
 // Role is a canonical message role.
@@ -65,14 +67,55 @@ type Request struct {
 	ThinkingEffort string `json:"thinking_effort,omitempty"`
 }
 
-// Usage is normalized token usage for one response.
+// Usage is normalized token usage for one response. InputTokens and
+// OutputTokens are totals; the cached, cache-write, and reasoning counts are
+// subsets of them and are never added to Total. Reported distinguishes a
+// provider-supplied usage object (including an all-zero object) from an
+// absent one.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens           int  `json:"input_tokens"`
+	OutputTokens          int  `json:"output_tokens"`
+	CachedInputTokens     int  `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int  `json:"cache_write_input_tokens,omitempty"`
+	ReasoningOutputTokens int  `json:"reasoning_output_tokens,omitempty"`
+	Reported              bool `json:"reported"`
 }
 
-// Total returns the total tokens reported for the response.
+// Total returns the total tokens reported for the response. The subset counts
+// are already included in the totals.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
+
+// UncachedInputTokens returns the non-cached, non-cache-write portion of the
+// input. The result is clamped at zero so a malformed provider payload cannot
+// produce a negative billable count.
+func (u Usage) UncachedInputTokens() int {
+	uncached := u.InputTokens - u.CachedInputTokens - u.CacheWriteInputTokens
+	if uncached < 0 {
+		return 0
+	}
+	return uncached
+}
+
+// validateUsage enforces the canonical subset bounds. Any violation is a
+// protocol error because the transcript would otherwise record contradictory
+// accounting.
+func validateUsage(u Usage) error {
+	if u.InputTokens < 0 || u.OutputTokens < 0 {
+		return &ProtocolError{Err: errors.New("usage totals must not be negative")}
+	}
+	if u.CachedInputTokens < 0 || u.CacheWriteInputTokens < 0 || u.ReasoningOutputTokens < 0 {
+		return &ProtocolError{Err: errors.New("usage subsets must not be negative")}
+	}
+	if u.CachedInputTokens+u.CacheWriteInputTokens > u.InputTokens {
+		return &ProtocolError{Err: fmt.Errorf("cached input tokens %d plus cache-write tokens %d exceed input tokens %d",
+			u.CachedInputTokens, u.CacheWriteInputTokens, u.InputTokens)}
+	}
+	if u.ReasoningOutputTokens > u.OutputTokens {
+		return &ProtocolError{Err: fmt.Errorf("reasoning output tokens %d exceed output tokens %d",
+			u.ReasoningOutputTokens, u.OutputTokens)}
+	}
+	return nil
+}
 
 // Response is one canonical model response. Streamed reports that the
 // response was assembled from an SSE stream; it is display/provenance metadata,

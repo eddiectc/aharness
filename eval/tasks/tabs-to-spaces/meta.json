@@ -1,0 +1,6 @@
+{
+  "cluster": "text-transform",
+  "language": "text",
+  "timeout": 30,
+  "notes": "Multi-file tab replacement, including a nested file."
+}

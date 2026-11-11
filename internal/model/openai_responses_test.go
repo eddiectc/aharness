@@ -130,7 +130,7 @@ func TestOpenAIResponsesCompleteCanonical(t *testing.T) {
 			Arguments: json.RawMessage(`{"path":"b.go"}`),
 		}},
 		FinishReason: FinishToolCalls,
-		Usage:        Usage{InputTokens: 21, OutputTokens: 13},
+		Usage:        Usage{InputTokens: 21, OutputTokens: 13, Reported: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Response = %#v, want %#v", got, want)

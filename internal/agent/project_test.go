@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -55,14 +56,89 @@ func TestProjectSystemPromptAndEstimate(t *testing.T) {
 
 	systemTokens := (len(string(model.RoleSystem))+len(systemPrompt(workspace))+3)/4 + tokensPerMessage
 	userTokens := (len(string(model.RoleUser))+len("task")+3)/4 + tokensPerMessage
-	want := systemTokens + userTokens + len(tools.Schemas())*tokensPerTool
+	want := systemTokens + userTokens + len(proj.Schemas)*tokensPerTool
 	if proj.BeforeTokens != want || proj.AfterTokens != want || proj.EstimatedInputTokens != want {
 		t.Fatalf("estimate = before %d after %d input %d, want %d",
 			proj.BeforeTokens, proj.AfterTokens, proj.EstimatedInputTokens, want)
 	}
+	if !reflect.DeepEqual(proj.Schemas, tools.Schemas()) {
+		t.Fatalf("projection schemas do not match the current toolset")
+	}
 	if proj.ElidedResults != 0 {
 		t.Fatalf("elided = %d, want 0", proj.ElidedResults)
 	}
+}
+
+func TestProjectSelectsToolsetSchemas(t *testing.T) {
+	workspace := "/workspace/project"
+	limits := Limits{MaxInputTokens: 1_000_000, CompactionTarget: 1_000_000}
+	for _, version := range []string{"toolset-v0", "toolset-v1"} {
+		t.Run(version, func(t *testing.T) {
+			events := []session.Event{
+				startEventForToolset(t, workspace, version),
+				newTestEvent(t, session.TypeUserMessage, 0, string(model.RoleUser), userMessageData{Text: "task", Source: "-task"}),
+			}
+			proj, err := Project(events, limits)
+			if err != nil {
+				t.Fatalf("Project(%s) error = %v", version, err)
+			}
+			want, err := tools.SchemasFor(version)
+			if err != nil {
+				t.Fatalf("SchemasFor(%s): %v", version, err)
+			}
+			if !reflect.DeepEqual(proj.Schemas, want) {
+				t.Fatalf("projection schemas = %v, want the frozen %s set", schemaNames(proj.Schemas), version)
+			}
+			systemTokens := (len(string(model.RoleSystem))+len(systemPrompt(workspace))+3)/4 + tokensPerMessage
+			userTokens := (len(string(model.RoleUser))+len("task")+3)/4 + tokensPerMessage
+			wantTokens := systemTokens + userTokens + len(want)*tokensPerTool
+			if proj.EstimatedInputTokens != wantTokens {
+				t.Fatalf("estimate = %d, want %d using %d selected schemas", proj.EstimatedInputTokens, wantTokens, len(want))
+			}
+		})
+	}
+
+	t.Run("unknown version", func(t *testing.T) {
+		events := []session.Event{
+			startEventForToolset(t, workspace, "toolset-v9"),
+			newTestEvent(t, session.TypeUserMessage, 0, string(model.RoleUser), userMessageData{Text: "task", Source: "-task"}),
+		}
+		_, err := Project(events, limits)
+		if err == nil {
+			t.Fatal("Project(unknown toolset) error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "toolset-v9") {
+			t.Fatalf("Project error = %v, want the unknown version", err)
+		}
+	})
+}
+
+func startEventForToolset(t *testing.T, workspace, version string) session.Event {
+	t.Helper()
+	cfg := testConfig()
+	return newTestEvent(t, session.TypeSessionStart, 0, "", sessionStartData{
+		PromptVersion:    PromptVersion,
+		ToolsetVersion:   version,
+		Workspace:        workspace,
+		StateDir:         "/tmp/state",
+		Provider:         "opencode-go",
+		Dialect:          "openai-chat",
+		Model:            "test-model",
+		Limits:           cfg.Limits,
+		MaxTurns:         cfg.MaxTurns,
+		MaxTotalTokens:   cfg.MaxTotalTokens,
+		SessionTimeoutMS: cfg.SessionTimeout.Milliseconds(),
+		ModelTimeoutMS:   cfg.ModelTimeout.Milliseconds(),
+		HarnessVersion:   "test-harness",
+	})
+}
+
+func schemaNames(schemas []model.ToolSchema) []string {
+	out := make([]string, len(schemas))
+	for i, schema := range schemas {
+		out[i] = schema.Name
+	}
+	return out
 }
 
 func TestProjectRetentionAndElision(t *testing.T) {

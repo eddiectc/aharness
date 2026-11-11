@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	catalogCacheVersion     = 2
+	catalogCacheVersion     = 3
 	maxCatalogModelIDBytes  = 256
 	defaultCatalogUserAgent = "aharness/unknown"
 	catalogCacheFileMode    = 0o600
@@ -363,6 +363,9 @@ func validUsableCachedModel(m CatalogModel) bool {
 	if _, reason := discoveredBaseURL(m.BaseURL); reason != "" {
 		return false
 	}
+	if m.Cost != nil && !m.Cost.valid() {
+		return false
+	}
 	return validReasoningEfforts(m.ReasoningEfforts)
 }
 
@@ -464,6 +467,16 @@ type modelsDevModel struct {
 	Modalities       modelsDevModalities    `json:"modalities"`
 	Reasoning        bool                   `json:"reasoning"`
 	ReasoningOptions jsontext.Value         `json:"reasoning_options"`
+	Cost             *modelsDevCost         `json:"cost"`
+}
+
+// modelsDevCost is the raw models.dev price object. Rates are USD per one
+// million tokens; pointers distinguish an omitted tier from a zero rate.
+type modelsDevCost struct {
+	Input      *float64 `json:"input"`
+	Output     *float64 `json:"output"`
+	CacheRead  *float64 `json:"cache_read"`
+	CacheWrite *float64 `json:"cache_write"`
 }
 
 // modelsDevReasoningOption is one raw reasoning control. Only effort options
@@ -578,6 +591,7 @@ func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM,
 
 	model.Reasoning = raw.Reasoning
 	model.ReasoningEfforts = normalizeReasoningEfforts(raw.ReasoningOptions)
+	model.Cost = normalizeCatalogCost(raw.Cost)
 
 	model.ContextWindow = raw.Limit.Context
 	if raw.Limit.Input > 0 {
@@ -624,6 +638,52 @@ func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM,
 		model.Unavailable = baseURLReason
 	}
 	return model
+}
+
+// normalizeCatalogCost converts the raw USD-per-million rates into integer
+// micro-USD. Missing input or output rates, negative values, non-finite
+// values, and overflow make the whole price set unavailable: a partial price
+// cannot estimate a response honestly.
+func normalizeCatalogCost(raw *modelsDevCost) *CatalogCost {
+	if raw == nil || raw.Input == nil || raw.Output == nil {
+		return nil
+	}
+	input, ok := microUSDRate(*raw.Input)
+	if !ok {
+		return nil
+	}
+	output, ok := microUSDRate(*raw.Output)
+	if !ok {
+		return nil
+	}
+	cost := &CatalogCost{InputMicroUSD: input, OutputMicroUSD: output}
+	if raw.CacheRead != nil {
+		value, ok := microUSDRate(*raw.CacheRead)
+		if !ok {
+			return nil
+		}
+		cost.CacheReadMicroUSD = &value
+	}
+	if raw.CacheWrite != nil {
+		value, ok := microUSDRate(*raw.CacheWrite)
+		if !ok {
+			return nil
+		}
+		cost.CacheWriteMicroUSD = &value
+	}
+	return cost
+}
+
+// microUSDRate converts one USD-per-million-token rate to integer micro-USD
+// per million tokens with half-up rounding.
+func microUSDRate(value float64) (int64, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, false
+	}
+	if value > float64(math.MaxInt64)/microUSDPerCurrencyUnit {
+		return 0, false
+	}
+	return int64(math.Round(value * microUSDPerCurrencyUnit)), true
 }
 
 // normalizeReasoningEfforts decodes reasoning_options defensively and retains

@@ -1,0 +1,6 @@
+{
+  "cluster": "go-fix",
+  "language": "go",
+  "timeout": 90,
+  "notes": "Normalize the shift modulo 26 before indexing the alphabet."
+}

@@ -153,14 +153,37 @@ func errorLine(code, message string) ErrorLine {
 	return ErrorLine{V: protocolVersion, Type: "error", Code: code, Message: SanitizeLine(message)}
 }
 
-// UsageLine is protocol usage.
+// UsageLine is protocol usage. The detail fields are additive optional
+// members; older consumers ignore them and no protocol version bump is
+// required.
 type UsageLine struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens           int  `json:"input_tokens"`
+	OutputTokens          int  `json:"output_tokens"`
+	CachedInputTokens     int  `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int  `json:"cache_write_input_tokens,omitempty"`
+	ReasoningOutputTokens int  `json:"reasoning_output_tokens,omitempty"`
+	Reported              bool `json:"reported,omitempty"`
+	// CostMicroUSD is an observational estimate, present only when every
+	// response was priced.
+	CostMicroUSD *int64 `json:"cost_micro_usd,omitempty"`
 }
 
 func usageLine(u model.Usage) UsageLine {
-	return UsageLine{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+	return UsageLine{
+		InputTokens:           u.InputTokens,
+		OutputTokens:          u.OutputTokens,
+		CachedInputTokens:     u.CachedInputTokens,
+		CacheWriteInputTokens: u.CacheWriteInputTokens,
+		ReasoningOutputTokens: u.ReasoningOutputTokens,
+		Reported:              u.Reported,
+	}
+}
+
+// usageLineCost attaches an optional estimated cost to a usage line.
+func usageLineCost(u model.Usage, cost *int64) UsageLine {
+	line := usageLine(u)
+	line.CostMicroUSD = cost
+	return line
 }
 
 type runStartedLine struct {
@@ -246,8 +269,8 @@ func encodeEvent(ev any) ([]byte, error) {
 		out = runFinishedLine{
 			V: protocolVersion, Type: "event", Event: "run_finished",
 			Status: string(ev.Status), Reason: SanitizeLine(ev.Reason),
-			RunTurns: ev.RunTurns, RunUsage: usageLine(ev.RunUsage),
-			Turns: ev.Turns, Usage: usageLine(ev.Usage),
+			RunTurns: ev.RunTurns, RunUsage: usageLineCost(ev.RunUsage, ev.RunCostMicroUSD),
+			Turns: ev.Turns, Usage: usageLineCost(ev.Usage, ev.CostMicroUSD),
 		}
 	case EventToolStarted:
 		out = toolStartedLine{

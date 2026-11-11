@@ -68,20 +68,34 @@ func TestSearchGlob(t *testing.T) {
 	}
 }
 
-func TestSearchDoubleStarIsNotRecursive(t *testing.T) {
+func TestSearchDoubleStarRecursive(t *testing.T) {
 	r, dir := newTestRegistry(t)
+	mustWriteFile(t, dir, "root.go", []byte("package root\n"))
 	mustWriteFile(t, dir, "sub/c.go", []byte("package x\n"))
 	mustWriteFile(t, dir, "deep/nested/d.go", []byte("package deep\n"))
 	res := executeArgs(t, r, "search", map[string]any{"pattern": "package", "glob": "**/*.go"})
 	if !res.OK {
 		t.Fatalf("search(**) failed: %s", res.Error)
 	}
-	want := "sub/c.go:1: package x\n"
+	want := "deep/nested/d.go:1: package deep\nroot.go:1: package root\nsub/c.go:1: package x\n"
 	if res.Output != want {
-		t.Errorf("search(**/*.go) output = %q, want %q (no ** recursion)", res.Output, want)
+		t.Errorf("search(**/*.go) output = %q, want %q", res.Output, want)
 	}
-	if strings.Contains(res.Output, "deep/nested") {
-		t.Errorf("search(**/*.go) descended recursively: %q", res.Output)
+
+	res = executeArgs(t, r, "search", map[string]any{"pattern": "package", "glob": "*.go"})
+	if !res.OK {
+		t.Fatalf("search(*.go) failed: %s", res.Error)
+	}
+	if want := "root.go:1: package root\n"; res.Output != want {
+		t.Errorf("search(*.go) output = %q, want %q (single * must not cross '/')", res.Output, want)
+	}
+
+	res = executeArgs(t, r, "search", map[string]any{"pattern": "package", "glob": "deep/**/*.go"})
+	if !res.OK {
+		t.Fatalf("search(deep/**/*.go) failed: %s", res.Error)
+	}
+	if want := "deep/nested/d.go:1: package deep\n"; res.Output != want {
+		t.Errorf("search(deep/**/*.go) output = %q, want %q", res.Output, want)
 	}
 }
 
@@ -134,7 +148,8 @@ func TestSearchSkipsBinaryLargeAndSymlinks(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("search failed: %s", res.Error)
 	}
-	want := "real/target.txt:1: hello linktarget\n"
+	want := "real/target.txt:1: hello linktarget\n" +
+		"[skipped 5 files: 1 over 1 MiB, 2 binary, 2 symlink]\n"
 	if res.Output != want {
 		t.Errorf("output = %q, want %q", res.Output, want)
 	}
@@ -143,6 +158,9 @@ func TestSearchSkipsBinaryLargeAndSymlinks(t *testing.T) {
 		if strings.Contains(res.Output, name) {
 			t.Errorf("output includes %s: %q", name, res.Output)
 		}
+	}
+	if res.Truncated {
+		t.Errorf("Truncated = true for skipped files, want false")
 	}
 }
 
@@ -207,8 +225,8 @@ func TestSearchMaxResultsCap(t *testing.T) {
 	if !strings.Contains(res.Output, "[results capped at 1]") {
 		t.Errorf("output missing capped marker: %q", res.Output)
 	}
-	if !res.Truncated {
-		t.Errorf("Truncated = false, want true for a capped result")
+	if res.Truncated {
+		t.Errorf("Truncated = true for a result-count cap, want false")
 	}
 }
 

@@ -1,0 +1,1 @@
+The Go module in the workspace has a failing test for Sum in sum.go. Fix the implementation so Sum adds every element and returns 0 for an empty slice. Keep the test file unchanged. Verify with `go test ./...`.

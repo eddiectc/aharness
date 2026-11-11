@@ -35,7 +35,7 @@ by its own constant.
 | Catalog stale fallback | implicit and `-list-models` only | On failure, a valid stale cache is used with a warning. Explicit refresh never falls back. |
 | Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R` | Unconditional GET, reusing the 15-second timeout, 16 MiB body cap, and 0600 cache policy. Failure exits 3/4 (CLI) or notifies (TUI); no stale fallback. |
 | Catalog cache file | `<state>/cache/models.dev/<provider>.json` | File 0600, directory 0700; atomic replacement. |
-| Catalog cache version | 2 | A version mismatch or corrupt entry is ignored and treated as absent. Version 2 carries normalized `reasoning`/`reasoning_efforts`; a version 1 cache is refetched. |
+| Catalog cache version | 3 | A version mismatch or corrupt entry is ignored and treated as absent. Version 2 carries normalized `reasoning`/`reasoning_efforts`; version 3 adds the optional normalized `cost` snapshot. Older caches are refetched. |
 | Model ID | at most 256 bytes | Valid UTF-8 with no control characters; used only as a JSON value/map key, never a path. |
 | Thinking effort value | at most 32 bytes | Non-empty valid UTF-8 matching `[a-z][a-z0-9_-]*`; `default` is reserved for clearing and is never a catalog value. Applies to the catalog, cache, CLI, and environment. |
 | Effort values per model | 16 | Extra values are dropped after canonical ordering; invalid values are dropped. A model with none advertises no effort control. |
@@ -86,6 +86,9 @@ when that flag is set and against total usage, and they add no separate cap.
 | Session line | 4 MiB | Includes the JSON envelope and escaping. |
 | `model_response` payload | 1 MiB total canonical content | The executed response is fully recorded so resume can replay it. |
 | Tool result output/error | 64 KiB per field | Tool-specific caps below are usually smaller. |
+| Model response usage | totals plus subsets | Input/output totals; cached, cache-write, and reasoning subsets; `reported` distinguishes an absent usage object from a present one. Subsets never change `Total()`. |
+| `-require-usage` | off | When set, a completed buffered response without provider usage is a `protocol_error` before any tool executes. Streaming already requires usage. Not inherited on resume/fork. |
+| Cost estimate | catalog micro-USD | Observational only. `$0.15` per 1M tokens is stored as `150000` micro-USD; per-response and run totals use integer arithmetic. Unpriced responses make the completeness flags false. |
 
 Other event payloads:
 
@@ -118,10 +121,10 @@ Other event payloads:
 
 | Tool | Limit | Value | Behavior |
 |---|---|---|---|
-| `read_file` | Default lines | 100 | `offset` is 1-based. |
-| `read_file` | Max lines per call | 500 | Larger `limit` values are clamped. |
+| `read_file` | Default lines | 2,000 | `offset` is 1-based. |
+| `read_file` | Max lines per call | 4,000 | Larger `limit` values are clamped. |
 | `read_file` | Max file size | 2 MiB | Larger files are `too_large`. |
-| `read_file` | Result cap | 32 KiB | Head and tail are kept with a truncation marker. |
+| `read_file` | Result cap | 60 KiB | One contiguous line window; never head+tail. The header names the delivered range and a non-final page ends with `continue with offset=N`. A byte-capped page keeps whole lines; a single over-budget line gets a prefix marker with no continuation. |
 | `read_file` | Binary/non-UTF-8 | rejected | `binary_file`. |
 | `edit_file` | Max resulting file size | 2 MiB | Existing and new files; larger is `too_large`. |
 | `edit_file` | New file mode | 0644 | Existing mode is preserved, including setuid/setgid/sticky bits. |
@@ -131,17 +134,19 @@ Other event payloads:
 | `search` | Max results | 200 | Capped results are marked. |
 | `search` | Max file size | 1 MiB | Larger files are skipped. |
 | `search` | Reported line length | 512 bytes | Longer lines are clipped with `...`. |
-| `search` | Result cap | 32 KiB | Combined result text; truncated flag is set. |
-| `search` | Skipped entries | `.git`, symlinks, binaries, files >1 MiB | Search requires a real directory root. |
+| `search` | Result cap | 60 KiB | Head-only combined result text. Dropped bytes set `truncated`; a result-count cap is its own `[results capped at N]` marker and does not. |
+| `search` | Skipped entries | `.git`, symlinks, binaries, files >1 MiB | Search requires a real directory root; skipped counts are reported by reason in one summary line. |
+| `search` | Glob | Go `path.Match` per segment | `**` matches zero or more whole path segments; `*` and `?` do not cross `/`. |
 | `run_command` | Default timeout | 120 seconds | Per call. |
 | `run_command` | Max timeout | 600 seconds | Larger values are clamped. |
-| `run_command` | Output cap | 64 KiB combined | Head and tail of stdout and stderr, with a truncation marker. |
+| `run_command` | Output cap | 64 KiB combined | Head and tail of stdout and stderr, with a truncation marker. Larger combined output is spilled to a per-run `<state>/work/<session-id>/tool-output/*.log` file (0600, directory 0700) and the absolute path is appended inline. |
 | `run_command` | `WaitDelay` | 5 seconds | Unblocks inherited pipes after cancellation. |
 | `run_command` | Process group | whole group killed | On timeout, cancellation, or interactive interrupt. |
 | `run_command` | stdin | nil | Commands cannot wait for interactive input. |
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, harness `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
+| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; an unknown recorded version is a replay error. `PromptVersion` is unchanged. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration
@@ -155,6 +160,7 @@ Other event payloads:
 | `-max-total-tokens` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
 | `-max-context-tokens` | 0 (unset) | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
 | `-max-output-tokens` | 0 (unset) | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
+| `-require-usage` | off | Opt-in fail-closed accounting: a completed buffered response without provider usage is a `protocol_error` before tools run. Per-run, not inherited. No new budget. |
 | `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | unset | Provider/model default. An explicit non-default value must be advertised by the effective model and match the 32-byte syntax rule; `default` clears. Flag wins over environment; resume/fork inherit the latest recorded value. Invalid or unsupported values exit 2. No new run budget. |
 | `-session-timeout` | 0 (none) | Per run when explicit and positive; `0`/omitted no deadline; negative is a config error. |
 | `-model-timeout` | 0 (none) | Per model attempt when explicit and positive; `0`/omitted no harness deadline; negative is a config error. |

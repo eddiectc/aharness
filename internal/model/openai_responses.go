@@ -88,8 +88,39 @@ type responsesError struct {
 }
 
 type responsesUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens         int                           `json:"input_tokens"`
+	InputTokensDetails  *responsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
+	OutputTokens        int                           `json:"output_tokens"`
+	OutputTokensDetails *responsesOutputTokensDetails `json:"output_tokens_details,omitempty"`
+}
+
+type responsesInputTokensDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
+}
+
+type responsesOutputTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// canonical maps one wire usage object into the canonical accounting.
+func (u *responsesUsage) canonical() Usage {
+	if u == nil {
+		return Usage{}
+	}
+	usage := Usage{
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		Reported:     true,
+	}
+	if details := u.InputTokensDetails; details != nil {
+		usage.CachedInputTokens = details.CachedTokens
+		usage.CacheWriteInputTokens = details.CacheWriteTokens
+	}
+	if details := u.OutputTokensDetails; details != nil {
+		usage.ReasoningOutputTokens = details.ReasoningTokens
+	}
+	return usage
 }
 
 type responsesOutputKind struct {
@@ -326,9 +357,9 @@ func consumeResponsesStream(r io.Reader, emit func(string) error, token string) 
 func (r responsesResponse) canonical(token string) (Response, error) {
 	var out Response
 	if r.Usage != nil {
-		out.Usage = Usage{
-			InputTokens:  r.Usage.InputTokens,
-			OutputTokens: r.Usage.OutputTokens,
+		out.Usage = r.Usage.canonical()
+		if err := validateUsage(out.Usage); err != nil {
+			return Response{}, err
 		}
 	}
 

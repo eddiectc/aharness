@@ -1,0 +1,6 @@
+{
+  "cluster": "shell-pipeline",
+  "language": "sh",
+  "timeout": 30,
+  "notes": "Multi-file rename including a nested directory."
+}

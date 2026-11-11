@@ -184,6 +184,7 @@ func resolveNewModel(ctx context.Context, cfg *config, source model.CatalogSourc
 	if err := applyCatalogModel(cfg, m, func(w string) { warnf(stderr, "%s", w) }); err != nil {
 		return err
 	}
+	cfg.Pricing = m.Pricing(cat.Source, cat.FetchedAt)
 	if cfg.thinkingEffortSet && cfg.ThinkingEffort != "" {
 		if err := validateModelThinkingEffort(cfg.ThinkingEffort, m); err != nil {
 			return err
@@ -298,6 +299,7 @@ func resolveSessionThinkingEffort(ctx context.Context, cfg *config, state agent.
 			if err != nil {
 				return err
 			}
+			cfg.Pricing = m.Pricing(loaded.Source, loaded.FetchedAt)
 			resolved = &m
 		}
 		return validateModelThinkingEffort(cfg.ThinkingEffort, *resolved)
@@ -351,11 +353,13 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 		if err := applyCatalogModel(cfg, m, warn); err != nil {
 			return err
 		}
+		cfg.Pricing = m.Pricing(cat.Source, cat.FetchedAt)
 		resolved = &m
 		if m.Deprecated {
 			warn(fmt.Sprintf("model %s is deprecated", m.ID))
 		}
 	} else {
+		cfg.Pricing = state.Pricing
 		cfg.Model = state.Model
 		if cfg.Model == "" {
 			cfg.Model = state.InitialModel

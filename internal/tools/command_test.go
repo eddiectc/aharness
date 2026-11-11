@@ -150,6 +150,152 @@ func TestRunCommandOutputCap(t *testing.T) {
 	if !strings.Contains(res.Output, "[truncated ") {
 		t.Errorf("output missing truncation marker")
 	}
+	if len(res.Details) != 0 {
+		t.Errorf("Details = %s, want none when WorkDir is empty", res.Details)
+	}
+	if strings.Contains(res.Output, "full output:") {
+		t.Errorf("output advertises a spill path without a work dir")
+	}
+}
+
+func newSpillRegistry(t *testing.T) (*Registry, string) {
+	t.Helper()
+	ws, _ := newTestWorkspace(t)
+	work := t.TempDir()
+	return NewRegistry(ws, Options{
+		HomeDir: t.TempDir(),
+		TmpDir:  t.TempDir(),
+		WorkDir: work,
+	}), work
+}
+
+func TestRunCommandOutputSpill(t *testing.T) {
+	r, work := newSpillRegistry(t)
+	res := executeArgs(t, r, "run_command", map[string]any{
+		"command": "head -c 1000000 /dev/zero | tr '\\000' 'x'",
+	})
+	if !res.OK {
+		t.Fatalf("run_command(spill) failed: code=%s error=%s", res.Code, res.Error)
+	}
+	if res.ExitCode == nil || *res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %v, want 0", res.ExitCode)
+	}
+	if !res.Truncated {
+		t.Errorf("Truncated = false, want true")
+	}
+	if len(res.Output) > commandOutputCap {
+		t.Errorf("inline output length = %d, want <= %d", len(res.Output), commandOutputCap)
+	}
+	if len(res.Details) == 0 {
+		t.Fatalf("Details is empty, want spilled path")
+	}
+	var details struct {
+		Spilled bool   `json:"spilled"`
+		Path    string `json:"path"`
+	}
+	if err := jsonv2.Unmarshal(res.Details, &details); err != nil {
+		t.Fatalf("decode details: %v", err)
+	}
+	if !details.Spilled {
+		t.Errorf("details.spilled = false, want true")
+	}
+	if details.Path == "" || !filepath.IsAbs(details.Path) {
+		t.Fatalf("spill path = %q, want an absolute path", details.Path)
+	}
+	spillDir := filepath.Join(work, spillDirName)
+	if !strings.HasPrefix(details.Path, spillDir+string(filepath.Separator)) {
+		t.Errorf("spill path %q escapes %q", details.Path, spillDir)
+	}
+	if !strings.Contains(res.Output, "\nfull output: "+details.Path+"\n") {
+		t.Errorf("inline output does not name the spill path %q", details.Path)
+	}
+
+	info, err := os.Stat(details.Path)
+	if err != nil {
+		t.Fatalf("stat spill file: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("spill file mode = %v, want a regular file", info.Mode())
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("spill file mode = %o, want 600", got)
+	}
+	dirInfo, err := os.Stat(spillDir)
+	if err != nil {
+		t.Fatalf("stat spill dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Errorf("spill dir mode = %o, want 700", got)
+	}
+	content, err := os.ReadFile(details.Path)
+	if err != nil {
+		t.Fatalf("read spill file: %v", err)
+	}
+	if len(content) != 1_000_000 {
+		t.Errorf("spill length = %d, want 1000000", len(content))
+	}
+	if len(content) > 0 && (content[0] != 'x' || content[len(content)-1] != 'x') {
+		t.Errorf("spill content is not the raw command output")
+	}
+
+	if err := os.RemoveAll(work); err != nil {
+		t.Fatalf("remove work dir: %v", err)
+	}
+	if _, err := os.Stat(details.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("spill file survived work-dir cleanup: %v", err)
+	}
+}
+
+func TestRunCommandNoSpillUnderCap(t *testing.T) {
+	r, work := newSpillRegistry(t)
+	res := executeArgs(t, r, "run_command", map[string]any{
+		"command": "head -c 1000 /dev/zero | tr '\\000' 'x'",
+	})
+	if !res.OK {
+		t.Fatalf("run_command(under cap) failed: %s", res.Error)
+	}
+	if res.Truncated {
+		t.Errorf("Truncated = true, want false")
+	}
+	if len(res.Details) != 0 {
+		t.Errorf("Details = %s, want none under the cap", res.Details)
+	}
+	if strings.Contains(res.Output, "full output:") {
+		t.Errorf("output advertises a spill path under the cap")
+	}
+	if entries, err := os.ReadDir(filepath.Join(work, spillDirName)); err == nil && len(entries) > 0 {
+		t.Errorf("spill directory has %d entries under the cap", len(entries))
+	}
+}
+
+func TestRunCommandSpillRejectsSymlinkDirectory(t *testing.T) {
+	r, work := newSpillRegistry(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(work, spillDirName)); err != nil {
+		t.Fatalf("symlink spill dir: %v", err)
+	}
+	res := executeArgs(t, r, "run_command", map[string]any{
+		"command": "head -c 200000 /dev/zero | tr '\\000' 'x'",
+	})
+	if !res.OK {
+		t.Fatalf("run_command(symlink spill dir) failed: code=%s error=%s", res.Code, res.Error)
+	}
+	if !res.Truncated {
+		t.Errorf("Truncated = false, want true for oversized inline output")
+	}
+	if len(res.Details) != 0 {
+		t.Errorf("Details = %s, want none when the spill directory is a symlink", res.Details)
+	}
+	if strings.Contains(res.Output, "full output:") {
+		t.Errorf("output advertises a spill path that was not created")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatalf("read outside dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("spill escaped through a symlink: %d entries", len(entries))
+	}
 }
 
 func TestRunCommandSanitizesUTF8(t *testing.T) {

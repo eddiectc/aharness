@@ -1,0 +1,6 @@
+{
+  "cluster": "text-transform",
+  "language": "text",
+  "timeout": 30,
+  "notes": "Straight sort preserving duplicate lines."
+}

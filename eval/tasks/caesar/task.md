@@ -1,0 +1,1 @@
+Shift in caesar.go must rotate letters by n, including negative n, leaving other bytes unchanged. The failing test covers negative shifts and wrapping. Fix the implementation; do not modify caesar_test.go.

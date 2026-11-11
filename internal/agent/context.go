@@ -51,11 +51,11 @@ func Project(events []session.Event, limits Limits) (Projection, error) {
 	if start.PromptVersion != PromptVersion {
 		return Projection{}, fmt.Errorf("project: unsupported prompt version %q", start.PromptVersion)
 	}
-	if start.ToolsetVersion != tools.Version {
-		return Projection{}, fmt.Errorf("project: unsupported toolset version %q", start.ToolsetVersion)
+	schemas, err := tools.SchemasFor(start.ToolsetVersion)
+	if err != nil {
+		return Projection{}, fmt.Errorf("project: %w", err)
 	}
 
-	schemas := tools.Schemas()
 	projected := []projectedMessage{{
 		kind: projectionSystem,
 		msg:  model.Message{Role: model.RoleSystem, Content: systemPrompt(start.Workspace)},
@@ -176,6 +176,7 @@ func Project(events []session.Event, limits Limits) (Projection, error) {
 
 	projection := Projection{
 		Messages:             messages,
+		Schemas:              schemas,
 		EstimatedInputTokens: estimated,
 		BeforeTokens:         before,
 		AfterTokens:          estimated,

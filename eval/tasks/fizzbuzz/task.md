@@ -1,0 +1,1 @@
+FizzBuzz in fizzbuzz.go returns the wrong label for multiples of 15 because the cases are ordered incorrectly. Fix the order so multiples of 15 return "FizzBuzz", multiples of 3 "Fizz", multiples of 5 "Buzz". Keep the test.

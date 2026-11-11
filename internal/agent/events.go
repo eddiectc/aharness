@@ -34,23 +34,25 @@ type sessionStartData struct {
 }
 
 type runStartData struct {
-	RunID            string `json:"run_id"`
-	ResumedFromSeq   uint64 `json:"resumed_from_seq"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	Dialect          string `json:"dialect"`
-	BaseURL          string `json:"base_url"`
-	Limits           Limits `json:"limits"`
-	MaxTurns         int    `json:"max_turns"`
-	MaxTotalTokens   int    `json:"max_total_tokens"`
-	SessionTimeoutMS int64  `json:"session_timeout_ms"`
-	ModelTimeoutMS   int64  `json:"model_timeout_ms"`
-	PromptVersion    string `json:"prompt_version"`
-	ToolsetVersion   string `json:"toolset_version"`
-	HarnessVersion   string `json:"harness_version"`
-	Interactive      bool   `json:"interactive"`
-	Stream           bool   `json:"stream"`
-	ThinkingEffort   string `json:"thinking_effort,omitempty"`
+	RunID            string        `json:"run_id"`
+	ResumedFromSeq   uint64        `json:"resumed_from_seq"`
+	Provider         string        `json:"provider"`
+	Model            string        `json:"model"`
+	Dialect          string        `json:"dialect"`
+	BaseURL          string        `json:"base_url"`
+	Limits           Limits        `json:"limits"`
+	MaxTurns         int           `json:"max_turns"`
+	MaxTotalTokens   int           `json:"max_total_tokens"`
+	SessionTimeoutMS int64         `json:"session_timeout_ms"`
+	ModelTimeoutMS   int64         `json:"model_timeout_ms"`
+	PromptVersion    string        `json:"prompt_version"`
+	ToolsetVersion   string        `json:"toolset_version"`
+	HarnessVersion   string        `json:"harness_version"`
+	Interactive      bool          `json:"interactive"`
+	Stream           bool          `json:"stream"`
+	ThinkingEffort   string        `json:"thinking_effort,omitempty"`
+	RequireUsage     bool          `json:"require_usage"`
+	Pricing          model.Pricing `json:"pricing"`
 }
 
 type userMessageData struct {
@@ -80,9 +82,13 @@ type modelResponseData struct {
 	ToolCalls    []loggedToolCall   `json:"tool_calls,omitempty"`
 	FinishReason model.FinishReason `json:"finish_reason"`
 	Usage        model.Usage        `json:"usage"`
-	LatencyMS    int64              `json:"latency_ms"`
-	Attempt      int                `json:"attempt"`
-	Streamed     bool               `json:"streamed"`
+	// CostMicroUSD is present only when the run's pricing snapshot could
+	// price this response; nil distinguishes an unpriced response from a
+	// priced zero-cost response.
+	CostMicroUSD *int64 `json:"cost_micro_usd,omitempty"`
+	LatencyMS    int64  `json:"latency_ms"`
+	Attempt      int    `json:"attempt"`
+	Streamed     bool   `json:"streamed"`
 }
 
 type modelRetryData struct {
@@ -147,6 +153,13 @@ type runEndData struct {
 	Turns      int         `json:"turns"`
 	Usage      model.Usage `json:"usage"`
 	DurationMS int64       `json:"duration_ms"`
+	// Cost fields are observational estimates. Completeness flags are false
+	// when any model response in the run or cumulative session lacked a
+	// price.
+	RunCostMicroUSD int64 `json:"run_cost_micro_usd,omitempty"`
+	CostMicroUSD    int64 `json:"cost_micro_usd,omitempty"`
+	RunCostComplete bool  `json:"run_cost_complete"`
+	CostComplete    bool  `json:"cost_complete"`
 }
 
 // User-message sources recorded in the event log.

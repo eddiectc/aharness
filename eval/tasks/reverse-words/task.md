@@ -1,0 +1,1 @@
+ReverseWords in reverse.go must reverse the order of whitespace-separated words (the current loop rotates them). Fix it so "one two three" becomes "three two one" and extra spaces are normalized. Keep the test unchanged.

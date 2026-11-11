@@ -65,9 +65,10 @@ func (r *Registry) executeRunCommand(ctx context.Context, args json.RawMessage) 
 
 	stdout := &cappedBuffer{max: commandOutputCap}
 	stderr := &cappedBuffer{max: commandOutputCap}
+	spill := newSpillCapture(r.opts.WorkDir, commandOutputCap)
 	cmd := newShellCommand(runCtx, a.Command, dir, commandEnv(r.opts), commandWaitDelay)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd.Stdout = spillWriter{inline: stdout, capture: spill, stream: 0}
+	cmd.Stderr = spillWriter{inline: stderr, capture: spill, stream: 1}
 	cmd.Stdin = nil
 
 	start := time.Now()
@@ -82,6 +83,7 @@ func (r *Registry) executeRunCommand(ctx context.Context, args json.RawMessage) 
 	elapsed := time.Since(start).Milliseconds()
 
 	out, streamTruncated := commandOutput(stdout, stderr)
+	out, truncated, details := finalizeCommandOutput(out, streamTruncated, spill)
 	if code, msg, timedOut := commandContextFailure(ctx, runCtx); code != "" {
 		return Result{
 			OK:         false,
@@ -89,7 +91,8 @@ func (r *Registry) executeRunCommand(ctx context.Context, args json.RawMessage) 
 			Output:     out,
 			Error:      msg,
 			TimedOut:   timedOut,
-			Truncated:  streamTruncated,
+			Truncated:  truncated,
+			Details:    details,
 			DurationMS: elapsed,
 		}
 	}
@@ -98,22 +101,23 @@ func (r *Registry) executeRunCommand(ctx context.Context, args json.RawMessage) 
 	switch {
 	case waitErr == nil:
 		code := 0
-		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: streamTruncated, DurationMS: elapsed}
+		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: truncated, Details: details, DurationMS: elapsed}
 	case errors.As(waitErr, &exitErr):
 		code := exitErr.ExitCode()
-		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: streamTruncated, DurationMS: elapsed}
+		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: truncated, Details: details, DurationMS: elapsed}
 	case cmd.ProcessState != nil:
 		// WaitDelay (or a post-exit wait error) can surface after the process
 		// itself finished; the process status is still the normal result.
 		code := cmd.ProcessState.ExitCode()
-		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: streamTruncated, DurationMS: elapsed}
+		return Result{OK: true, Code: CodeOK, Output: out, ExitCode: &code, Truncated: truncated, Details: details, DurationMS: elapsed}
 	default:
 		return Result{
 			OK:         false,
 			Code:       CodeSpawnFailed,
 			Output:     out,
 			Error:      sanitizeUTF8(fmt.Sprintf("wait for command: %v", waitErr)),
-			Truncated:  streamTruncated,
+			Truncated:  truncated,
+			Details:    details,
 			DurationMS: elapsed,
 		}
 	}

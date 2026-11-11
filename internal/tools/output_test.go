@@ -54,6 +54,55 @@ func TestCapOutputUTF8Boundaries(t *testing.T) {
 	}
 }
 
+func TestCapHeadOutputTruncatesHeadOnly(t *testing.T) {
+	input := strings.Repeat("a", 2000)
+	const max = 200
+	got, truncated := capHeadOutput(input, max)
+	if !truncated {
+		t.Fatalf("capHeadOutput(2000 bytes, max 200) truncated = false, want true")
+	}
+	if len(got) > max {
+		t.Errorf("capHeadOutput length = %d, want <= %d", len(got), max)
+	}
+	if !strings.HasPrefix(got, "aaa") {
+		t.Errorf("capHeadOutput lost the head: %q", got)
+	}
+	if !strings.Contains(got, "[truncated ") || !strings.HasSuffix(got, "bytes]\n") {
+		t.Errorf("capHeadOutput missing truncation marker: %q", got)
+	}
+	if strings.Contains(got, strings.Repeat("a", max)) {
+		t.Errorf("capHeadOutput kept bytes past the cap")
+	}
+}
+
+func TestCapHeadOutputShort(t *testing.T) {
+	const input = "hello\n"
+	got, truncated := capHeadOutput(input, 32)
+	if truncated {
+		t.Errorf("capHeadOutput short = truncated true, want false")
+	}
+	if got != input {
+		t.Errorf("capHeadOutput short = %q, want %q", got, input)
+	}
+}
+
+func TestCapHeadOutputUTF8Boundaries(t *testing.T) {
+	input := strings.Repeat("é", 1000)
+	for _, max := range []int{31, 32, 33, 64, 101} {
+		got, truncated := capHeadOutput(input, max)
+		if !truncated {
+			t.Errorf("capHeadOutput(é*1000, %d) truncated = false", max)
+			continue
+		}
+		if len(got) > max {
+			t.Errorf("capHeadOutput(é*1000, %d) length = %d, want <= %d", max, len(got), max)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("capHeadOutput(é*1000, %d) produced invalid UTF-8", max)
+		}
+	}
+}
+
 func TestCappedBuffer(t *testing.T) {
 	t.Run("small", func(t *testing.T) {
 		var b cappedBuffer

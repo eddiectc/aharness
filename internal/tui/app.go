@@ -84,6 +84,10 @@ type Info struct {
 	MaxTotalTokens int
 	Turns          int
 	Usage          model.Usage
+	// CostMicroUSD is the cumulative estimated session cost; CostComplete is
+	// false when any model response lacked a price.
+	CostMicroUSD   int64
+	CostComplete   bool
 	ThinkingEffort string
 }
 
@@ -187,12 +191,14 @@ type (
 		ThinkingEffort string
 	}
 	EventRunFinished struct {
-		Status   agent.StopReason
-		Reason   string
-		RunTurns int
-		RunUsage model.Usage
-		Turns    int
-		Usage    model.Usage
+		Status          agent.StopReason
+		Reason          string
+		RunTurns        int
+		RunUsage        model.Usage
+		RunCostMicroUSD *int64
+		Turns           int
+		Usage           model.Usage
+		CostMicroUSD    *int64
 	}
 	EventToolStarted struct {
 		CallID    string
@@ -1002,13 +1008,22 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	m.run.state = StateIdle
 	m.dirty = true
 	if !alreadyFinished {
+		var runCost, cost *int64
+		if result.RunCostComplete {
+			runCost = &result.RunCostMicroUSD
+		}
+		if result.CostComplete {
+			cost = &result.CostMicroUSD
+		}
 		m.emit(EventRunFinished{
-			Status:   status,
-			Reason:   SanitizeLine(reason),
-			RunTurns: result.RunTurns,
-			RunUsage: result.RunUsage,
-			Turns:    result.CumulativeTurns,
-			Usage:    result.CumulativeUsage,
+			Status:          status,
+			Reason:          SanitizeLine(reason),
+			RunTurns:        result.RunTurns,
+			RunUsage:        result.RunUsage,
+			RunCostMicroUSD: runCost,
+			Turns:           result.CumulativeTurns,
+			Usage:           result.CumulativeUsage,
+			CostMicroUSD:    cost,
 		})
 	}
 	switch status {

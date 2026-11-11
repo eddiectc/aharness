@@ -116,7 +116,7 @@ func TestOpenAIChatCompleteCanonical(t *testing.T) {
 			{ID: "call_b", Name: "search", Arguments: json.RawMessage(`{}`)},
 		},
 		FinishReason: FinishToolCalls,
-		Usage:        Usage{InputTokens: 11, OutputTokens: 7},
+		Usage:        Usage{InputTokens: 11, OutputTokens: 7, Reported: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Response = %#v, want %#v", got, want)

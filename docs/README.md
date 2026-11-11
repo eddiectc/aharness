@@ -51,7 +51,7 @@ rewriting its conclusions.
 
 | Document | Status |
 |---|---|
-| [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Proposed; not implemented |
+| [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke and A/B baseline pending credentials |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |

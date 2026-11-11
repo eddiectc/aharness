@@ -130,8 +130,47 @@ real timeouts for subprocess and signal tests.
 - Interrupt/control: model interrupt hint; tool interrupt pairs the interrupted
   call and unstarted calls; TUI steering consumed at turn boundaries and before
   a completed response; batch non-interactive signal behavior.
+- Usage mapping: Chat and Responses, buffered and streamed; absent, empty, and
+  populated detail objects; DeepSeek `prompt_cache_hit_tokens` fallback;
+  cache-write and reasoning subsets; a present all-zero object reported versus
+  an absent object not reported; invalid subset bounds becoming
+  `protocol_error`; old usage JSON decoding with `reported=false`; `Total()`
+  excluding the subsets.
+- Cost and strict usage: catalog cost decoding and micro-USD rounding; a
+  missing cost, negative rate, or non-finite rate leaving pricing unavailable;
+  cache-read fallback to the input rate; reasoning not charged twice; per-call
+  and run aggregation; `run_cost_complete`/`cost_complete` false for an
+  unpriced response; a priced zero-cost response still priced; `-require-usage`
+  accepted for a reported response and rejected before tool execution for an
+  absent one, while the default still accepts missing usage; old v2 logs
+  decode with no cost and `reported=false`.
+- Read windowing: exact line boundaries; default 2,000 and max 4,000 clamps;
+  the 60 KiB byte cap; a 1,175-line/42 KB file in one default call; a
+  500-line/80-byte page with no middle loss; actual `lines A-B of Z` headers;
+  `continue with offset=N` only when lines remain; `truncated` only for byte
+  loss; a single over-budget line prefix with its marker and no continuation;
+  empty files, trailing newlines, CRLF, multibyte UTF-8, offset past EOF, and
+  no index panics.
+- Eval driver: manifest/meta validation, setup-failure exclusion, verifier
+  failure, arm interleaving and recorded order, metrics from a hand-built
+  session fixture, price-table and peak-window cost, catalog-pricing fallback,
+  missing usage not averaged as zero, bootstrap determinism, and summary
+  ordering. The shipped suite test asserts 30 tasks, at least three clusters,
+  executable setup/verify scripts, the price snapshot, and the honest
+  `baseline.json` status.
+- Toolset selection: frozen v0 schemas, current v1 schemas, unknown version
+  error, `Projection.Schemas` and the token estimate using the recorded set,
+  and a seeded v0 session resuming with v0 descriptions.
+- Search: `**` zero-or-more segments versus `*` not crossing `/`; `.git`
+  exclusion; skipped-file counts by reason; count-cap versus byte-truncation
+  flags.
+- Command spill: threshold, 0600 file under the per-run tool-output directory,
+  absolute path in the result and `details`, inline result within 64 KiB,
+  cleanup with the work directory, O_EXCL/no-symlink behavior, and spill
+  failure leaving the inline result usable.
 - Projection: prompt/toolset selection by version; run/control events ignored;
-  resumed and forked histories; repaired calls paired; retained turns.
+  resumed and forked histories; repaired calls paired; retained turns; the
+  selected schema set drives the request and token estimate.
 - Config: new flags; mutual exclusion; task rules; inheritance; explicit
   overrides; provider validation and precedence; list/refresh terminal actions;
   model resolution and provider mismatch; base-URL credential/query/fragment
@@ -187,7 +226,15 @@ diagnostic, not a gate.
   `run_start` records `0`.
 - Streaming: for both dialects, a delta is visible on stdout while the fake
   provider is still blocked; the log has one `model_response` with
-  `streamed=true`; no delta events are written.
+  `streamed=true`; no delta events are written. A buffered and a streamed
+  response with the same logical usage produce the same canonical usage.
+- Usage/cost end to end: a fake provider returns cached, cache-write, and
+  reasoning subsets; `run_start` records the catalog pricing snapshot,
+  `model_response` records the expected `cost_micro_usd`, and `run_end`
+  reconciles run and cumulative cost; a resumed old log with no cost keeps
+  `cost_complete=false`; `-require-usage` stops a missing-usage response before
+  the tool runs; the `-ui-json` run-finished usage carries the additive detail
+  fields without a protocol bump.
 - Resume: a limit-stopped run resumes under the same session ID with inherited
   model/workspace/base URL/context/output values; recorded run budgets are not
   inherited; a torn final line is repaired and recorded;
@@ -254,8 +301,10 @@ Fuzz targets cover the SSE decoder, the v2 JSONL reader/repair path, the TUI
 terminal sanitizer, markdown input, file-path/image containment, the
 `-ui-json` command decoder and frame/event/snapshot encoders, `agent.History`,
 and the models.dev catalog decoder at the trust boundary. Catalog payloads
-include arbitrary `reasoning_options` shapes and values: no panic, no unbounded
-allocation, and deterministic normalization. Seeds live under
+include arbitrary `reasoning_options` shapes and values, and stream seeds
+include usage detail objects and malformed subset bounds: no panic, no unbounded
+allocation, deterministic normalization, and invalid subsets rejected as
+`protocol_error`. Seeds live under
 `internal/model/testdata/fuzz` and `internal/session/testdata/fuzz`; the
 TUI/history targets use built-in seeds. The unit test run executes the seeds; a
 scheduled job MAY run longer fuzzing. The fuzz targets must not make real
@@ -294,6 +343,27 @@ request `snapshot`, inspect the SVG, and confirm the session log is the durable
 record. Use `AHARNESS_LOG_REQUESTS=1` to confirm a default request body has no
 `max_tokens` / `max_output_tokens` field; exercise one explicit output budget
 and one provider `length`/context-overflow outcome.
+
+For usage and cost: run a task that needs at least two tool rounds with
+`-thinking-effort high` and inspect the session for `reported=true`, cached
+input, reasoning output, the `pricing` snapshot in `run_start`, per-response
+`cost_micro_usd`, and `run_end` cost/completeness. Run a two-turn conversation
+and confirm `prompt_cache_hit_tokens` or `cached_input_tokens` is positive on
+the second call when the prefix is stable. Re-run with `-require-usage`; if the
+endpoint omits usage, the run must stop with `protocol_error` before a tool
+executes. A `reported=false` response with the default flag must still complete.
+
+For the read/search/command contract: read a 1,175-line, roughly 42 KB Go file
+in one default call and confirm the header range; page a file with
+`limit` and follow the `continue with offset=N` footer; read a file with one
+line longer than 60 KiB and confirm the truncation marker and absence of a
+misleading continuation. Run a search with `**/*.go` and confirm nested files
+match while `*.go` does not cross directories; search a tree containing a file
+over 1 MiB, a binary file, and a symlink and confirm the skipped summary. Run a
+command that emits about 1 MiB, then page the `full output:` path with a second
+`run_command`; confirm the file is under the session work directory and is gone
+after the run. Finally, confirm a seeded `toolset-v0` session resumes with the
+v0 descriptions while a new session records `toolset-v1`.
 
 For thinking effort: pick a model whose `-list-models` `EFFORT` column is
 non-empty, choose one advertised value, and run a small tool-call round trip
@@ -338,8 +408,13 @@ separation, confirm no delta events are logged, and confirm no
 `<state>/work/<session-id>` directory remains. If a hosted model does not
 stream, record the limitation and do not claim streaming support for it.
 
-This is a manual check, not a built-in eval suite. External benchmarking and
-eval infrastructure are out of scope.
+These are manual checks, not substitute measurements. The dev-only internal
+eval suite lives under `eval/` with the driver in `cmd/aharness-eval`; it runs
+task manifests with setup/verify hooks, extracts session-JSONL metrics, applies
+the price file, and reports paired bootstrap intervals. It is not part of the
+runtime package graph; external benchmarking platforms remain out of scope.
+Its baseline is recorded as `unmeasured` until provider credentials exist, and
+a fake-arm smoke is used only to validate the driver and suite wiring.
 
 The v0 smoke passed for `deepseek-v4.1-flash` (2026-11-09) and
 `muse-spark-1.3-contributor` (2026-11-10). v1 manual smoke results are recorded

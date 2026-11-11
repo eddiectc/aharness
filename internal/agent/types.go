@@ -58,6 +58,12 @@ type Config struct {
 	// ModelTimeout bounds one model attempt; 0 means no harness deadline.
 	ModelTimeout time.Duration
 	LogRequests  bool
+	// RequireUsage makes a completed model response without provider usage a
+	// protocol error before any tool executes.
+	RequireUsage bool
+	// Pricing is the effective catalog price snapshot for this run. An
+	// unavailable snapshot leaves usage uncharged.
+	Pricing model.Pricing
 	// ThinkingEffort is the effective reasoning effort for every model call
 	// in this run. Empty means the provider/model default.
 	ThinkingEffort string
@@ -147,12 +153,19 @@ type Result struct {
 	RunUsage        model.Usage
 	CumulativeTurns int
 	CumulativeUsage model.Usage
+	// Cost fields are observational estimates from the run's pricing
+	// snapshot. Completeness is false when any response lacked a price.
+	RunCostMicroUSD int64
+	CostMicroUSD    int64
+	RunCostComplete bool
+	CostComplete    bool
 	Err             error
 }
 
 // Projection is the model input rebuilt from the event log.
 type Projection struct {
 	Messages             []model.Message
+	Schemas              []model.ToolSchema
 	EstimatedInputTokens int
 	BeforeTokens         int
 	AfterTokens          int

@@ -1,0 +1,6 @@
+{
+  "cluster": "text-transform",
+  "language": "text",
+  "timeout": 30,
+  "notes": "Two single-line JSON files require a search across files."
+}

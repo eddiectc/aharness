@@ -1,0 +1,6 @@
+{
+  "cluster": "shell-pipeline",
+  "language": "sh",
+  "timeout": 30,
+  "notes": "Sum a CSV column into a single-value file."
+}

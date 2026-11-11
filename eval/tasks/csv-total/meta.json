@@ -1,0 +1,6 @@
+{
+  "cluster": "go-fix",
+  "language": "go",
+  "timeout": 90,
+  "notes": "Skip the header row when summing."
+}

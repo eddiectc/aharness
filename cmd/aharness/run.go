@@ -337,7 +337,7 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 	if sink != nil {
 		rcfg.Display = textDisplay(sink)
 	}
-	registry := tools.NewRegistry(ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir})
+	registry := tools.NewRegistry(ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir, WorkDir: workDir})
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
 	result, runErr := runner.Run(runCtx, opts)
@@ -400,6 +400,8 @@ func runnerConfig(cfg config) agent.Config {
 		LogRequests:    cfg.LogRequests,
 		Stream:         cfg.Stream,
 		ThinkingEffort: cfg.ThinkingEffort,
+		RequireUsage:   cfg.RequireUsage,
+		Pricing:        cfg.Pricing,
 	}
 }
 

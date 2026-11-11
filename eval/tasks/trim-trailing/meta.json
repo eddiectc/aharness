@@ -1,0 +1,6 @@
+{
+  "cluster": "text-transform",
+  "language": "text",
+  "timeout": 30,
+  "notes": "Uses printf so trailing whitespace is exact in the fixture."
+}

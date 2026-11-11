@@ -1,0 +1,6 @@
+{
+  "cluster": "go-fix",
+  "language": "go",
+  "timeout": 90,
+  "notes": "Check divisibility by 15 before 3 and 5."
+}

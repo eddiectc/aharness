@@ -1,0 +1,1 @@
+Rename every .log file under the workspace (including subdirectories) to the same name with a .txt extension. Do not copy; the .log names must be gone. Write renamed.txt listing the new workspace-relative paths, sorted ascending, one per line.

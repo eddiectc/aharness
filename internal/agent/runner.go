@@ -112,6 +112,10 @@ type runState struct {
 	usage            model.Usage
 	runTurns         int
 	runUsage         model.Usage
+	cost             int64
+	runCost          int64
+	costComplete     bool
+	runCostComplete  bool
 	lastText         string
 	lastElided       int
 	compactionTarget int
@@ -142,6 +146,9 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	}
 	st.turns = state.Turns
 	st.usage = state.Usage
+	st.cost = state.CostMicroUSD
+	st.costComplete = state.CostComplete
+	st.runCostComplete = true
 
 	// Repair every unpaired call before the new run starts so the pairing
 	// invariant holds even after a crash.
@@ -295,6 +302,8 @@ func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
 		Interactive:      r.cfg.Interactive,
 		Stream:           r.cfg.Stream,
 		ThinkingEffort:   r.cfg.ThinkingEffort,
+		RequireUsage:     r.cfg.RequireUsage,
+		Pricing:          r.cfg.Pricing,
 	}
 	return r.record(session.TypeRunStart, 0, "", data)
 }
@@ -418,7 +427,7 @@ func (r *Runner) executeTurn(ctx context.Context, res *Result, st *runState, pro
 	req := model.Request{
 		Model:           r.cfg.Model,
 		Messages:        proj.Messages,
-		Tools:           r.tools.Schemas(),
+		Tools:           proj.Schemas,
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
 		ThinkingEffort:  r.cfg.ThinkingEffort,
 	}
@@ -537,7 +546,7 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 	req := model.Request{
 		Model:           r.cfg.Model,
 		Messages:        next.Messages,
-		Tools:           r.tools.Schemas(),
+		Tools:           next.Schemas,
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
 		ThinkingEffort:  r.cfg.ThinkingEffort,
 	}
@@ -619,7 +628,12 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 			return r.failDisplay(res, st, err, "failed to display the model response")
 		}
 	}
-	if err := r.recordResponse(comp, turn); err != nil {
+	cost, priced := r.cfg.Pricing.Cost(comp.resp.Usage)
+	var costMicroUSD *int64
+	if priced {
+		costMicroUSD = &cost
+	}
+	if err := r.recordResponse(comp, turn, costMicroUSD); err != nil {
 		res.Err = err
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the model response")
 	}
@@ -638,6 +652,13 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 	st.usage.OutputTokens += comp.resp.Usage.OutputTokens
 	st.runUsage.InputTokens += comp.resp.Usage.InputTokens
 	st.runUsage.OutputTokens += comp.resp.Usage.OutputTokens
+	if priced {
+		st.cost += cost
+		st.runCost += cost
+	} else {
+		st.costComplete = false
+		st.runCostComplete = false
+	}
 	if comp.resp.Text != "" {
 		st.lastText = comp.resp.Text
 	}
@@ -652,6 +673,15 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 			"streamed", comp.streamed,
 			"latency_ms", comp.latency.Milliseconds(),
 		)
+	}
+	if r.cfg.RequireUsage && !comp.resp.Usage.Reported {
+		const message = "model response did not report token usage (-require-usage)"
+		if err := r.recordError(st.turns, errorClassProtocol, message); err != nil {
+			res.Err = err
+			return r.finishTerminal(res, st, StopInternalError, "failed to record an error event")
+		}
+		res.Err = errors.New(message)
+		return r.finishTerminal(res, st, StopProtocolError, message)
 	}
 
 	if len(comp.resp.ToolCalls) == 0 {
@@ -900,6 +930,10 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	res.RunUsage = st.runUsage
 	res.CumulativeTurns = st.turns
 	res.CumulativeUsage = st.usage
+	res.RunCostMicroUSD = st.runCost
+	res.CostMicroUSD = st.cost
+	res.RunCostComplete = st.runCostComplete
+	res.CostComplete = st.costComplete
 	if st.finalized {
 		return *res, res.Err
 	}
@@ -910,13 +944,17 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 		Text:   capText(st.lastText, maxEventTextBytes),
 	})
 	endErr := r.record(session.TypeRunEnd, st.turns, "", runEndData{
-		Status:     status,
-		Reason:     capText(reason, maxErrorEventBytes),
-		RunTurns:   st.runTurns,
-		RunUsage:   st.runUsage,
-		Turns:      st.turns,
-		Usage:      st.usage,
-		DurationMS: time.Since(st.start).Milliseconds(),
+		Status:          status,
+		Reason:          capText(reason, maxErrorEventBytes),
+		RunTurns:        st.runTurns,
+		RunUsage:        st.runUsage,
+		Turns:           st.turns,
+		Usage:           st.usage,
+		DurationMS:      time.Since(st.start).Milliseconds(),
+		RunCostMicroUSD: st.runCost,
+		CostMicroUSD:    st.cost,
+		RunCostComplete: st.runCostComplete,
+		CostComplete:    st.costComplete,
 	})
 	syncErr := r.sync()
 	if failures := errors.Join(finalErr, endErr, syncErr); failures != nil {
@@ -1017,12 +1055,13 @@ func (r *Runner) recordErrorWithPartial(turn int, class, message, partial string
 	return r.notice(turn, NoticeError, cappedMessage)
 }
 
-func (r *Runner) recordResponse(comp completion, turn int) error {
+func (r *Runner) recordResponse(comp completion, turn int, costMicroUSD *int64) error {
 	return r.record(session.TypeModelResponse, turn, string(model.RoleAssistant), modelResponseData{
 		Text:         cleanText(comp.resp.Text),
 		ToolCalls:    loggableToolCalls(comp.resp.ToolCalls),
 		FinishReason: comp.resp.FinishReason,
 		Usage:        comp.resp.Usage,
+		CostMicroUSD: costMicroUSD,
 		LatencyMS:    comp.latency.Milliseconds(),
 		Attempt:      comp.attempt,
 		Streamed:     comp.streamed,

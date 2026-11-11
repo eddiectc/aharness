@@ -1169,3 +1169,168 @@ func TestBinaryOneMiBStreamedResponseRoundTrips(t *testing.T) {
 	}
 	t.Fatal("no model_response event")
 }
+
+func TestBinaryRequireUsageStopsBeforeTools(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if call != 1 {
+			t.Errorf("provider calls = %d, want 1 (no tool round)", call)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "calling",
+					"tool_calls": []any{map[string]any{
+						"id":   "call_1",
+						"type": "function",
+						"function": map[string]any{
+							"name":      "read_file",
+							"arguments": `{"path":"a.go"}`,
+						},
+					}},
+				},
+				"finish_reason": "tool_calls",
+			}},
+		})
+	})
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(t.TempDir(), "state")
+	run := runHarness(t, bin, workspace, stateDir, f.url,
+		"-batch", "-require-usage", "-task", "read a.go", "-model", "deepseek-v4.1-flash",
+		"-max-turns", "2", "-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if run.exit != 4 {
+		t.Fatalf("exit = %d, want 4 (protocol_error)\nstderr:\n%s", run.exit, run.stderr)
+	}
+	events := readSessionEvents(t, sessionFiles(t, stateDir)[0])
+	if got := countEventType(events, session.TypeModelResponse); got != 1 {
+		t.Errorf("model_response events = %d, want 1", got)
+	}
+	if got := countEventType(events, session.TypeToolResult); got != 0 {
+		t.Errorf("tool_result events = %d, want 0", got)
+	}
+	if got := countEventType(events, session.TypeError); got != 1 {
+		t.Errorf("error events = %d, want 1", got)
+	}
+	var start struct {
+		RequireUsage bool `json:"require_usage"`
+	}
+	for _, ev := range events {
+		if ev.Type != session.TypeRunStart {
+			continue
+		}
+		if err := json.Unmarshal(ev.Data, &start); err != nil {
+			t.Fatalf("decode run_start: %v", err)
+		}
+	}
+	if !start.RequireUsage {
+		t.Error("run_start require_usage = false, want true")
+	}
+}
+
+func TestBinaryRecordsCatalogCost(t *testing.T) {
+	bin := buildHarness(t)
+	catalog := startFakeModelsDev(t)
+	catalog.SetRawBody([]byte(`{
+	  "opencode-go": {
+	    "npm": "@ai-sdk/openai-compatible",
+	    "api": "https://opencode.ai/inference/go/openai/v1",
+	    "models": {
+	      "deepseek-v4.1-flash": {
+	        "name": "DeepSeek V4.1 Flash",
+	        "tool_call": true,
+	        "limit": {"context": 200000},
+	        "modalities": {"output": ["text"]},
+	        "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003, "cache_write": 0.18}
+	      }
+	    }
+	  }
+	}`))
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"choices": []any{map[string]any{
+				"message":       map[string]any{"role": "assistant", "content": "done"},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":             1000,
+				"completion_tokens":         200,
+				"prompt_tokens_details":     map[string]any{"cached_tokens": 400, "cache_write_tokens": 100},
+				"completion_tokens_details": map[string]any{"reasoning_tokens": 50},
+			},
+		})
+	})
+	workspace := t.TempDir()
+	stateDir := filepath.Join(t.TempDir(), "state")
+	run := runHarnessEnv(t, bin, workspace, stateDir, f.url,
+		[]string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()},
+		"-batch", "-task", "say done", "-model", "deepseek-v4.1-flash",
+		"-max-turns", "1", "-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if run.exit != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", run.exit, run.stderr)
+	}
+	events := readSessionEvents(t, sessionFiles(t, stateDir)[0])
+	var start struct {
+		Pricing struct {
+			Available         bool   `json:"available"`
+			Currency          string `json:"currency"`
+			Unit              string `json:"unit"`
+			InputMicroUSD     int64  `json:"input_micro_usd"`
+			OutputMicroUSD    int64  `json:"output_micro_usd"`
+			CacheReadMicroUSD int64  `json:"cache_read_micro_usd"`
+			Source            string `json:"source"`
+		} `json:"pricing"`
+	}
+	var response struct {
+		Usage struct {
+			CachedInputTokens     int  `json:"cached_input_tokens"`
+			CacheWriteInputTokens int  `json:"cache_write_input_tokens"`
+			ReasoningOutputTokens int  `json:"reasoning_output_tokens"`
+			Reported              bool `json:"reported"`
+		} `json:"usage"`
+		CostMicroUSD *int64 `json:"cost_micro_usd"`
+	}
+	var end struct {
+		RunCostMicroUSD int64 `json:"run_cost_micro_usd"`
+		CostMicroUSD    int64 `json:"cost_micro_usd"`
+		RunCostComplete bool  `json:"run_cost_complete"`
+		CostComplete    bool  `json:"cost_complete"`
+	}
+	for _, ev := range events {
+		switch ev.Type {
+		case session.TypeRunStart:
+			if err := json.Unmarshal(ev.Data, &start); err != nil {
+				t.Fatal(err)
+			}
+		case session.TypeModelResponse:
+			if err := json.Unmarshal(ev.Data, &response); err != nil {
+				t.Fatal(err)
+			}
+		case session.TypeRunEnd:
+			if err := json.Unmarshal(ev.Data, &end); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !start.Pricing.Available || start.Pricing.Currency != "USD" || start.Pricing.Unit != "per_million_tokens" {
+		t.Errorf("pricing snapshot = %+v, want available USD per_million_tokens", start.Pricing)
+	}
+	if start.Pricing.InputMicroUSD != 150000 || start.Pricing.OutputMicroUSD != 600000 ||
+		start.Pricing.CacheReadMicroUSD != 3000 || start.Pricing.Source != catalog.URL() {
+		t.Errorf("pricing rates/source = %+v", start.Pricing)
+	}
+	if response.Usage.CachedInputTokens != 400 || response.Usage.CacheWriteInputTokens != 100 ||
+		response.Usage.ReasoningOutputTokens != 50 || !response.Usage.Reported {
+		t.Errorf("usage detail = %+v", response.Usage)
+	}
+	if response.CostMicroUSD == nil || *response.CostMicroUSD != 214 {
+		t.Errorf("model_response cost = %v, want 214", response.CostMicroUSD)
+	}
+	if end.RunCostMicroUSD != 214 || end.CostMicroUSD != 214 || !end.RunCostComplete || !end.CostComplete {
+		t.Errorf("run_end cost = %+v, want 214/214 complete", end)
+	}
+}

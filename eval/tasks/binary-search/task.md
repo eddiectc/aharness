@@ -1,0 +1,1 @@
+Index in search.go performs binary search over sorted ints and returns the target index. It returns the wrong value when the target is absent; it should return -1. Fix it without changing search_test.go.

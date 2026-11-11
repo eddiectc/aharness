@@ -25,7 +25,7 @@ type Registry struct {
 	fs   map[string]toolFunc
 }
 
-// NewRegistry constructs the v0 tool registry for one workspace.
+// NewRegistry constructs the tool registry for one workspace.
 func NewRegistry(ws *Workspace, opts Options) *Registry {
 	r := &Registry{ws: ws, opts: opts}
 	r.fs = map[string]toolFunc{
@@ -37,7 +37,7 @@ func NewRegistry(ws *Workspace, opts Options) *Registry {
 	return r
 }
 
-// Schemas returns a copy of the v0 tool declarations.
+// Schemas returns a copy of the current tool declarations.
 func (r *Registry) Schemas() []model.ToolSchema {
 	return Schemas()
 }

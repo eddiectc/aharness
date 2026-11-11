@@ -483,6 +483,16 @@ func formatTurnBudget(turns, maxTurns int) string {
 
 // formatTokenBudget renders cumulative tokens with an explicit positive budget.
 // A zero budget means unlimited and omits the ratio.
+// formatCostMicroUSD renders an observational cost estimate. Micro-USD is an
+// integer so accumulated estimates never drift.
+func formatCostMicroUSD(micro int64, complete bool) string {
+	value := fmt.Sprintf("$%d.%06d", micro/1_000_000, micro%1_000_000)
+	if !complete {
+		value += " (incomplete)"
+	}
+	return value
+}
+
 func formatTokenBudget(used, maxTokens int) string {
 	if maxTokens > 0 {
 		return fmt.Sprintf("%s/%s", humanTokens(used), humanTokens(maxTokens))

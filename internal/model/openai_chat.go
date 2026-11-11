@@ -69,7 +69,7 @@ type chatToolFunction struct {
 
 type chatResponse struct {
 	Choices []chatChoice `json:"choices"`
-	Usage   chatUsage    `json:"usage"`
+	Usage   *chatUsage   `json:"usage"`
 }
 
 type chatChoice struct {
@@ -83,8 +83,45 @@ type chatResponseMessage struct {
 }
 
 type chatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens            int                          `json:"prompt_tokens"`
+	CompletionTokens        int                          `json:"completion_tokens"`
+	PromptTokensDetails     *chatPromptTokensDetails     `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *chatCompletionTokensDetails `json:"completion_tokens_details,omitempty"`
+	// PromptCacheHitTokens is the DeepSeek-compatible fallback for cached
+	// input when prompt_tokens_details is absent.
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens,omitempty"`
+}
+
+type chatPromptTokensDetails struct {
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
+}
+
+type chatCompletionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// canonical maps one wire usage object into the canonical accounting. A nil
+// receiver is an absent usage object and is not reported.
+func (u *chatUsage) canonical() Usage {
+	if u == nil {
+		return Usage{}
+	}
+	usage := Usage{
+		InputTokens:  u.PromptTokens,
+		OutputTokens: u.CompletionTokens,
+		Reported:     true,
+	}
+	if details := u.PromptTokensDetails; details != nil {
+		usage.CachedInputTokens = details.CachedTokens
+		usage.CacheWriteInputTokens = details.CacheWriteTokens
+	} else {
+		usage.CachedInputTokens = u.PromptCacheHitTokens
+	}
+	if details := u.CompletionTokensDetails; details != nil {
+		usage.ReasoningOutputTokens = details.ReasoningTokens
+	}
+	return usage
 }
 
 type chatChunk struct {
@@ -286,12 +323,14 @@ func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
 		return fail(&ProtocolError{Err: errors.New("chat stream completed without usage")})
 	}
 
+	usageValue := usage.canonical()
+	if err := validateUsage(usageValue); err != nil {
+		return fail(err)
+	}
+
 	out := Response{
-		Text: text.String(),
-		Usage: Usage{
-			InputTokens:  usage.PromptTokens,
-			OutputTokens: usage.CompletionTokens,
-		},
+		Text:     text.String(),
+		Usage:    usageValue,
 		Streamed: true,
 	}
 	seen := make(map[string]struct{}, len(calls))
@@ -333,11 +372,11 @@ func (r chatResponse) canonical() (Response, error) {
 
 	choice := r.Choices[0]
 	out := Response{
-		Text: choice.Message.Content,
-		Usage: Usage{
-			InputTokens:  r.Usage.PromptTokens,
-			OutputTokens: r.Usage.CompletionTokens,
-		},
+		Text:  choice.Message.Content,
+		Usage: r.Usage.canonical(),
+	}
+	if err := validateUsage(out.Usage); err != nil {
+		return Response{}, err
 	}
 	seen := make(map[string]struct{}, len(choice.Message.ToolCalls))
 	for _, call := range choice.Message.ToolCalls {

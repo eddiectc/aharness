@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -71,6 +72,117 @@ type CatalogModel struct {
 	// set of effort values the model advertises. Empty means no effort
 	// control.
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	// Cost is the optional models.dev price snapshot in integer micro-USD per
+	// one million tokens. Nil means the catalog did not publish usable prices.
+	Cost *CatalogCost `json:"cost,omitempty"`
+}
+
+// CatalogCost is a normalized models.dev price set. Rates are integer
+// micro-USD per one million tokens ($0.15 -> 150000). CacheReadMicroUSD and
+// CacheWriteMicroUSD are nil when the catalog omitted that tier.
+type CatalogCost struct {
+	InputMicroUSD      int64  `json:"input_micro_usd"`
+	OutputMicroUSD     int64  `json:"output_micro_usd"`
+	CacheReadMicroUSD  *int64 `json:"cache_read_micro_usd,omitempty"`
+	CacheWriteMicroUSD *int64 `json:"cache_write_micro_usd,omitempty"`
+}
+
+// Pricing is the effective per-run price snapshot recorded in run_start. It
+// is observational: it estimates cost from catalog prices and is never a
+// billing authority. Rates are micro-USD per one million tokens.
+type Pricing struct {
+	Available          bool      `json:"available"`
+	Currency           string    `json:"currency,omitempty"`
+	Unit               string    `json:"unit,omitempty"`
+	InputMicroUSD      int64     `json:"input_micro_usd,omitempty"`
+	OutputMicroUSD     int64     `json:"output_micro_usd,omitempty"`
+	CacheReadMicroUSD  int64     `json:"cache_read_micro_usd,omitempty"`
+	CacheWriteMicroUSD int64     `json:"cache_write_micro_usd,omitempty"`
+	Source             string    `json:"source,omitempty"`
+	FetchedAt          time.Time `json:"fetched_at,omitzero"`
+}
+
+// Pricing currency and unit values.
+const (
+	PricingCurrencyUSD          = "USD"
+	PricingUnitPerMillionTokens = "per_million_tokens"
+	microUSDPerCurrencyUnit     = 1_000_000
+	pricingRoundHalfUpMicro     = microUSDPerCurrencyUnit / 2
+)
+
+// Pricing returns the effective price snapshot for the model. source and
+// fetchedAt identify the catalog snapshot. The cache-read tier falls back to
+// the input rate when models.dev omitted it; the cache-write tier falls back
+// to zero.
+func (m CatalogModel) Pricing(source string, fetchedAt time.Time) Pricing {
+	if m.Cost == nil {
+		return Pricing{}
+	}
+	cacheRead := m.Cost.InputMicroUSD
+	if m.Cost.CacheReadMicroUSD != nil {
+		cacheRead = *m.Cost.CacheReadMicroUSD
+	}
+	var cacheWrite int64
+	if m.Cost.CacheWriteMicroUSD != nil {
+		cacheWrite = *m.Cost.CacheWriteMicroUSD
+	}
+	return Pricing{
+		Available:          true,
+		Currency:           PricingCurrencyUSD,
+		Unit:               PricingUnitPerMillionTokens,
+		InputMicroUSD:      m.Cost.InputMicroUSD,
+		OutputMicroUSD:     m.Cost.OutputMicroUSD,
+		CacheReadMicroUSD:  cacheRead,
+		CacheWriteMicroUSD: cacheWrite,
+		Source:             source,
+		FetchedAt:          fetchedAt.UTC(),
+	}
+}
+
+// Cost estimates one response's cost in integer micro-USD. ok is false when
+// pricing is unavailable or an arithmetic overflow would make the estimate
+// meaningless. Reasoning tokens are already part of OutputTokens and are not
+// charged twice.
+func (p Pricing) Cost(u Usage) (cost int64, ok bool) {
+	if !p.Available {
+		return 0, false
+	}
+	uncached := u.UncachedInputTokens()
+	parts := []struct {
+		tokens int
+		rate   int64
+	}{
+		{uncached, p.InputMicroUSD},
+		{u.CachedInputTokens, p.CacheReadMicroUSD},
+		{u.CacheWriteInputTokens, p.CacheWriteMicroUSD},
+		{u.OutputTokens, p.OutputMicroUSD},
+	}
+	var sum int64
+	for _, part := range parts {
+		if part.tokens <= 0 || part.rate <= 0 {
+			continue
+		}
+		tokens := int64(part.tokens)
+		if tokens > (math.MaxInt64-sum)/part.rate {
+			return 0, false
+		}
+		sum += tokens * part.rate
+	}
+	return (sum + pricingRoundHalfUpMicro) / microUSDPerCurrencyUnit, true
+}
+
+// valid reports whether every provided rate is a non-negative integer.
+func (c CatalogCost) valid() bool {
+	if c.InputMicroUSD < 0 || c.OutputMicroUSD < 0 {
+		return false
+	}
+	if c.CacheReadMicroUSD != nil && *c.CacheReadMicroUSD < 0 {
+		return false
+	}
+	if c.CacheWriteMicroUSD != nil && *c.CacheWriteMicroUSD < 0 {
+		return false
+	}
+	return true
 }
 
 // SupportsEffort reports whether the model advertises value as an effort.

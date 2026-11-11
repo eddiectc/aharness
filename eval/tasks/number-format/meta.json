@@ -1,0 +1,6 @@
+{
+  "cluster": "shell-pipeline",
+  "language": "sh",
+  "timeout": 30,
+  "notes": "Integer-to-decimal formatting, including negatives."
+}

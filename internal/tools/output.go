@@ -8,12 +8,46 @@ import (
 
 const (
 	// fileOutputCap bounds read_file and search results.
-	fileOutputCap = 32 << 10
+	fileOutputCap = 60 << 10
 	// commandOutputCap bounds combined run_command stdout and stderr.
 	commandOutputCap = 64 << 10
 	// panicStackCap bounds the stack attached to a recovered tool panic.
 	panicStackCap = 4 << 10
 )
+
+// capHeadOutput keeps only the head of s when it exceeds max bytes and
+// appends an explicit truncation marker. The returned string is at most max
+// bytes when max can hold the marker. Rune boundaries are honored so a valid
+// UTF-8 input stays valid.
+func capHeadOutput(s string, max int) (string, bool) {
+	if max <= 0 || len(s) <= max {
+		return s, false
+	}
+	removed := len(s)
+	var head int
+	var marker string
+	for {
+		marker = fmt.Sprintf("\n[truncated %d bytes]\n", removed)
+		budget := max - len(marker)
+		if budget < 0 {
+			budget = 0
+		}
+		head = safeHeadLen(s, budget)
+		next := len(s) - head
+		if next == removed {
+			break
+		}
+		removed = next
+	}
+	out := s[:head] + marker
+	if len(out) > max {
+		// Rune-boundary adjustment can push the result a few bytes over a
+		// tight budget; trim the head without splitting a rune.
+		head = safeHeadLen(s[:head], head-(len(out)-max))
+		out = s[:head] + marker
+	}
+	return out, true
+}
 
 // capOutput keeps the head and tail of s when it exceeds max bytes, inserting
 // an explicit truncation marker. The returned string is at most max bytes when

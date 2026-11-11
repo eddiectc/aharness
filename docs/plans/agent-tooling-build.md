@@ -1,8 +1,11 @@
 # aharness agent tooling and measurement build plan
 
 - **Date:** 2026-11-11
-- **Status:** proposed; **not implemented**. This document is a plan and a
-  contract sketch, not a description of shipped behavior.
+- **Status:** implemented for M0–M3. The mock-provider, fixture, fuzz, and
+  automated gate checks pass. Two measurement items remain environment-blocked:
+  the real-provider thinking-tool/cache smoke and the 30-task baseline/A-B run
+  both require `AHARNESS_PROVIDER_TOKEN`, which is unset here. The plan records
+  those as pending rather than fabricating results; see §12.
 - **Source:** [agent tooling, limits, and measurement research](../research/agent-tooling-research.md).
 - **Target:** Go 1.27.3, module `aharness`.
 - **Architecture:** [architecture.md](../architecture.md) §2 (canonical model and
@@ -93,42 +96,53 @@ read interface, then build the A/B instrument, then polish search/command.
 ### 1.4 Definition of done
 
 In addition to the [project definition of done](../definition-of-done.md), all
-items below must hold. All items are unchecked because the plan is not
-implemented.
+items below must hold. Checked items are exercised by fixture, integration, or
+gate tests; see §12 for the two environment-blocked measurement items.
 
-- [ ] `model.Usage` carries cached-input, cache-write-input, and
+- [x] `model.Usage` carries cached-input, cache-write-input, and
       reasoning-output subsets plus a `reported` flag; Chat and Responses map
       them on buffered and streaming paths; `Total()` remains input+output.
-- [ ] `-require-usage` turns absent provider usage into a `protocol_error`
+- [x] `-require-usage` turns absent provider usage into a `protocol_error`
       before any tool executes; default behavior still accepts missing usage
       for local endpoints and records `reported=false`.
-- [ ] `run_start` records the catalog pricing snapshot; `model_response`
+- [x] `run_start` records the catalog pricing snapshot; `model_response`
       records a per-call cost when prices are available; `run_end` aggregates
       run and cumulative cost; old logs decode without cost.
 - [ ] A manual multi-round tool smoke in thinking mode (`-thinking-effort
       high`) against `deepseek-v4.1-flash` passes, or the failure is recorded
-      and the reasoning-continuation contingency is opened.
-- [ ] `read_file` never returns head+tail file content; the header describes
+      and the reasoning-continuation contingency is opened. **Not run:**
+      `AHARNESS_PROVIDER_TOKEN` is unset in this environment. The contingency
+      stays open in §8; fixture tests do not claim provider acceptance.
+- [x] `read_file` never returns head+tail file content; the header describes
       the delivered range; a non-final page ends with
       `continue with offset=<next>`; a truncated line is marked.
-- [ ] `read_file` defaults to 2,000 lines, caps at 4,000, and caps the result
+- [x] `read_file` defaults to 2,000 lines, caps at 4,000, and caps the result
       at 60 KiB; a 1,175-line/42 KB Go file is one call at default.
-- [ ] `toolset-v1` is recorded for new sessions; a seeded `toolset-v0` session
+- [x] `toolset-v1` is recorded for new sessions; a seeded `toolset-v0` session
       resumes using the frozen v0 schemas; new sessions use v1.
-- [ ] `cmd/aharness-eval` runs a task manifest against two harness binaries,
+- [x] `cmd/aharness-eval` runs a task manifest against two harness binaries,
       interleaves arms, repeats k times, and writes per-run JSONL plus a
       summary with paired bootstrap confidence intervals.
 - [ ] The 30-task suite has executable setup/verify scripts, at least three
       clusters, and a recorded baseline; the M1 A/B reports read calls per
-      file, tokens per solved task, turns, and solve rate.
-- [ ] `search` reports skipped files, supports `**`, and distinguishes a
+      file, tokens per solved task, turns, and solve rate. **Suite and driver
+      complete:** 30 tasks across `go-fix`, `text-transform`, and
+      `shell-pipeline`; every setup succeeds, no verifier is trivially
+      satisfied, and `eval/baseline.json` records `status=unmeasured` because
+      provider credentials are unavailable. The A/B itself is pending.
+- [x] `search` reports skipped files, supports `**`, and distinguishes a
       result-count cap from byte truncation.
-- [ ] `run_command` spills output over 64 KiB to a per-run file, returns the
+- [x] `run_command` spills output over 64 KiB to a per-run file, returns the
       path, and removes it with the per-run work directory.
-- [ ] README, architecture, limits, testing strategy, TUI doc, and this plan
-      are updated; the coding-standard §8 gates pass.
+- [x] README, architecture, limits, testing strategy, TUI doc, and this plan
+      are updated; the coding-standard §8 gates pass (`make dod`: goimports,
+      go vet, golangci-lint, `go test -race -count=1`, go build, govulncheck,
+      docs-check).
 
 ## 2. Current state
+
+This section records the pre-implementation baseline that motivated the plan;
+§12 records the shipped behavior and deviations.
 
 ### 2.1 Usage and cost
 
@@ -689,3 +703,32 @@ When implemented, update:
 - Revisit the read cap after the first A/B. If 60 KiB still causes extra
   calls, test 100 KiB; if token cost rises, test 48 KiB or a model-relative
   cap.
+
+## 12. Implementation notes and deviations
+
+The implementation follows §1–§10 with these recorded choices:
+
+- **Pricing on resume/fork.** When no catalog load is needed (model unchanged),
+  the run inherits the latest recorded `run_start.pricing` snapshot instead of
+  forcing a network fetch. An explicit model change refreshes the snapshot from
+  the catalog; a catalog without cost leaves `pricing.available=false`.
+- **Invalid catalog cost.** Negative, non-finite, or incomplete catalog rates
+  make that model's pricing unavailable (`Cost=nil`) instead of making the model
+  unusable. Cost is observational; eligibility is unchanged.
+- **Read byte cap.** A page first keeps the largest run of whole lines that fits
+  with the continuation footer. A partial line prefix is emitted when the first
+  requested line cannot fit at all. In both cases `Truncated` means bytes were
+  dropped and normal `limit` paging does not set it.
+- **Command spill names.** Spill files use random `cmd-<hex>.log` names under
+  `<state>/work/<session-id>/tool-output/` rather than the tool call ID. The
+  observable contract is the absolute path in `details` and the inline
+  `full output:` line; the directory is per-run and removed with the work tree.
+- **`-require-usage` timing.** The response is recorded and displayed, and the
+  turn/usage counters advance, before the runner stops with `protocol_error`.
+  No tool executes. The default remains permissive.
+- **Eval baseline.** The 30-task suite and driver are complete and tested with
+  fake arms; `eval/baseline.json` honestly records `status=unmeasured` with the
+  credential reason. No solve rate, token delta, or cost delta is claimed
+  without a real run.
+- **Manual smokes.** The real-provider thinking-tool, cache-hit, and A/B runs
+  remain release prerequisites; see §11.

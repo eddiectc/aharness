@@ -6,14 +6,16 @@ log, and exits with a final answer or a typed stop reason. The loop is bounded
 by the model context window, termination policies, and errors; run budgets are
 opt-in and unlimited by default.
 
-- **Status:** v1 implementation complete (M0–M3); the default TUI,
-  provider/model discovery, and per-model thinking effort are implemented. The
-  TUI is the default in a terminal; `-batch` keeps the one-shot CLI and
-  `-ui-json` is the headless automation surface. Mock-provider, integration,
-  fuzz, race, and §8 gate checks pass. The real-provider TUI smoke and the
-  real-provider thinking-effort smoke remain pending provider credentials
-  (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation environment); they
-  are explicit release prerequisites.
+- **Status:** v1 implementation complete. The agent-tooling M0–M3 work is also
+  implemented, including usage/cost accounting, the contiguous 2,000-line read
+  contract with `toolset-v1` replay, search/command improvements, and the
+  dev-only eval driver and 30-task suite. The default TUI, provider/model discovery, and per-model
+  thinking effort are implemented. The TUI is the default in a terminal;
+  `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
+  surface. Mock-provider, integration, fuzz, race, and §8 gate checks pass. The
+  real-provider TUI, thinking-effort, and eval baseline/A-B runs remain pending
+  provider credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
+  environment); they are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** the Go standard library by default. The approved TUI
   exception is Bubble Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2,
@@ -42,6 +44,15 @@ opt-in and unlimited by default.
   clears an inherited value. The effective value is recorded and inherited on
   resume/fork unless explicitly changed. `-list-models` ends with an `EFFORT`
   column, and the TUI offers a next-run picker on `F2`.
+- Provider usage detail and an observational cost estimate. `model.Usage`
+  keeps input/output totals plus cached-input, cache-write, and
+  reasoning-output subsets and a `reported` flag; `run_start` records the
+  catalog price snapshot, `model_response` an optional per-call
+  `cost_micro_usd`, and `run_end` run/cumulative cost with completeness flags.
+  The estimate is never a billing authority. `-require-usage` makes a completed
+  buffered response without provider usage a `protocol_error` before any tool
+  executes; the default stays compatible with local OpenAI-compatible
+  endpoints.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
@@ -136,6 +147,14 @@ export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
 ```
 
 `make build` and `make test` wrap the same build and race-test commands.
+
+Development measurement tooling is separate from the runtime binary:
+`go build -trimpath -o bin/aharness-eval ./cmd/aharness-eval` builds the
+A/B driver, and `eval/` holds the task suite, price file, and results. The
+driver runs two or more harness binaries over the same tasks with fresh
+workspaces, verifies each task with its own script, and reports paired
+bootstrap confidence intervals. It is not part of the shipped runtime
+dependency graph; see [eval/README.md](eval/README.md).
 
 In TUI and `-ui-json` modes a task is optional: a new session is created
 eagerly, the header shows its ID, and the first submitted message supplies the

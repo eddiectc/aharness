@@ -77,6 +77,10 @@ type config struct {
 	SessionTimeout time.Duration
 	ModelTimeout   time.Duration
 	LogRequests    bool
+	RequireUsage   bool
+	// Pricing is the effective model's catalog price snapshot. It is
+	// observational and may be unavailable when no catalog was loaded.
+	Pricing model.Pricing
 
 	ResumeID string
 	ForkID   string
@@ -205,6 +209,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		sessionTimeout   time.Duration
 		modelTimeout     time.Duration
 		providerBaseURL  string
+		requireUsage     bool
 		showVersion      bool
 	)
 	fs.StringVar(&task, "task", "", "task text; seeds the first message in TUI modes")
@@ -233,6 +238,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.IntVar(&maxOutputTokens, "max-output-tokens", 0, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
 	fs.StringVar(&thinkingEffort, "thinking-effort", env.thinkingEffort, "model-advertised reasoning effort for model calls, or \"default\" to clear (default: AHARNESS_THINKING_EFFORT)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
+	fs.BoolVar(&requireUsage, "require-usage", false, "fail with protocol_error when a completed model response omits provider usage")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -348,6 +354,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		SessionTimeout:    sessionTimeout,
 		ModelTimeout:      modelTimeout,
 		LogRequests:       env.logRequests,
+		RequireUsage:      requireUsage,
 		ResumeID:          resumeID,
 		ForkID:            forkID,
 		Mode:              mode,

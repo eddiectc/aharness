@@ -45,10 +45,17 @@ type State struct {
 	Stream         bool
 	Turns          int
 	Usage          model.Usage
-	LastRunEnded   bool
-	LastRunStatus  StopReason
-	LastEventSeq   uint64
-	Pending        []PendingCall
+	// CostMicroUSD is the cumulative estimated session cost; CostComplete is
+	// false when any recorded model response lacked a price.
+	CostMicroUSD int64
+	CostComplete bool
+	// Pricing is the most recent recorded run_start price snapshot, used to
+	// keep cost estimation working on resume without a catalog fetch.
+	Pricing       model.Pricing
+	LastRunEnded  bool
+	LastRunStatus StopReason
+	LastEventSeq  uint64
+	Pending       []PendingCall
 }
 
 // Inspect reconstructs the session state used for resume, fork, and the next
@@ -56,9 +63,10 @@ type State struct {
 // payload is a corrupt-log error.
 func Inspect(events []session.Event) (State, error) {
 	var (
-		state      State
-		startFound bool
-		pending    []PendingCall
+		state        State
+		startFound   bool
+		pending      []PendingCall
+		costComplete = true
 	)
 	for _, ev := range events {
 		state.LastEventSeq = ev.Seq
@@ -107,6 +115,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.PromptVersion = data.PromptVersion
 			state.ToolsetVersion = data.ToolsetVersion
 			state.ThinkingEffort = data.ThinkingEffort
+			state.Pricing = data.Pricing
 			state.Interactive = data.Interactive
 			state.Stream = data.Stream
 			state.LastRunEnded = false
@@ -126,6 +135,11 @@ func Inspect(events []session.Event) (State, error) {
 			state.Turns++
 			state.Usage.InputTokens += data.Usage.InputTokens
 			state.Usage.OutputTokens += data.Usage.OutputTokens
+			if data.CostMicroUSD != nil {
+				state.CostMicroUSD += *data.CostMicroUSD
+			} else {
+				costComplete = false
+			}
 			for _, call := range data.ToolCalls {
 				if call.ID == "" {
 					continue
@@ -146,6 +160,7 @@ func Inspect(events []session.Event) (State, error) {
 	if state.PromptVersion == "" || state.ToolsetVersion == "" {
 		return State{}, fmt.Errorf("%w: session_start is missing prompt or toolset version", session.ErrCorrupt)
 	}
+	state.CostComplete = costComplete
 	state.Pending = pending
 	return state, nil
 }
@@ -167,4 +182,4 @@ func removePending(pending []PendingCall, id string) []PendingCall {
 func SupportsPrompt(version string) bool { return version == PromptVersion }
 
 // SupportsToolset reports whether this binary can replay a toolset version.
-func SupportsToolset(version string) bool { return version == tools.Version }
+func SupportsToolset(version string) bool { return tools.SupportsVersion(version) }
