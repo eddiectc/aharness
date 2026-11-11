@@ -5,6 +5,7 @@
   effort.
 - **Related:** [architecture](architecture.md), [v1 build plan](v1-build.md),
   [TUI build plan](tui-build.md), [shipped TUI](tui.md),
+  [slash commands](commands.md),
   [model discovery build plan](model-discovery-build.md),
   [thinking effort build plan](thinking-effort-build.md),
   [coding standard](coding-standard.md).
@@ -169,7 +170,8 @@ Other event payloads:
 ## 6. TUI and `-ui-json`
 
 These caps are display-only; none changes the session log or the model
-contract. See [tui.md](tui.md) for the shipped behavior.
+contract. See [tui.md](tui.md) for the shipped behavior and
+[commands.md](commands.md) for slash commands.
 
 | Cap | Value | Behavior |
 |---|---|---|
@@ -194,6 +196,7 @@ contract. See [tui.md](tui.md) for the shipped behavior.
 | Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
 | Escape timeout | 50 ms | A lone Esc is delivered; modified sequences never interrupt. |
 | Display queue | 256 events | Backpressure; text deltas are not durable. |
+| Slash-command menu | 8 rows | Filtered by command name/alias; scrolls to the selection; shrinks to keep the header, one transcript row, composer, and status visible. |
 | TUI catalog refresh | `Ctrl-R` in the model picker | Idle only; reuses the catalog timeout/body/cache caps; no `-ui-json` protocol version change. |
 | Thinking effort picker | `F2`; model's normalized list | Idle only; lists `provider default` plus the model's values; no overlay when the model advertises none; next run only; no protocol version change. |
 | `-ui-json` command line | 1 MiB | Longer lines are a protocol error (exit 2). |

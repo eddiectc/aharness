@@ -59,7 +59,8 @@ opt-in and unlimited by default.
   (`/help`, `/model`, `/effort`, `/provider`, `/details`, `/files`, `/table`,
   `/image`, `/rich`/`/raw`, `/repaint`, `/refresh`, `/interrupt`, `/cancel`,
   `/quit`); typing `/` opens a filtered completion menu (`Tab` completes,
-  `Enter` runs), and unrecognized `/text` is sent as a normal message.
+  `Enter` runs), and unrecognized `/text` is sent as a normal message. See the
+  [slash-command reference](docs/commands.md).
 - `-batch` forces the one-shot stdout contract. Non-TTY invocations batch
   automatically. `-ui-json` runs the same Bubble Tea program headlessly over a
   versioned JSONL protocol (`frames`, semantic `events`, and deterministic SVG
@@ -93,6 +94,7 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [limits-removal-build.md](docs/limits-removal-build.md) | Implemented removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
 | [thinking-effort-build.md](docs/thinking-effort-build.md) | Implemented per-model thinking/reasoning effort control: catalog discovery, Chat/Responses mapping, CLI/env precedence and clearing, session persistence and inheritance, `-list-models` column, and TUI/`-ui-json` surface |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
+| [commands.md](docs/commands.md) | Slash-command reference: syntax, autocomplete, arguments, key equivalents, idle/run behavior, `-ui-json` mapping, and caps |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
 | [definition-of-done.md](docs/definition-of-done.md) | The v0 completion checklist |

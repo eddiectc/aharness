@@ -6,7 +6,7 @@
 - **Related:** [Go coding standard](coding-standard.md),
   [bare-minimum harness research](agent-harness-minimum.md),
   [v1 build plan](v1-build.md), [TUI build plan](tui-build.md),
-  [shipped TUI](tui.md),
+  [shipped TUI](tui.md), [slash commands](commands.md),
   [thinking effort build plan](thinking-effort-build.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
@@ -318,7 +318,7 @@ adapter fell back to non-streaming, the response text is printed once. Without
 |---|---|
 | `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. |
 | `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
-| `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
+| `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, composer slash commands and autocomplete, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
 | `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors; models.dev catalog discovery, cache, and SDK-to-dialect mapping. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
@@ -508,7 +508,8 @@ schema version.
   `x/vt` emulator. TTY/`TERM` checks run before session creation for the TUI.
   `-interactive` and stdin steering are removed; the runner's steering channel
   remains for TUI submissions. See [tui.md](tui.md) for the shipped modes, keys,
-  protocol, and caps.
+  protocol, and caps, and [commands.md](commands.md) for composer slash
+  commands and autocomplete.
 - **Safety.** All untrusted text passes through `internal/tui.Sanitize` before
   Glamour, Bubbles, or cells. Images are workspace-contained display-only files.
   Bubble Tea owns raw mode, the alternate screen, paste, resize, cursor, and

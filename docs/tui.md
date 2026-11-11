@@ -79,43 +79,14 @@ its selection, `Tab` completes, `Enter` runs the highlighted command, and
 ## Slash commands
 
 The composer executes a registered command instead of starting or steering a
-run. Command names are case-insensitive and arguments are trimmed. Only
-recognized commands are intercepted: any other text, including an unknown
-`/word`, is submitted as a normal message, and a seeded `-task`/`-task-file` is
-always literal. Prefix a recognized command with a space to send it as a
-message. While a run is active, commands still work, but actions that only
-affect the next run are disabled with a notice.
-
-Typing `/` opens a completion menu filtered by command name or alias.
-`Up`/`Down` move the highlight, `Tab` completes the highlighted command
-(adding a trailing space for `/model` and `/effort`), `Enter` runs it, and
-`Esc` dismisses the menu without clearing the composer. A space after the
-command name starts argument mode and closes the menu. History recall does not
-reopen the menu until the recalled text is edited. The menu shows at most eight
-rows and shrinks so the header, one transcript row, the composer, and the
-status line stay visible.
-
-| Command | Action |
-|---|---|
-| `/help` | help overlay (`F1`), including this list |
-| `/model [id]` | model picker (`Ctrl-P`); with an ID, select it for the next run |
-| `/provider` | show the active provider and open the details overlay |
-| `/effort [value]` | thinking-effort picker (`F2`); with a value, apply it to the next run, and `default` clears it |
-| `/details` | details overlay (`Ctrl-X`) |
-| `/files`, `/file` | workspace file picker (`Ctrl-O`, idle) |
-| `/table` | most recent markdown table overlay (`Ctrl-T`) |
-| `/image` | image viewer (`Ctrl-G`) |
-| `/rich`, `/raw` | set rich or raw assistant rendering (`Ctrl-R` toggles) |
-| `/repaint` | full terminal repaint (`Ctrl-L`) |
-| `/refresh` | open the model picker and refresh the catalog (`Ctrl-P` then `Ctrl-R`, idle) |
-| `/interrupt` | interrupt the in-flight operation (`Esc` during a run) |
-| `/cancel` | cancel the active run (the second `Ctrl-C`) |
-| `/quit`, `/exit` | quit; an active run is canceled and the exit code is 130 (`Ctrl-D`) |
-
-`/provider` is informational in v1: `-provider` selects the single supported
-provider at startup, so there is no in-session switch. `/model` and `/effort`
-change only the next run, exactly like their key bindings. Command feedback
-uses the status line and overlays and is not written to the session log.
+run. Typing `/` opens a filtered completion menu: `Up`/`Down` select, `Tab`
+completes, `Enter` runs the highlighted command, and `Esc` dismisses. Command
+names are case-insensitive; a space starts argument mode; unknown `/text` is
+sent as a normal message, and `-task`/`-task-file` text is always literal.
+While a run is active, commands still work, but actions that only affect the
+next run are disabled with a notice. The full reference — syntax, arguments,
+key equivalents, idle/active behavior, `-ui-json` mapping, and examples — is
+in [commands.md](commands.md). The help overlay (`F1`) lists every command.
 
 ## Model picker
 
@@ -205,11 +176,12 @@ carry the same labels.
 Every stdin line is one JSON object with `"v":1` and `"type"`. Unknown fields
 are ignored; an unknown version, type, or key is a protocol error (exit 2).
 Commands: `text`, `key`, `paste`, `resize`, `wait`, `frame`, `snapshot`,
-`quit`; EOF is equivalent to `quit`. Slash commands are ordinary composer
-text: send `text` followed by `key` `enter` to execute them, with no protocol
-change. Keys accepted by `key` are the shipped key table plus `enter`, `esc`,
-`up`, `down`, `left`, `right`, `home`, `end`,
-`pgup`, `pgdown`, `backspace`, `delete`, `tab`, `shift-tab`, `ctrl-c`,
+`quit`; EOF is equivalent to `quit`. Slash commands and their autocomplete are
+ordinary composer text: send `text` followed by `key` `enter` (or `tab`,
+`up`, `down`, `esc`) to drive them, with no protocol change. See
+[commands.md](commands.md#-ui-json-mapping). Keys accepted by `key` are the
+shipped key table plus `enter`, `esc`, `up`, `down`, `left`, `right`, `home`,
+`end`, `pgup`, `pgdown`, `backspace`, `delete`, `tab`, `shift-tab`, `ctrl-c`,
 `ctrl-d`, `ctrl-l`, `ctrl-u`, `ctrl-w`, `ctrl-a`, `ctrl-e`, `ctrl-k`, `ctrl-p`,
 `ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, and `f2`.
 
