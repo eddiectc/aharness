@@ -77,6 +77,7 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
 | [model-discovery-build.md](docs/model-discovery-build.md) | Implemented `-provider` and opencode-go model/limit/dialect discovery from models.dev; catalog cache, revalidation, refresh, and listing |
 | [limits-removal-build.md](docs/limits-removal-build.md) | Implemented removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
+| [thinking-effort-build.md](docs/thinking-effort-build.md) | Proposed per-model thinking/reasoning effort control, catalog discovery, wire mapping, session persistence, and TUI surface |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
