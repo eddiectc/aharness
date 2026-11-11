@@ -104,7 +104,10 @@ real timeouts for subprocess and signal tests.
 - TUI slash commands: parser case/aliases/arguments, `/help` lists the
   registry, known commands execute without starting a run, unknown `/text` and
   seeded tasks fall through as messages, `/model`/`/effort` arguments and
-  active-run notices, and `/interrupt`/`/cancel`/`/quit` run control.
+  active-run notices, and `/interrupt`/`/cancel`/`/quit` run control. The
+  completion menu covers prefix matching, alias de-duplication, Up/Down
+  selection and windowing, Tab completion, Enter execution, Esc precedence,
+  history-recall suppression, and the minimum-size layout cap.
 - TUI thinking effort: `F2` opens and closes the next-run picker; it is
   disabled with a notice during a run; entries are `provider default` then the
   model's values in canonical order; a model with no effort values shows a

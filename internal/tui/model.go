@@ -159,6 +159,11 @@ type App struct {
 	historyIndex int
 	draft        string
 
+	suggestions         []slashCommand
+	suggestionIndex     int
+	suggestionPrefix    string
+	suggestionDismissed bool
+
 	notice string
 
 	overlay    overlayState
@@ -431,18 +436,23 @@ func (m *App) recallHistory(delta int) {
 		next = len(m.inputHistory)
 	}
 	m.historyIndex = next
+	// History recall is navigation, not typing: do not let a recalled slash
+	// command immediately capture Up/Down for the completion menu.
 	if next == len(m.inputHistory) {
 		m.composer.SetValue(m.draft)
-		return
+	} else {
+		m.composer.SetValue(m.inputHistory[next])
+		m.composer.CursorEnd()
 	}
-	m.composer.SetValue(m.inputHistory[next])
-	m.composer.CursorEnd()
+	m.dismissSuggestions()
+	m.layout()
 }
 
 func (m *App) clearComposer() {
 	m.composer.SetValue("")
 	m.historyIndex = len(m.inputHistory)
 	m.draft = ""
+	m.updateSuggestions()
 }
 
 func (m *App) applyNoColor() {

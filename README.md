@@ -58,8 +58,8 @@ opt-in and unlimited by default.
   one run per submitted message. Composer slash commands mirror the actions
   (`/help`, `/model`, `/effort`, `/provider`, `/details`, `/files`, `/table`,
   `/image`, `/rich`/`/raw`, `/repaint`, `/refresh`, `/interrupt`, `/cancel`,
-  `/quit`);
-  unrecognized `/text` is sent as a normal message.
+  `/quit`); typing `/` opens a filtered completion menu (`Tab` completes,
+  `Enter` runs), and unrecognized `/text` is sent as a normal message.
 - `-batch` forces the one-shot stdout contract. Non-TTY invocations batch
   automatically. `-ui-json` runs the same Bubble Tea program headlessly over a
   versioned JSONL protocol (`frames`, semantic `events`, and deterministic SVG

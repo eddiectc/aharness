@@ -99,11 +99,12 @@ func (m *App) View() tea.View {
 }
 
 func (m *App) baseFrame() string {
-	header := m.headerLine()
-	transcript := m.viewport.View()
-	composer := m.composerView()
-	status := m.statusLine()
-	return lipgloss.JoinVertical(lipgloss.Left, header, transcript, composer, status)
+	parts := []string{m.headerLine(), m.viewport.View()}
+	if suggestions := m.suggestionView(); suggestions != "" {
+		parts = append(parts, suggestions)
+	}
+	parts = append(parts, m.composerView(), m.statusLine())
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *App) headerLine() string {
@@ -168,7 +169,7 @@ func (m *App) statusLine() string {
 }
 
 func (m *App) composerView() string {
-	h := m.composerHeight()
+	h := m.editorHeight()
 	view := m.composer.View()
 	lines := strings.Split(view, "\n")
 	if len(lines) > h {
@@ -183,6 +184,41 @@ func (m *App) composerView() string {
 	return strings.Join(lines, "\n")
 }
 
+// suggestionView renders the slash-command completion menu. The highlighted
+// row is reversed; the window scrolls to keep it visible.
+func (m *App) suggestionView() string {
+	count := m.visibleSuggestionCount()
+	if count == 0 {
+		return ""
+	}
+	start := m.suggestionWindowStart(count)
+	t := newTheme(m.noColor)
+	selected := lipgloss.NewStyle().Reverse(true)
+	lines := make([]string, count)
+	for i := range count {
+		command := m.suggestions[start+i]
+		line := ansi.Truncate(fmt.Sprintf("%-16s %s", command.usage, command.summary), m.width, "")
+		if start+i == m.suggestionIndex {
+			line = selected.Render(line)
+		} else {
+			line = t.dim.Render(line)
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *App) suggestionWindowStart(count int) int {
+	if m.suggestionIndex < count {
+		return 0
+	}
+	start := m.suggestionIndex - count + 1
+	if start+count > len(m.suggestions) {
+		start = len(m.suggestions) - count
+	}
+	return max(0, start)
+}
+
 func (m *App) cursor() *tea.Cursor {
 	if m.overlay.kind != OverlayNone {
 		return nil
@@ -194,7 +230,7 @@ func (m *App) cursor() *tea.Cursor {
 	header, composerH, status := 1, m.composerHeight(), 1
 	transcript := max(1, m.height-header-composerH-status)
 	x := cur.X
-	y := header + transcript + cur.Y
+	y := header + transcript + m.visibleSuggestionCount() + cur.Y
 	if x < 0 || x >= m.width || y < 0 || y >= m.height {
 		return nil
 	}

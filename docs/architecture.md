@@ -345,7 +345,7 @@ internal/agent/
   types.go
 internal/tui/
   app.go         # tea.Model, Host/Run contracts, modes, key handling, lifecycle
-  commands.go    # composer slash-command parser, dispatch, and help registry
+  commands.go    # composer slash-command parser, completion, dispatch, and help
   model.go       # transcript, composer, status, steering, caps
   view.go        # Lip Gloss layout, transcript/tool/notice views
   markdown.go    # Glamour rendering, raw/rich toggle, table extraction

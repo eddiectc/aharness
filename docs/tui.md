@@ -72,7 +72,9 @@ A bare `Esc` is recognized only after the 50 ms escape timeout. Option/Alt
 sequences, including Option-`[` and Option-`]`, are decoded as modified keys
 and never interrupt; `Ctrl-C` remains the authoritative global interrupt. The
 help overlay (`F1`) lists the shipped keys and slash commands, including `F2`
-and the overlay keys.
+and the overlay keys. While the slash-command menu is open, `Up`/`Down` move
+its selection, `Tab` completes, `Enter` runs the highlighted command, and
+`Esc` dismisses the menu before the normal `Esc` action.
 
 ## Slash commands
 
@@ -83,6 +85,15 @@ recognized commands are intercepted: any other text, including an unknown
 always literal. Prefix a recognized command with a space to send it as a
 message. While a run is active, commands still work, but actions that only
 affect the next run are disabled with a notice.
+
+Typing `/` opens a completion menu filtered by command name or alias.
+`Up`/`Down` move the highlight, `Tab` completes the highlighted command
+(adding a trailing space for `/model` and `/effort`), `Enter` runs it, and
+`Esc` dismisses the menu without clearing the composer. A space after the
+command name starts argument mode and closes the menu. History recall does not
+reopen the menu until the recalled text is edited. The menu shows at most eight
+rows and shrinks so the header, one transcript row, the composer, and the
+status line stay visible.
 
 | Command | Action |
 |---|---|

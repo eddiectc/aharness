@@ -15,25 +15,28 @@ type slashCommand struct {
 	names   []string
 	usage   string
 	summary string
+	hasArg  bool
 }
+
+const maxSlashSuggestions = 8
 
 // slashCommands is the command registry and the source of the help listing.
 var slashCommands = []slashCommand{
-	{[]string{"help"}, "/help", "show keys and commands"},
-	{[]string{"model"}, "/model [id]", "pick a model for the next run"},
-	{[]string{"provider"}, "/provider", "active provider and configuration"},
-	{[]string{"effort"}, "/effort [value]", "pick a thinking effort for the next run"},
-	{[]string{"details"}, "/details", "session, terminal, and config details"},
-	{[]string{"files", "file"}, "/files", "workspace file picker (idle)"},
-	{[]string{"table"}, "/table", "latest markdown table"},
-	{[]string{"image"}, "/image", "image viewer"},
-	{[]string{"rich"}, "/rich", "rich markdown rendering"},
-	{[]string{"raw"}, "/raw", "raw markdown rendering"},
-	{[]string{"repaint"}, "/repaint", "full terminal repaint"},
-	{[]string{"refresh"}, "/refresh", "refresh the model catalog (idle)"},
-	{[]string{"interrupt"}, "/interrupt", "interrupt the in-flight operation"},
-	{[]string{"cancel"}, "/cancel", "cancel the active run"},
-	{[]string{"quit", "exit"}, "/quit", "quit; cancels an active run"},
+	{names: []string{"help"}, usage: "/help", summary: "show keys and commands"},
+	{names: []string{"model"}, usage: "/model [id]", summary: "pick a model for the next run", hasArg: true},
+	{names: []string{"provider"}, usage: "/provider", summary: "active provider and configuration"},
+	{names: []string{"effort"}, usage: "/effort [value]", summary: "pick a thinking effort for the next run", hasArg: true},
+	{names: []string{"details"}, usage: "/details", summary: "session, terminal, and config details"},
+	{names: []string{"files", "file"}, usage: "/files", summary: "workspace file picker (idle)"},
+	{names: []string{"table"}, usage: "/table", summary: "latest markdown table"},
+	{names: []string{"image"}, usage: "/image", summary: "image viewer"},
+	{names: []string{"rich"}, usage: "/rich", summary: "rich markdown rendering"},
+	{names: []string{"raw"}, usage: "/raw", summary: "raw markdown rendering"},
+	{names: []string{"repaint"}, usage: "/repaint", summary: "full terminal repaint"},
+	{names: []string{"refresh"}, usage: "/refresh", summary: "refresh the model catalog (idle)"},
+	{names: []string{"interrupt"}, usage: "/interrupt", summary: "interrupt the in-flight operation"},
+	{names: []string{"cancel"}, usage: "/cancel", summary: "cancel the active run"},
+	{names: []string{"quit", "exit"}, usage: "/quit", summary: "quit; cancels an active run"},
 }
 
 // lookupSlashCommand finds a canonical name or alias.
@@ -75,6 +78,120 @@ func slashCommandHelpLines() []string {
 		lines[i] = fmt.Sprintf("%-16s %s", command.usage, command.summary)
 	}
 	return lines
+}
+
+// slashPrefix returns the command-name prefix being typed. Only a single-line
+// value that begins with "/" and has no whitespace after it has a prefix.
+func slashPrefix(value string) (string, bool) {
+	body, ok := strings.CutPrefix(value, "/")
+	if !ok || strings.IndexFunc(body, unicode.IsSpace) >= 0 {
+		return "", false
+	}
+	return body, true
+}
+
+// matchSlashCommands returns registry entries whose canonical name or alias
+// starts with prefix, in registry order.
+func matchSlashCommands(prefix string) []slashCommand {
+	prefix = strings.ToLower(prefix)
+	matches := make([]slashCommand, 0, len(slashCommands))
+	for _, command := range slashCommands {
+		for _, name := range command.names {
+			if strings.HasPrefix(name, prefix) {
+				matches = append(matches, command)
+				break
+			}
+		}
+	}
+	return matches
+}
+
+// updateSuggestions recomputes the command menu from the composer value. It
+// keeps the highlighted row while the prefix is unchanged and resets it when
+// the prefix changes. It reports whether a menu is shown.
+func (m *App) updateSuggestions() bool {
+	prefix, ok := slashPrefix(m.composer.Value())
+	if !ok {
+		m.suggestions = nil
+		m.suggestionIndex = 0
+		m.suggestionPrefix = ""
+		m.suggestionDismissed = false
+		return false
+	}
+	prefixChanged := prefix != m.suggestionPrefix
+	if prefixChanged {
+		m.suggestionPrefix = prefix
+		m.suggestionIndex = 0
+		m.suggestionDismissed = false
+	}
+	if m.suggestionDismissed {
+		m.suggestions = nil
+		return false
+	}
+	m.suggestions = matchSlashCommands(prefix)
+	if len(m.suggestions) == 0 {
+		m.suggestionIndex = 0
+		return false
+	}
+	if prefixChanged {
+		if command, ok := lookupSlashCommand(strings.ToLower(prefix)); ok {
+			// An exact name or alias starts on its own row instead of the
+			// first prefix match (for example, "/quit", not "/help").
+			for i, match := range m.suggestions {
+				if match.names[0] == command.names[0] {
+					m.suggestionIndex = i
+					break
+				}
+			}
+		}
+	}
+	if m.suggestionIndex >= len(m.suggestions) {
+		m.suggestionIndex = len(m.suggestions) - 1
+	}
+	return true
+}
+
+func (m *App) suggestionsVisible() bool { return len(m.suggestions) > 0 }
+
+// dismissSuggestions hides the menu until the composer text changes again.
+func (m *App) dismissSuggestions() {
+	m.suggestionDismissed = true
+	m.suggestions = nil
+	if prefix, ok := slashPrefix(m.composer.Value()); ok {
+		m.suggestionPrefix = prefix
+	}
+}
+
+func (m *App) moveSuggestion(delta int) {
+	if len(m.suggestions) == 0 {
+		return
+	}
+	m.suggestionIndex = min(max(m.suggestionIndex+delta, 0), len(m.suggestions)-1)
+}
+
+// completeSuggestion replaces the prefix with the highlighted canonical
+// command. Commands with an optional argument leave a trailing space.
+func (m *App) completeSuggestion() tea.Cmd {
+	command := m.suggestions[m.suggestionIndex]
+	text := "/" + command.names[0]
+	if command.hasArg {
+		text += " "
+	}
+	m.composer.SetValue(text)
+	m.composer.CursorEnd()
+	m.dismissSuggestions()
+	m.layout()
+	return nil
+}
+
+// runSuggestion executes the highlighted command exactly as if it had been
+// typed and submitted.
+func (m *App) runSuggestion() tea.Cmd {
+	command := m.suggestions[m.suggestionIndex]
+	text := "/" + command.names[0]
+	m.clearComposer()
+	m.layout()
+	return m.submit(text, "tui")
 }
 
 // handleSlashCommand executes a composer command. It reports false for

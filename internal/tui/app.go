@@ -403,12 +403,33 @@ func (m *App) layout() {
 	m.viewport.SetWidth(m.width)
 	m.viewport.SetHeight(transcript)
 	m.composer.SetWidth(max(1, m.width-2))
-	m.composer.SetHeight(composerH)
+	m.composer.SetHeight(m.editorHeight())
 }
 
-func (m *App) composerHeight() int {
+// editorHeight is the number of composer rows, excluding the completion menu.
+func (m *App) editorHeight() int {
 	lines := max(m.composer.LineCount(), 1)
 	return min(lines, 6)
+}
+
+// visibleSuggestionCount bounds the completion menu so the header, one
+// transcript row, the editor, and the status line always fit.
+func (m *App) visibleSuggestionCount() int {
+	if len(m.suggestions) == 0 {
+		return 0
+	}
+	count := min(len(m.suggestions), maxSlashSuggestions)
+	if m.height > 0 {
+		available := m.height - m.editorHeight() - 3
+		count = min(count, max(0, available))
+	}
+	return count
+}
+
+// composerHeight includes the completion menu because both sit above the
+// status line and take space from the transcript.
+func (m *App) composerHeight() int {
+	return m.editorHeight() + m.visibleSuggestionCount()
 }
 
 // insertInput routes text to the focused overlay filter or the composer.
@@ -427,6 +448,7 @@ func (m *App) insertInput(text string) {
 		return
 	}
 	m.composer.InsertString(text)
+	m.updateSuggestions()
 	m.layout()
 }
 
@@ -473,6 +495,28 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	m.updateSuggestions()
+	if m.suggestionsVisible() {
+		switch keystroke {
+		case "up":
+			m.moveSuggestion(-1)
+			return nil
+		case "down":
+			m.moveSuggestion(1)
+			return nil
+		case "tab":
+			return m.completeSuggestion()
+		case "esc":
+			m.dismissSuggestions()
+			m.layout()
+			return nil
+		case "enter", "ctrl+m":
+			if !msg.Mod.Contains(tea.ModShift) && !msg.Mod.Contains(tea.ModAlt) {
+				return m.runSuggestion()
+			}
+		}
+	}
+
 	if m.run.active {
 		switch keystroke {
 		case "esc":
@@ -498,8 +542,7 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "enter", "ctrl+m":
 		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
-			m.composer.InsertString("\n")
-			m.layout()
+			m.insertInput("\n")
 			return nil
 		}
 		text := m.composer.Value()
@@ -545,6 +588,7 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	updated, cmd := m.composer.Update(msg)
 	m.composer = updated
+	m.updateSuggestions()
 	if m.composer.Value() != "" {
 		m.notice = ""
 	}
@@ -943,6 +987,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 		} else {
 			m.composer.SetValue(text + "\n" + m.composer.Value())
 		}
+		m.dismissSuggestions()
 		m.appendNotice(agent.NoticeWarning, "unacknowledged steering returned to the composer")
 		m.layout()
 	}

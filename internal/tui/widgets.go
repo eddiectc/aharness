@@ -247,7 +247,8 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"F1               help; Ctrl-X details",
 		"F2               thinking effort picker (idle)",
 		"",
-		t.dim.Render("Type a command in the composer; unknown /text is sent as a message."),
+		t.dim.Render("Slash commands: Up/Down select, Tab complete, Enter run."),
+		t.dim.Render("Esc dismisses the menu; unknown /text is sent as a message."),
 		t.dim.Render("Mouse reporting is disabled. Terminal output is sanitized."),
 	)
 	m.overlay.help = lines
