@@ -436,8 +436,11 @@ Examples with the snapshot data:
   and performs a conditional GET (falling back to cache on failure), so listing
   also revalidates the cache without forcing a full download. Output is a
   tab-separated header plus one row per model: `ID`, `NAME`, `DIALECT`,
-  `CONTEXT`, `OUTPUT`, `STATUS`. `OUTPUT` is the advertised ceiling, not an
-  effective request budget; a missing ceiling prints as `-`.
+  `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT`. `OUTPUT` is the advertised ceiling,
+  not an effective request budget; a missing ceiling prints as `-`. `EFFORT`
+  is the normalized comma-separated effort list added by
+  [thinking effort](thinking-effort-build.md); a model with no effort control
+  prints `-`.
 - `-refresh-models` is the explicit cache-refresh action. It validates
   `-provider`, performs the unconditional fetch described in §3.2, atomically
   replaces the cache, and exits 0 without creating a session or reading the
@@ -449,8 +452,8 @@ Examples with the snapshot data:
   returned by the refresh; no second catalog request is made.
 - The model picker lists eligible models from the catalog, sorted by ID. Each
   row shows the display name, ID, dialect, context/input limits, advertised
-  output ceiling, and a `deprecated` / `alpha` / `beta` / `translated` marker
-  when applicable.
+  output ceiling, normalized effort values, and a `deprecated` / `alpha` /
+  `beta` / `translated` marker when applicable.
 - `Ctrl-R` in the model picker triggers the same explicit refresh. The picker
   footer shows `refreshing models…`; a second `Ctrl-R` while the request is in
   flight is ignored, and closing the picker cancels it without changing the
@@ -765,7 +768,7 @@ Add or change these rows in [limits.md](limits.md):
 | Catalog stale fallback | Allowed only for implicit or `-list-models` refresh failure, with a warning. Explicit refresh never falls back. |
 | Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R`; unconditional GET; reuses the 15-second timeout, 16 MiB body cap, and 0600 cache policy; failure exits 3/4 (CLI) or notifies (TUI); no new budget. |
 | Catalog cache file | `<state>/cache/models.dev/<provider>.json`; file 0600, directory 0700. |
-| Catalog cache version | 1; mismatches are ignored and refetched. |
+| Catalog cache version | 2; mismatches are ignored and refetched. Version 2 adds normalized `reasoning` / `reasoning_efforts` from [thinking effort](thinking-effort-build.md). |
 | Model ID | At most 256 bytes; valid UTF-8; no control characters. |
 | Discovered base URL | HTTPS, host `opencode.ai`, no userinfo/query/fragment. |
 | `-provider` | `opencode-go` only; unknown values are config errors. |

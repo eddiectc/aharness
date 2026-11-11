@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"aharness/internal/agent"
 	"aharness/internal/model"
 	"aharness/internal/tools"
 )
@@ -27,10 +28,11 @@ type overlayState struct {
 	help   []string
 	scroll int
 
-	table *tableOverlay
-	file  *fileOverlay
-	model *modelOverlay
-	image *imageOverlay
+	table  *tableOverlay
+	file   *fileOverlay
+	model  *modelOverlay
+	effort *effortOverlay
+	image  *imageOverlay
 }
 
 func (o *overlayState) push(kind OverlayKind) {
@@ -82,6 +84,11 @@ func (o *overlayState) insert(m *App, text string) bool {
 			o.model.insertFilter(text)
 			return true
 		}
+	case OverlayEffort:
+		if o.effort != nil {
+			o.effort.insertFilter(text)
+			return true
+		}
 	}
 	return false
 }
@@ -97,6 +104,9 @@ func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
 	}
 	if o.model != nil {
 		o.model.resize(innerW, innerH)
+	}
+	if o.effort != nil {
+		o.effort.resize(innerW, innerH)
 	}
 	if o.table != nil {
 		o.table.resize(innerW, innerH)
@@ -139,6 +149,10 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 		if o.model != nil {
 			return o.model.update(m, msg)
 		}
+	case OverlayEffort:
+		if o.effort != nil {
+			return o.effort.update(m, msg)
+		}
 	case OverlayImage:
 		if o.image != nil {
 			return o.image.update(m, msg)
@@ -176,6 +190,11 @@ func (o *overlayState) view(m *App) string {
 		title = "model picker · Ctrl-P"
 		if o.model != nil {
 			content = o.model.view()
+		}
+	case OverlayEffort:
+		title = "thinking effort · F2"
+		if o.effort != nil {
+			content = o.effort.view()
 		}
 	case OverlayImage:
 		title = "image · Ctrl-G"
@@ -223,6 +242,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"Ctrl-P           model picker (idle)",
 		"Ctrl-O           file picker (idle)",
 		"F1               help; Ctrl-X details",
+		"F2               thinking effort picker (idle)",
 		"",
 		t.dim.Render("Mouse reporting is disabled. Terminal output is sanitized."),
 	}
@@ -246,6 +266,15 @@ func detailsTrace(m *App) string {
 	return SanitizeLine(m.info.TracePath)
 }
 
+// effortLabel renders an effective thinking effort, with the empty value
+// spelled out as the provider default.
+func effortLabel(value string) string {
+	if value == "" {
+		return "provider default"
+	}
+	return SanitizeLine(value)
+}
+
 func (m *App) openDetailsOverlay() tea.Cmd {
 	t := newTheme(m.noColor)
 	lines := []string{
@@ -254,6 +283,7 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 		"trace:      " + detailsTrace(m),
 		"workspace:  " + SanitizeLine(m.info.Workspace),
 		"model:      " + SanitizeLine(m.info.Model) + " (" + SanitizeLine(m.info.Dialect) + ")",
+		"thinking effort: " + effortLabel(m.nextEffort),
 		"turns:      " + formatTurnBudget(m.info.Turns, m.info.MaxTurns),
 		"tokens:     " + formatTokenBudget(m.info.Usage.Total(), m.info.MaxTotalTokens),
 		"run:        " + fmt.Sprintf("%d", m.run.number),
@@ -591,6 +621,7 @@ func (mi modelItem) Description() string {
 		fmt.Sprintf("ctx %d", max(0, mi.choice.ContextWindow)),
 		fmt.Sprintf("in %d", max(0, mi.choice.InputLimit)),
 		"out " + modelOutputLimit(mi.choice.OutputLimit),
+		effortDescription(mi.choice.ReasoningEfforts),
 	}
 	if status := SanitizeLine(mi.choice.Status); status != "" {
 		parts = append(parts, status)
@@ -599,6 +630,21 @@ func (mi modelItem) Description() string {
 		parts = append(parts, "translated")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// effortDescription renders the model's advertised effort values for a picker
+// row, or a dash when the model has no effort control.
+func effortDescription(values []string) string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = SanitizeLine(value); value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+	if len(cleaned) == 0 {
+		return "effort -"
+	}
+	return "effort " + strings.Join(cleaned, "/")
 }
 
 func (mi modelItem) FilterValue() string {
@@ -700,6 +746,117 @@ func (mo *modelOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+// effortOverlay is the next-run thinking effort picker. The first row always
+// means provider default; the remaining rows are the effective model's
+// advertised values in catalog order.
+type effortOverlay struct {
+	list   list.Model
+	width  int
+	height int
+}
+
+type effortItem struct {
+	value string // empty selects the provider default
+}
+
+func (ei effortItem) Title() string { return effortLabel(ei.value) }
+
+func (ei effortItem) Description() string {
+	if ei.value == "" {
+		return "send no reasoning effort field"
+	}
+	return "reasoning effort " + SanitizeLine(ei.value)
+}
+
+func (ei effortItem) FilterValue() string { return effortLabel(ei.value) }
+
+// currentModelChoice returns the picker metadata for the effective model.
+func (m *App) currentModelChoice() (ModelChoice, bool) {
+	id := m.currentModelID()
+	if id == "" {
+		return ModelChoice{}, false
+	}
+	for _, choice := range m.models {
+		if choice.ID == id {
+			return choice, true
+		}
+	}
+	return ModelChoice{}, false
+}
+
+func (m *App) openEffortOverlay() tea.Cmd {
+	if m.run.active {
+		m.notice = "the thinking effort picker is disabled while a run is active"
+		return nil
+	}
+	choice, ok := m.currentModelChoice()
+	if !ok || len(choice.ReasoningEfforts) == 0 {
+		if id := SanitizeLine(m.currentModelID()); id != "" {
+			m.notice = "model " + id + " advertises no effort levels"
+		} else {
+			m.notice = "the current model advertises no effort levels"
+		}
+		return nil
+	}
+	items := make([]list.Item, 0, len(choice.ReasoningEfforts)+1)
+	items = append(items, effortItem{})
+	selected := 0
+	for _, value := range choice.ReasoningEfforts {
+		items = append(items, effortItem{value: value})
+		if value == m.nextEffort {
+			selected = len(items) - 1
+		}
+	}
+	el := list.New(items, list.NewDefaultDelegate(), 40, 8)
+	el.Select(selected)
+	el.SetShowFilter(true)
+	el.SetShowStatusBar(false)
+	el.SetShowHelp(false)
+	el.SetShowPagination(false)
+	el.Title = "thinking effort for the next run"
+	m.overlay.effort = &effortOverlay{list: el}
+	m.overlay.push(OverlayEffort)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func (eo *effortOverlay) insertFilter(text string) {
+	eo.list.SetFilteringEnabled(true)
+	eo.list.SetFilterText(eo.list.FilterInput.Value() + text)
+}
+
+func (eo *effortOverlay) resize(width, height int) {
+	eo.width, eo.height = width, height
+	eo.list.SetSize(width, max(1, height-1))
+}
+
+func (eo *effortOverlay) view() string {
+	return strings.Join([]string{eo.list.View(), "Enter select · Esc close"}, "\n")
+}
+
+func (eo *effortOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Keystroke() == "enter" {
+		item, ok := eo.list.SelectedItem().(effortItem)
+		if !ok {
+			return nil
+		}
+		return m.chooseEffort(item.value)
+	}
+	updated, cmd := eo.list.Update(msg)
+	eo.list = updated
+	return cmd
+}
+
+// chooseEffort applies an F2 selection to the next run only.
+func (m *App) chooseEffort(value string) tea.Cmd {
+	m.nextEffort = value
+	text := "thinking effort for the next run: " + effortLabel(value)
+	m.notice = text
+	m.emit(EventNotice{Kind: "thinking_effort", Text: text})
+	m.closeOverlay()
+	return nil
+}
+
 // chooseModel applies a picker selection for the next run. A choice that the
 // host marked unswitchable is the offline recorded-model fallback: it stays
 // visible but can never replace the current model.
@@ -723,6 +880,11 @@ func (m *App) chooseModel(choice ModelChoice) tea.Cmd {
 	}
 	m.nextModel = selected.ID
 	m.nextDialect = selected.Dialect
+	cleared := ""
+	if m.nextEffort != "" && !slices.Contains(selected.ReasoningEfforts, m.nextEffort) {
+		cleared = m.nextEffort
+		m.nextEffort = ""
+	}
 	m.notice = "model for the next run: " + SanitizeLine(selected.ID)
 	if selected.Status == "deprecated" {
 		m.notice += " (deprecated)"
@@ -730,7 +892,17 @@ func (m *App) chooseModel(choice ModelChoice) tea.Cmd {
 	if warning != "" {
 		m.notice += "; " + CapText(SanitizeLine(warning), 512)
 	}
-	m.emit(EventModelChanged{Model: selected.ID, Dialect: string(selected.Dialect)})
+	if cleared != "" {
+		text := "thinking effort " + `"` + effortLabel(cleared) + `"` + " cleared: model " +
+			SanitizeLine(selected.ID) + " does not advertise it; using the provider default"
+		m.notice += "; " + CapText(text, 512)
+		m.emit(EventNotice{Kind: string(agent.NoticeWarning), Text: text})
+	}
+	m.emit(EventModelChanged{
+		Model:          selected.ID,
+		Dialect:        string(selected.Dialect),
+		ThinkingEffort: m.nextEffort,
+	})
 	m.closeOverlay()
 	return nil
 }

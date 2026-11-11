@@ -1465,6 +1465,13 @@ func FuzzCatalogDecoder(f *testing.F) {
 	f.Add([]byte(`null`))
 	f.Add([]byte(`{"opencode-go":{"npm":"@ai-sdk/openai-compatible","api":"https://opencode.ai/v1","models":{"m":{"tool_call":true,"limit":{"context":1000},"modalities":{"output":["text"]}}}}}`))
 	f.Add([]byte(`{"opencode-go":{"models":{"m":{"id":"other","tool_call":true,"limit":{"context":-1},"modalities":{}}}}}`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":[{"type":"effort","values":["high","low"]}]`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":[{"type":"toggle","values":["low"]},{"type":"budget_tokens","max":1000}]`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":[{"type":"mystery","values":["max"]}]`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":[{"type":"effort","values":["high","high","default","High","high low","high\u0001","` + strings.Repeat("a", MaxThinkingEffortBytes+1) + `"]}]`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":{}`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":"effort"`))
+	f.Add(effortCatalogBody(effortCatalogModel + `,"reasoning_options":42`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		catalog, err := parseCatalog(data, testProvider, DefaultCatalogURL)
 		if err != nil {
@@ -1475,6 +1482,18 @@ func FuzzCatalogDecoder(f *testing.F) {
 		}
 		if len(catalog.Models) == 0 {
 			t.Fatal("successful parse returned an empty catalog")
+		}
+		second, err := parseCatalog(data, testProvider, DefaultCatalogURL)
+		if err != nil {
+			t.Fatalf("second parse error = %v, want deterministic success", err)
+		}
+		if !reflect.DeepEqual(catalog.Models, second.Models) {
+			t.Fatal("catalog normalization is not deterministic")
+		}
+		for id, m := range catalog.Models {
+			if !validReasoningEfforts(m.ReasoningEfforts) {
+				t.Fatalf("model %q efforts = %q, want normalized values", id, m.ReasoningEfforts)
+			}
 		}
 	})
 }

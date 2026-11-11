@@ -60,6 +60,9 @@ type Request struct {
 	Messages        []Message    `json:"messages"`
 	Tools           []ToolSchema `json:"tools,omitempty"`
 	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
+	// ThinkingEffort is the provider-neutral reasoning effort. Empty means the
+	// provider/model default and omits the wire field.
+	ThinkingEffort string `json:"thinking_effort,omitempty"`
 }
 
 // Usage is normalized token usage for one response.

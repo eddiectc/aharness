@@ -38,6 +38,9 @@ type State struct {
 	MaxTotalTokens int
 	SessionTimeout time.Duration
 	ModelTimeout   time.Duration
+	// ThinkingEffort is the latest recorded effective effort. Empty means the
+	// provider default, including for old logs without the field.
+	ThinkingEffort string
 	Interactive    bool
 	Stream         bool
 	Turns          int
@@ -87,6 +90,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.MaxTotalTokens = data.MaxTotalTokens
 			state.SessionTimeout = time.Duration(data.SessionTimeoutMS) * time.Millisecond
 			state.ModelTimeout = time.Duration(data.ModelTimeoutMS) * time.Millisecond
+			state.ThinkingEffort = data.ThinkingEffort
 		case session.TypeRunStart:
 			var data runStartData
 			if err := decodeEventData(ev, &data); err != nil {
@@ -102,6 +106,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.ModelTimeout = time.Duration(data.ModelTimeoutMS) * time.Millisecond
 			state.PromptVersion = data.PromptVersion
 			state.ToolsetVersion = data.ToolsetVersion
+			state.ThinkingEffort = data.ThinkingEffort
 			state.Interactive = data.Interactive
 			state.Stream = data.Stream
 			state.LastRunEnded = false

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"aharness/internal/model"
+	"aharness/internal/tui"
 )
 
 func TestParseModeSelection(t *testing.T) {
@@ -216,5 +217,114 @@ func TestTUISelectModelReportsContextClamp(t *testing.T) {
 	}
 	if got := host.TakeModelWarning(); got != "" {
 		t.Fatalf("warning was not consumed: %q", got)
+	}
+}
+
+func TestTUIModelChoiceCopiesReasoningEfforts(t *testing.T) {
+	source := model.CatalogModel{
+		ID:               "deepseek-v4.1-flash",
+		Name:             "DeepSeek V4.1 Flash",
+		Dialect:          model.DialectChat,
+		Reasoning:        true,
+		ReasoningEfforts: []string{"low", "high", "max"},
+	}
+	choice := modelChoice(source)
+	if strings.Join(choice.ReasoningEfforts, ",") != "low,high,max" {
+		t.Fatalf("ReasoningEfforts = %v", choice.ReasoningEfforts)
+	}
+	choice.ReasoningEfforts[0] = "changed"
+	if source.ReasoningEfforts[0] != "low" {
+		t.Fatal("modelChoice aliased the catalog effort slice")
+	}
+
+	recorded := (&tuiHost{cfg: config{Model: "recorded"}, info: tui.Info{Model: "recorded"}}).recordedChoiceLocked(true)
+	if len(recorded.ReasoningEfforts) != 0 {
+		t.Fatalf("recorded fallback exposed efforts: %v", recorded.ReasoningEfforts)
+	}
+}
+
+func TestTUIHostInfoTracksEffectiveEffort(t *testing.T) {
+	host := &tuiHost{
+		cfg:  config{ThinkingEffort: "high"},
+		info: tui.Info{Model: "deepseek-v4.1-flash"},
+	}
+	if got := host.Info().ThinkingEffort; got != "high" {
+		t.Fatalf("Info().ThinkingEffort = %q, want high", got)
+	}
+	host.cfg.ThinkingEffort = ""
+	if got := host.Info().ThinkingEffort; got != "" {
+		t.Fatalf("Info().ThinkingEffort = %q, want the provider default", got)
+	}
+}
+
+func TestTUIResolveRunThinkingEffort(t *testing.T) {
+	catalog := map[string]model.CatalogModel{
+		"supported": {ID: "supported", Reasoning: true, ReasoningEfforts: []string{"low", "high"}},
+		"no-values": {ID: "no-values", Reasoning: true},
+		"no-reason": {ID: "no-reason"},
+	}
+	cases := []struct {
+		name      string
+		inherited string
+		opts      tui.RunOptions
+		model     string
+		want      string
+		wantWarn  string
+	}{
+		{
+			name:      "inherit supported",
+			inherited: "high", model: "supported", want: "high",
+		},
+		{
+			name:      "explicit supported",
+			inherited: "low", opts: tui.RunOptions{ThinkingEffort: "high", ThinkingEffortSet: true},
+			model: "supported", want: "high",
+		},
+		{
+			name:      "explicit unsupported clears",
+			inherited: "low", opts: tui.RunOptions{ThinkingEffort: "max", ThinkingEffortSet: true},
+			model: "supported", want: "", wantWarn: "cleared",
+		},
+		{
+			name:      "inherit unsupported clears",
+			inherited: "max", model: "supported", want: "", wantWarn: "cleared",
+		},
+		{
+			name:      "explicit provider default clears",
+			inherited: "high", opts: tui.RunOptions{ThinkingEffortSet: true},
+			model: "supported", want: "",
+		},
+		{
+			name:      "no advertised values clears",
+			inherited: "high", model: "no-values", want: "", wantWarn: "advertises no effort levels",
+		},
+		{
+			name:      "no reasoning clears",
+			inherited: "high", model: "no-reason", want: "", wantWarn: "does not support reasoning",
+		},
+		{
+			name:      "unknown model keeps recorded value",
+			inherited: "high", model: "offline-model", want: "high",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config{ThinkingEffort: tc.inherited}
+			var warnings []string
+			resolveRunThinkingEffort(&cfg, catalog, tc.model, tc.opts, func(text string) {
+				warnings = append(warnings, text)
+			})
+			if cfg.ThinkingEffort != tc.want {
+				t.Fatalf("ThinkingEffort = %q, want %q", cfg.ThinkingEffort, tc.want)
+			}
+			joined := strings.Join(warnings, "\n")
+			if tc.wantWarn != "" {
+				if !strings.Contains(joined, tc.wantWarn) || !strings.Contains(joined, "provider default") {
+					t.Fatalf("warnings = %q, want %q and the provider default", joined, tc.wantWarn)
+				}
+			} else if joined != "" {
+				t.Fatalf("unexpected warnings: %q", joined)
+			}
+		})
 	}
 }

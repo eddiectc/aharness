@@ -129,6 +129,8 @@ func protocolKey(name string) (tea.KeyPressMsg, error) {
 		code = tea.KeyDelete
 	case "f1":
 		code = tea.KeyF1
+	case "f2":
+		code = tea.KeyF2
 	case "ctrl-c", "ctrl-d", "ctrl-l", "ctrl-u", "ctrl-w", "ctrl-a", "ctrl-e",
 		"ctrl-k", "ctrl-p", "ctrl-o", "ctrl-r", "ctrl-t", "ctrl-g", "ctrl-x":
 		code = rune(name[len(name)-1])
@@ -162,12 +164,13 @@ func usageLine(u model.Usage) UsageLine {
 }
 
 type runStartedLine struct {
-	V       int    `json:"v"`
-	Type    string `json:"type"`
-	Event   string `json:"event"`
-	Run     int    `json:"run"`
-	Model   string `json:"model"`
-	Dialect string `json:"dialect"`
+	V              int    `json:"v"`
+	Type           string `json:"type"`
+	Event          string `json:"event"`
+	Run            int    `json:"run"`
+	Model          string `json:"model"`
+	Dialect        string `json:"dialect"`
+	ThinkingEffort string `json:"thinking_effort,omitempty"`
 }
 
 type runFinishedLine struct {
@@ -205,11 +208,12 @@ type toolFinishedLine struct {
 }
 
 type modelChangedLine struct {
-	V       int    `json:"v"`
-	Type    string `json:"type"`
-	Event   string `json:"event"`
-	Model   string `json:"model"`
-	Dialect string `json:"dialect"`
+	V              int    `json:"v"`
+	Type           string `json:"type"`
+	Event          string `json:"event"`
+	Model          string `json:"model"`
+	Dialect        string `json:"dialect"`
+	ThinkingEffort string `json:"thinking_effort,omitempty"`
 }
 
 type noticeLine struct {
@@ -236,6 +240,7 @@ func encodeEvent(ev any) ([]byte, error) {
 		out = runStartedLine{
 			V: protocolVersion, Type: "event", Event: "run_started",
 			Run: ev.Run, Model: SanitizeLine(ev.Model), Dialect: SanitizeLine(ev.Dialect),
+			ThinkingEffort: SanitizeLine(ev.ThinkingEffort),
 		}
 	case EventRunFinished:
 		out = runFinishedLine{
@@ -261,6 +266,7 @@ func encodeEvent(ev any) ([]byte, error) {
 		out = modelChangedLine{
 			V: protocolVersion, Type: "event", Event: "model_changed",
 			Model: SanitizeLine(ev.Model), Dialect: SanitizeLine(ev.Dialect),
+			ThinkingEffort: SanitizeLine(ev.ThinkingEffort),
 		}
 	case EventNotice:
 		out = noticeLine{

@@ -148,6 +148,7 @@ type App struct {
 	steerCh     chan string
 	nextModel   string
 	nextDialect model.Dialect
+	nextEffort  string
 	models      []ModelChoice
 	acks        chan<- int
 
@@ -227,12 +228,21 @@ func New(opts Options) *App {
 	app.info.Dialect = string(opts.Dialect)
 	if opts.Host != nil {
 		app.info = opts.Host.Info()
+		app.nextEffort = app.info.ThinkingEffort
 		if app.nextModel == "" {
 			app.nextModel = app.info.Model
 			app.nextDialect = model.Dialect(app.info.Dialect)
 		}
 		if history, err := opts.Host.History(); err == nil {
 			app.loadHistory(history)
+		}
+		// The host may have resolved the session with a warning (for example,
+		// an inherited effort cleared by a model change). It is consumed here
+		// exactly once, before any picker selection can set a new warning.
+		if provider, ok := opts.Host.(ModelWarningProvider); ok {
+			if warning := provider.TakeModelWarning(); warning != "" {
+				app.appendNotice(agent.NoticeWarning, warning)
+			}
 		}
 	}
 	app.applyNoColor()

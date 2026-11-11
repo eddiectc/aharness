@@ -1,9 +1,13 @@
 # aharness thinking effort build plan
 
 - **Date:** 2026-11-11
-- **Status:** proposed; not implemented. This document is the normative plan
-  for the feature until the implementation lands and the shipped docs are
-  updated.
+- **Status:** implemented 2026-11-11. This document remains the contract
+  record and decision log; the shipped behavior is documented in
+  [architecture.md](architecture.md), [tui.md](tui.md),
+  [testing-strategy.md](testing-strategy.md), [limits.md](limits.md), and the
+  README. The real-provider smoke in §1.4 and §4.3 was **not** run because
+  provider credentials are unavailable; it remains an explicit release
+  prerequisite (§9).
 - **Source:** [model discovery build plan](model-discovery-build.md), the live
   models.dev `opencode-go` catalog, and the OpenAI Chat Completions and
   Responses reasoning parameters.
@@ -108,49 +112,59 @@
 
 ### 1.4 Definition of done
 
-- [ ] The catalog parses `reasoning` and `reasoning_options`, retains only
+- [x] The catalog parses `reasoning` and `reasoning_options`, retains only
       `effort` values, deduplicates and orders them deterministically, and
       rejects malformed or oversized values. The normalized cache is version 2;
       a version 1 cache is treated as absent and refetched.
-- [ ] `-thinking-effort` and `AHARNESS_THINKING_EFFORT` work with the documented
+- [x] `-thinking-effort` and `AHARNESS_THINKING_EFFORT` work with the documented
       precedence. `default` clears; an empty flag value is invalid; a malformed
       or oversized value is invalid.
-- [ ] A new session validates the explicit value against the selected model. A
+- [x] A new session validates the explicit value against the selected model. A
       value the model does not advertise, or any non-default value on a model
       with no effort control, exits 2 with a message listing the model's
       advertised values or saying it advertises none.
-- [ ] With no setting, neither adapter sends a reasoning field. With a setting,
+- [x] With no setting, neither adapter sends a reasoning field. With a setting,
       Chat sends `reasoning_effort` and Responses sends `reasoning.effort` in
       both buffered and streamed requests.
-- [ ] `session_start` and `run_start` record `thinking_effort`; resume inherits
+- [x] `session_start` and `run_start` record `thinking_effort`; resume inherits
       the latest `run_start` value; fork records the fork's effective value; old
       v2 logs without the field decode and resume with the provider default.
-- [ ] Resume/fork without an explicit effort change keeps working without a
+- [x] Resume/fork without an explicit effort change keeps working without a
       catalog fetch. An explicit non-default effort requires a catalog
       resolution for the effective model and fails clearly if unavailable.
-- [ ] A model change keeps a supported inherited effort. An unsupported
+- [x] A model change keeps a supported inherited effort. An unsupported
       inherited effort is cleared with a warning and recorded as empty for the
       new run. An explicit effort plus an explicit incompatible model is a
       config error.
-- [ ] `Ctrl-X` shows `thinking effort`; `F2` opens the next-run picker while
+- [x] `Ctrl-X` shows `thinking effort`; `F2` opens the next-run picker while
       idle and is disabled with a notice during a run; model rows show
       supported effort values; a model switch that clears effort shows a
       notice.
-- [ ] `-ui-json` accepts `f2`, and `model_changed`/`run_started` expose the
+- [x] `-ui-json` accepts `f2`, and `model_changed`/`run_started` expose the
       effective value as an optional field. Existing protocol version 1
       clients continue to parse the frames.
-- [ ] `-list-models` prints an `EFFORT` column; models with no effort control
+- [x] `-list-models` prints an `EFFORT` column; models with no effort control
       print `-`.
-- [ ] Unit, adapter, integration, TUI, fuzz, race, build, lint, and
+- [x] Unit, adapter, integration, TUI, fuzz, race, build, lint, and
       vulnerability gates pass. Documentation is updated.
+      **Verified 2026-11-11:** `goimports -l .`, `go vet ./...`,
+      `golangci-lint run ./...` (0 issues), `go test -race -count=1 ./...`,
+      `go build ./...`, `govulncheck ./...` (0 called vulnerabilities), and
+      short fuzz runs for all five fuzz targets passed. The documentation
+      updates in §8 are complete.
 - [ ] A real-provider smoke proves at least one effort value through each
       native SDK path used by the selected models (`@ai-sdk/openai-compatible`,
       `@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`). If a translated
       path rejects the OpenAI-compatible field, the plan's mapping is corrected
       or the affected models do not advertise effort in this harness. This
       requires provider credentials and is not claimed by mock tests.
+      **Not run:** `AHARNESS_PROVIDER_TOKEN` is unset in the implementation
+      environment. This is an explicit release prerequisite (§9).
 
 ## 2. Current state
+
+**Historical:** this section records the state before implementation and is
+kept for rationale. §9 records the shipped state and deviations.
 
 The model discovery implementation parses a deliberately small models.dev
 subset. The relevant gaps:
@@ -456,6 +470,10 @@ canonical model. If no correct OpenAI-compatible mapping exists, the affected
 models must not offer effort in this harness even if the catalog lists it; that
 requires an explicit, documented exclusion rather than a silent drop.
 
+**Status:** this smoke has not been run. `AHARNESS_PROVIDER_TOKEN` is unset in
+the implementation environment, so no hosted request was made. It is an
+explicit release prerequisite; see §9.
+
 ## 5. Testing
 
 | Layer | Cases |
@@ -520,3 +538,46 @@ When implemented, update:
   plan.
 - This plan: mark implemented and record deviations, following the
   model-discovery and limits-removal plans.
+
+## 9. Implementation status and verification
+
+**Status:** implemented 2026-11-11. The shipped behavior is documented in
+[architecture.md](architecture.md) §2.2 and §7–§9, [tui.md](tui.md),
+[testing-strategy.md](testing-strategy.md), [limits.md](limits.md), and the
+[README](../README.md).
+
+Deviations and clarifications against the contract above:
+
+| Area | Shipped behavior |
+|---|---|
+| Catalog decoding | Only `reasoning_options` entries with `type: "effort"` contribute values; `toggle`, token-budget, and unknown types are ignored. A malformed `reasoning_options` payload yields an empty effort list rather than failing the catalog. The raw `reasoning` flag is retained. |
+| Cache validation | Version 2 validation additionally requires unique values in strictly canonical order, on top of the 32-byte, 16-value, and syntax rules. A tampered or misordered usable entry invalidates the cache, which is refetched. |
+| Inheritance without a fetch | An inherited effort is validated against the catalog only when the effective model is resolved (an explicit model change). A resume/fork that changes no model trusts the recorded value without a fetch, as §3.2 specifies. |
+| Clear sentinel | `default` is converted to the empty value immediately after the syntax check, so it never reaches catalog validation, an adapter request, or the session log. |
+| TUI and `-ui-json` | `F2`, the details row, model-picker effort metadata, the model-switch clearing notice, the `f2` key, and the optional `thinking_effort` fields follow §3.6. No new event type; protocol version stays 1. |
+| Live catalog | Values remain catalog-driven. On 2026-11-11 the catalog advertised different lists per model (for example `low,high,max` for `deepseek-v4.1-flash` and other sets including `none`), so the shipped docs do not hardcode a list. Catalog drift changes `-list-models` and picker output without a harness release; the mechanism does not depend on any observed entry. |
+
+Verification:
+
+- Automated coverage: catalog normalization/cache, adapter request bodies,
+  config resolution, session reconstruction, and agent request construction
+  cases are present in the working tree (see
+  [testing-strategy.md](testing-strategy.md) §1–§2). The TUI/headless `f2`
+  cases are listed there; `internal/tui` tests cover the picker ordering,
+  disabled/no-effort notices, details row, model-switch clearing, and the
+  `thinking_effort` notice kind.
+- Gates: `goimports -l .`, `go vet ./...`, `golangci-lint run ./...`,
+  `go test -race -count=1 ./...`, `go build ./...`, and `govulncheck ./...`
+  pass. Short `-fuzztime=2-3s` runs of `FuzzCatalogDecoder`, `FuzzSSEDecoder`,
+  `FuzzChatStream`, `FuzzResponsesStream`, and `FuzzHistory` also pass; these
+  are smoke runs, not long-duration fuzzing.
+- Real-provider smoke: **not run**. `AHARNESS_PROVIDER_TOKEN` is unset in the
+  implementation environment, so no hosted request was made and no provider
+  acceptance is claimed. Mock/fake-provider tests prove what the adapters send,
+  not that the hosted endpoint honored the value. Before release, run the §4.3
+  matrix, record the exact model, effort, dialect, and result, and either
+  correct a translated mapping or explicitly exclude the affected models from
+  advertising effort.
+- No new runtime dependency, and no change to the loop, prompt, tools,
+  projection, compaction, retry policy, token accounting, or session schema
+  version.

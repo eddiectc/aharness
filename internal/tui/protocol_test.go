@@ -15,6 +15,8 @@ import (
 func TestDecodeCommandValidation(t *testing.T) {
 	valid := []string{
 		`{"v":1,"type":"text","text":"hi"}`,
+		`{"v":1,"type":"key","key":"f1"}`,
+		`{"v":1,"type":"key","key":"f2"}`,
 		`{"v":1,"type":"key","key":"ctrl-c"}`,
 		`{"v":1,"type":"resize","width":100,"height":30}`,
 		`{"v":1,"type":"wait","until":"run_started"}`,
@@ -64,12 +66,15 @@ func TestEncodeSemanticEvents(t *testing.T) {
 		ev   any
 		want []string
 	}{
+		{EventRunStarted{Run: 2, Model: "m", Dialect: "openai-chat", ThinkingEffort: "high"}, []string{`"event":"run_started"`, `"run":2`, `"model":"m"`, `"thinking_effort":"high"`}},
 		{EventRunStarted{Run: 2, Model: "m", Dialect: "openai-chat"}, []string{`"event":"run_started"`, `"run":2`, `"model":"m"`}},
 		{EventRunFinished{Status: agent.StopCompleted, Reason: "ok", RunTurns: 2, RunUsage: model.Usage{InputTokens: 1, OutputTokens: 2}, Turns: 3, Usage: model.Usage{InputTokens: 4, OutputTokens: 5}}, []string{`"status":"completed"`, `"run_turns":2`, `"input_tokens":4`}},
 		{EventToolStarted{CallID: "c", Name: "read_file", Arguments: `{"path":"a"}`}, []string{`"event":"tool_started"`, `"arguments":{"path":"a"}`}},
 		{EventToolStarted{CallID: "c", Name: "read_file", Arguments: "not json"}, []string{`"arguments":"not json"`}},
 		{EventToolFinished{CallID: "c", Name: "read_file", OK: true, Code: "ok"}, []string{`"ok":true`, `"exit_code":0`, `"truncated":false`}},
+		{EventModelChanged{Model: "m2", Dialect: "openai-responses", ThinkingEffort: "max"}, []string{`"event":"model_changed"`, `"thinking_effort":"max"`}},
 		{EventModelChanged{Model: "m2", Dialect: "openai-responses"}, []string{`"event":"model_changed"`}},
+		{EventNotice{Kind: "thinking_effort", Text: "thinking effort for the next run: high"}, []string{`"kind":"thinking_effort"`, `"text":"thinking effort for the next run: high"`}},
 		{EventNotice{Kind: "retry", Text: "again"}, []string{`"kind":"retry"`, `"text":"again"`}},
 		{EventError{Code: "internal_error", Message: "bad"}, []string{`"code":"internal_error"`}},
 	}
@@ -85,6 +90,21 @@ func TestEncodeSemanticEvents(t *testing.T) {
 			if !strings.Contains(string(data), want) {
 				t.Errorf("event %T missing %s: %s", tc.ev, want, data)
 			}
+		}
+	}
+}
+
+func TestEncodeEffortFieldOmittedForProviderDefault(t *testing.T) {
+	for _, ev := range []any{
+		EventRunStarted{Run: 1, Model: "m", Dialect: "openai-chat"},
+		EventModelChanged{Model: "m", Dialect: "openai-chat"},
+	} {
+		data, err := encodeEvent(ev)
+		if err != nil {
+			t.Fatalf("encodeEvent(%T): %v", ev, err)
+		}
+		if bytes.Contains(data, []byte("thinking_effort")) {
+			t.Fatalf("event %T exposed an empty thinking effort: %s", ev, data)
 		}
 	}
 }

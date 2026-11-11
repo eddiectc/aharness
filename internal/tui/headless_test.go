@@ -25,9 +25,10 @@ type fakeHost struct {
 	history []agent.HistoryItem
 	ws      *tools.Workspace
 
-	mu   sync.Mutex
-	run  *fakeRun
-	last []byte
+	mu       sync.Mutex
+	run      *fakeRun
+	last     []byte
+	lastOpts RunOptions
 }
 
 type fakeRun struct {
@@ -44,7 +45,7 @@ func (h *fakeHost) Models() []ModelChoice {
 		{
 			ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash",
 			Dialect: model.DialectChat, ContextWindow: 200_000, InputLimit: 160_000,
-			OutputLimit: 8_192, Switchable: true,
+			OutputLimit: 8_192, Switchable: true, ReasoningEfforts: []string{"low", "high", "max"},
 		},
 		{
 			ID: "crouton-alpha-free", Name: "Crouton Alpha Free",
@@ -60,8 +61,13 @@ func (h *fakeHost) Close() error                          { return nil }
 func (h *fakeHost) Start(sub Submission, opts RunOptions, steer <-chan string, display func(agent.DisplayEvent) error) (Run, error) {
 	h.mu.Lock()
 	h.last = []byte(sub.Text)
+	h.lastOpts = opts
 	h.mu.Unlock()
 	done := make(chan agent.Result, 1)
+	modelName := opts.Model
+	if modelName == "" {
+		modelName = "deepseek-v4.1-flash"
+	}
 	go func() {
 		defer close(done)
 		emit := func(ev agent.DisplayEvent) {
@@ -69,7 +75,7 @@ func (h *fakeHost) Start(sub Submission, opts RunOptions, steer <-chan string, d
 				_ = display(ev)
 			}
 		}
-		emit(agent.RunStarted{Turn: 0, Model: "deepseek-v4.1-flash", Dialect: "openai-chat"})
+		emit(agent.RunStarted{Turn: 0, Model: modelName, Dialect: "openai-chat", ThinkingEffort: opts.ThinkingEffort})
 		emit(agent.ModelStarted{Turn: 1, Attempt: 1})
 		emit(agent.TextDelta{Text: "hello "})
 		emit(agent.TextDelta{Text: "world"})
@@ -102,6 +108,12 @@ func newFakeHost() *fakeHost {
 		Workspace: "/tmp/fake",
 		MaxTurns:  30, MaxTotalTokens: 2_000_000,
 	}}
+}
+
+func (h *fakeHost) lastRunOptions() RunOptions {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastOpts
 }
 
 func parseOutput(t *testing.T, out string) []map[string]any {
@@ -203,6 +215,235 @@ func anyStrings(values []any) []string {
 		out[i], _ = value.(string)
 	}
 	return out
+}
+
+type headlessSelectingHost struct {
+	*fakeHost
+	choices []ModelChoice
+}
+
+func (h *headlessSelectingHost) Models() []ModelChoice {
+	return append([]ModelChoice(nil), h.choices...)
+}
+
+func (h *headlessSelectingHost) SelectModel(id string) (ModelChoice, error) {
+	for _, choice := range h.choices {
+		if choice.ID == id {
+			return choice, nil
+		}
+	}
+	return ModelChoice{}, fmt.Errorf("model %q is not in the loaded catalog", id)
+}
+
+func TestHeadlessEffortPickerSelectsNextRun(t *testing.T) {
+	host := newFakeHost()
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"key","key":"esc"}`,
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"use the selected effort"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":5000}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Width: 120, Height: 40, Stdin: strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil {
+		t.Fatalf("RunHeadless: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d", exit)
+	}
+	raw := out.String()
+	for _, want := range []string{
+		`"overlay":"model"`, "effort low/high/max",
+		`"overlay":"effort"`, "provider default",
+		"thinking effort for the next run: high",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("output missing %q:\n%s", want, raw)
+		}
+	}
+	opts := host.lastRunOptions()
+	if opts.ThinkingEffort != "high" || !opts.ThinkingEffortSet {
+		t.Fatalf("Start options = %+v, want high with the set flag", opts)
+	}
+	var runStarted, effortNotice bool
+	for _, line := range parseOutput(t, raw) {
+		if line["type"] != "event" {
+			continue
+		}
+		switch line["event"] {
+		case "run_started":
+			runStarted = true
+			if line["thinking_effort"] != "high" {
+				t.Fatalf("run_started = %v, want thinking_effort high", line)
+			}
+		case "notice":
+			if line["kind"] == "thinking_effort" {
+				effortNotice = true
+				if !strings.Contains(fmt.Sprint(line["text"]), "high") {
+					t.Fatalf("thinking_effort notice = %v", line)
+				}
+			}
+		}
+	}
+	if !runStarted || !effortNotice {
+		t.Fatalf("missing run_started or thinking_effort notice:\n%s", raw)
+	}
+}
+
+func TestHeadlessEffortPickerProviderDefaultOmitsField(t *testing.T) {
+	host := newFakeHost()
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"run with the provider default"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":5000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Width: 120, Height: 40, Stdin: strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil || exit != 0 {
+		t.Fatalf("RunHeadless exit=%d err=%v", exit, err)
+	}
+	opts := host.lastRunOptions()
+	if opts.ThinkingEffort != "" || !opts.ThinkingEffortSet {
+		t.Fatalf("Start options = %+v, want an explicit provider default", opts)
+	}
+	raw := out.String()
+	var runStarted bool
+	for _, line := range parseOutput(t, raw) {
+		if line["type"] != "event" {
+			continue
+		}
+		if line["event"] == "run_started" {
+			runStarted = true
+			if _, ok := line["thinking_effort"]; ok {
+				t.Fatalf("provider-default run_started exposed the field: %v", line)
+			}
+		}
+	}
+	if !runStarted {
+		t.Fatalf("missing run_started event:\n%s", raw)
+	}
+	if !strings.Contains(raw, "thinking effort for the next run: provider default") {
+		t.Fatalf("missing provider default notice:\n%s", raw)
+	}
+}
+
+func TestHeadlessEffortPickerNoValues(t *testing.T) {
+	models := []ModelChoice{{
+		ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", Dialect: model.DialectChat,
+		ContextWindow: 200_000, InputLimit: 160_000, OutputLimit: 8_192, Switchable: true,
+	}}
+	host := newFakeHost()
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: models, Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Width: 120, Height: 40, Stdin: strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil || exit != 0 {
+		t.Fatalf("RunHeadless exit=%d err=%v", exit, err)
+	}
+	raw := out.String()
+	if !strings.Contains(raw, "advertises no effort levels") {
+		t.Fatalf("missing no-effort notice:\n%s", raw)
+	}
+	if strings.Contains(raw, `"overlay":"effort"`) {
+		t.Fatalf("effort overlay opened without advertised values:\n%s", raw)
+	}
+	if strings.Contains(raw, `"event":"run_started"`) {
+		t.Fatalf("a run started unexpectedly:\n%s", raw)
+	}
+}
+
+func TestHeadlessModelSwitchClearsUnsupportedEffort(t *testing.T) {
+	base := newFakeHost()
+	base.info.ThinkingEffort = "high"
+	host := &headlessSelectingHost{
+		fakeHost: base,
+		choices: []ModelChoice{
+			{
+				ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash", Dialect: model.DialectChat,
+				ContextWindow: 200_000, InputLimit: 160_000, OutputLimit: 8_192,
+				Switchable: true, ReasoningEfforts: []string{"low", "high", "max"},
+			},
+			{
+				ID: "crouton-alpha-free", Name: "Crouton Alpha Free", Dialect: model.DialectResponses,
+				ContextWindow: 1_000_000, InputLimit: 900_000, Switchable: true,
+			},
+		},
+	}
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"text","text":"crouton"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"run after the switch"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":5000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Width: 120, Height: 40, Stdin: strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil || exit != 0 {
+		t.Fatalf("RunHeadless exit=%d err=%v", exit, err)
+	}
+	opts := host.lastRunOptions()
+	if opts.Model != "crouton-alpha-free" || opts.ThinkingEffort != "" || !opts.ThinkingEffortSet {
+		t.Fatalf("Start options = %+v, want the switched model with the cleared effort", opts)
+	}
+	raw := out.String()
+	var warning, changed bool
+	for _, line := range parseOutput(t, raw) {
+		if line["type"] != "event" {
+			continue
+		}
+		switch line["event"] {
+		case "notice":
+			if line["kind"] == "warning" && strings.Contains(fmt.Sprint(line["text"]), `cleared`) {
+				warning = true
+			}
+		case "model_changed":
+			changed = true
+			if line["model"] != "crouton-alpha-free" {
+				t.Fatalf("model_changed = %v", line)
+			}
+			if _, ok := line["thinking_effort"]; ok {
+				t.Fatalf("cleared model_changed exposed the field: %v", line)
+			}
+		case "run_started":
+			if _, ok := line["thinking_effort"]; ok {
+				t.Fatalf("cleared run_started exposed the field: %v", line)
+			}
+		}
+	}
+	if !warning || !changed {
+		t.Fatalf("missing clearing warning or model_changed event:\n%s", raw)
+	}
 }
 
 func TestHeadlessProtocolError(t *testing.T) {

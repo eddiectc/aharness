@@ -67,6 +67,9 @@ type config struct {
 	MaxTotalTokens   int
 	MaxContextTokens int
 	MaxOutputTokens  int
+	// ThinkingEffort is the effective effort after clearing "default". Empty
+	// means the provider/model default.
+	ThinkingEffort string
 	// InputLimit is the catalog's optional input ceiling for the selected
 	// model. Zero means the context window minus the safety margin applies.
 	InputLimit     int
@@ -106,21 +109,23 @@ type config struct {
 	maxOutputSet      bool
 	sessionTimeoutSet bool
 	modelTimeoutSet   bool
+	thinkingEffortSet bool
 }
 
 // envSettings is the environment layer of the flag defaults. It is parsed
 // before flags so defaults are env-aware and env errors remain config errors.
 type envSettings struct {
-	model         string
-	provider      string
-	workspace     string
-	stateDir      string
-	token         string
-	baseURL       string
-	modelsDevURL  string
-	maxContext    int
-	maxContextSet bool
-	logRequests   bool
+	model          string
+	provider       string
+	workspace      string
+	stateDir       string
+	token          string
+	baseURL        string
+	modelsDevURL   string
+	thinkingEffort string
+	maxContext     int
+	maxContextSet  bool
+	logRequests    bool
 }
 
 func loadEnv(getenv func(string) string) (envSettings, error) {
@@ -128,13 +133,14 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		getenv = os.Getenv
 	}
 	env := envSettings{
-		model:        getenv("AHARNESS_MODEL"),
-		provider:     getenv("AHARNESS_PROVIDER"),
-		workspace:    getenv("AHARNESS_WORKSPACE"),
-		stateDir:     getenv("AHARNESS_STATE_DIR"),
-		token:        getenv("AHARNESS_PROVIDER_TOKEN"),
-		baseURL:      getenv("AHARNESS_PROVIDER_BASE_URL"),
-		modelsDevURL: getenv("AHARNESS_MODELS_DEV_URL"),
+		model:          getenv("AHARNESS_MODEL"),
+		provider:       getenv("AHARNESS_PROVIDER"),
+		workspace:      getenv("AHARNESS_WORKSPACE"),
+		stateDir:       getenv("AHARNESS_STATE_DIR"),
+		token:          getenv("AHARNESS_PROVIDER_TOKEN"),
+		baseURL:        getenv("AHARNESS_PROVIDER_BASE_URL"),
+		modelsDevURL:   getenv("AHARNESS_MODELS_DEV_URL"),
+		thinkingEffort: getenv("AHARNESS_THINKING_EFFORT"),
 	}
 	if raw := getenv("AHARNESS_MAX_CONTEXT_TOKENS"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -195,6 +201,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxTotalTokens   int
 		maxContextTokens int
 		maxOutputTokens  int
+		thinkingEffort   string
 		sessionTimeout   time.Duration
 		modelTimeout     time.Duration
 		providerBaseURL  string
@@ -224,6 +231,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.DurationVar(&sessionTimeout, "session-timeout", defaultSessionTimeout, "per-run wall-clock timeout (0: no deadline; negative is invalid)")
 	fs.DurationVar(&modelTimeout, "model-timeout", defaultModelTimeout, "per-model-call harness timeout (0: no deadline; negative is invalid)")
 	fs.IntVar(&maxOutputTokens, "max-output-tokens", 0, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
+	fs.StringVar(&thinkingEffort, "thinking-effort", env.thinkingEffort, "model-advertised reasoning effort for model calls, or \"default\" to clear (default: AHARNESS_THINKING_EFFORT)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
 
@@ -264,6 +272,18 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 			ListModels:    listModels,
 			RefreshModels: refreshModels,
 		}, nil
+	}
+
+	thinkingEffortSet := visited["thinking-effort"] || env.thinkingEffort != ""
+	if visited["thinking-effort"] && thinkingEffort == "" {
+		return config{}, errors.New("thinking effort must not be empty; use \"default\" to clear")
+	}
+	if thinkingEffort != "" && thinkingEffort != "default" && !model.ValidReasoningEffort(thinkingEffort) {
+		return config{}, fmt.Errorf("invalid thinking effort %q: must match [a-z][a-z0-9_-]* and be at most %d bytes",
+			thinkingEffort, model.MaxThinkingEffortBytes)
+	}
+	if thinkingEffort == "default" {
+		thinkingEffort = ""
 	}
 
 	taskText, taskSource, taskSet, err := resolveTask(task, taskFile)
@@ -323,6 +343,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		MaxTotalTokens:    maxTotalTokens,
 		MaxContextTokens:  maxContextTokens,
 		MaxOutputTokens:   maxOutputTokens,
+		ThinkingEffort:    thinkingEffort,
 		ModelsDevURL:      env.modelsDevURL,
 		SessionTimeout:    sessionTimeout,
 		ModelTimeout:      modelTimeout,
@@ -348,6 +369,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxOutputSet:      visited["max-output-tokens"],
 		sessionTimeoutSet: visited["session-timeout"],
 		modelTimeoutSet:   visited["model-timeout"],
+		thinkingEffortSet: thinkingEffortSet,
 	}
 	if cfg.maxContextSet {
 		cfg.maxContextValue = maxContextTokens
@@ -461,7 +483,8 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "environment: AHARNESS_MODEL, AHARNESS_PROVIDER, AHARNESS_WORKSPACE,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_STATE_DIR, AHARNESS_PROVIDER_TOKEN, AHARNESS_MAX_CONTEXT_TOKENS,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_PROVIDER_BASE_URL, AHARNESS_MODELS_DEV_URL")
+	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_PROVIDER_BASE_URL, AHARNESS_MODELS_DEV_URL,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_THINKING_EFFORT")
 }
 
 // versionRequested reports whether args select -version, including the

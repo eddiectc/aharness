@@ -28,6 +28,7 @@ type sessionStartData struct {
 	SessionTimeoutMS int64  `json:"session_timeout_ms"`
 	ModelTimeoutMS   int64  `json:"model_timeout_ms"`
 	HarnessVersion   string `json:"harness_version"`
+	ThinkingEffort   string `json:"thinking_effort,omitempty"`
 	ParentSession    string `json:"parent_session,omitempty"`
 	ParentSeq        uint64 `json:"parent_seq,omitzero"`
 }
@@ -49,6 +50,7 @@ type runStartData struct {
 	HarnessVersion   string `json:"harness_version"`
 	Interactive      bool   `json:"interactive"`
 	Stream           bool   `json:"stream"`
+	ThinkingEffort   string `json:"thinking_effort,omitempty"`
 }
 
 type userMessageData struct {
@@ -61,6 +63,7 @@ type modelRequestData struct {
 	Messages             []model.Message    `json:"messages,omitempty"`
 	Tools                []model.ToolSchema `json:"tools,omitempty"`
 	MaxOutputTokens      int                `json:"max_output_tokens,omitzero"`
+	ThinkingEffort       string             `json:"thinking_effort,omitempty"`
 	EstimatedInputTokens int                `json:"estimated_input_tokens,omitzero"`
 	MessageCount         int                `json:"message_count,omitzero"`
 	Truncated            bool               `json:"truncated,omitzero"`

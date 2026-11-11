@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -19,7 +20,7 @@ import (
 )
 
 const (
-	catalogCacheVersion     = 1
+	catalogCacheVersion     = 2
 	maxCatalogModelIDBytes  = 256
 	defaultCatalogUserAgent = "aharness/unknown"
 	catalogCacheFileMode    = 0o600
@@ -362,6 +363,28 @@ func validUsableCachedModel(m CatalogModel) bool {
 	if _, reason := discoveredBaseURL(m.BaseURL); reason != "" {
 		return false
 	}
+	return validReasoningEfforts(m.ReasoningEfforts)
+}
+
+// validReasoningEfforts enforces the normalized cache contract: bounded count,
+// syntactically valid unique values in canonical order.
+func validReasoningEfforts(values []string) bool {
+	if len(values) > MaxReasoningEfforts {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for i, value := range values {
+		if !ValidReasoningEffort(value) {
+			return false
+		}
+		if _, ok := seen[value]; ok {
+			return false
+		}
+		seen[value] = struct{}{}
+		if i > 0 && compareReasoningEfforts(values[i-1], value) >= 0 {
+			return false
+		}
+	}
 	return true
 }
 
@@ -431,14 +454,24 @@ type modelsDevProvider struct {
 }
 
 type modelsDevModel struct {
-	ID         *string                `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"`
-	ToolCall   bool                   `json:"tool_call"`
-	Status     string                 `json:"status"`
-	Provider   modelsDevModelProvider `json:"provider"`
-	Limit      modelsDevLimit         `json:"limit"`
-	Modalities modelsDevModalities    `json:"modalities"`
+	ID               *string                `json:"id"`
+	Name             string                 `json:"name"`
+	Type             string                 `json:"type"`
+	ToolCall         bool                   `json:"tool_call"`
+	Status           string                 `json:"status"`
+	Provider         modelsDevModelProvider `json:"provider"`
+	Limit            modelsDevLimit         `json:"limit"`
+	Modalities       modelsDevModalities    `json:"modalities"`
+	Reasoning        bool                   `json:"reasoning"`
+	ReasoningOptions jsontext.Value         `json:"reasoning_options"`
+}
+
+// modelsDevReasoningOption is one raw reasoning control. Only effort options
+// are normalized; toggle, budget, and unknown types are decoded and ignored.
+type modelsDevReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values"`
+	Max    int      `json:"max"`
 }
 
 type modelsDevModelProvider struct {
@@ -543,6 +576,9 @@ func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM,
 		model.Translated = translated
 	}
 
+	model.Reasoning = raw.Reasoning
+	model.ReasoningEfforts = normalizeReasoningEfforts(raw.ReasoningOptions)
+
 	model.ContextWindow = raw.Limit.Context
 	if raw.Limit.Input > 0 {
 		model.InputLimit = raw.Limit.Input
@@ -588,6 +624,72 @@ func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM,
 		model.Unavailable = baseURLReason
 	}
 	return model
+}
+
+// normalizeReasoningEfforts decodes reasoning_options defensively and retains
+// only syntactically valid effort values. A malformed options payload yields
+// no effort control instead of making the catalog unusable.
+func normalizeReasoningEfforts(raw jsontext.Value) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var options []modelsDevReasoningOption
+	if err := jsonv2.Unmarshal(raw, &options); err != nil {
+		return nil
+	}
+	values := make([]string, 0, len(options))
+	seen := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		if option.Type != "effort" {
+			continue
+		}
+		for _, candidate := range option.Values {
+			value := strings.TrimSpace(candidate)
+			if !ValidReasoningEffort(value) {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			values = append(values, value)
+		}
+	}
+	slices.SortFunc(values, compareReasoningEfforts)
+	if len(values) > MaxReasoningEfforts {
+		values = values[:MaxReasoningEfforts]
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+var reasoningEffortRank = map[string]int{
+	"none":    0,
+	"minimal": 1,
+	"low":     2,
+	"medium":  3,
+	"high":    4,
+	"xhigh":   5,
+	"max":     6,
+}
+
+// compareReasoningEfforts orders known levels by strength, then unknown values
+// lexicographically.
+func compareReasoningEfforts(a, b string) int {
+	ra, aKnown := reasoningEffortRank[a]
+	rb, bKnown := reasoningEffortRank[b]
+	switch {
+	case aKnown && bKnown:
+		return ra - rb
+	case aKnown:
+		return -1
+	case bKnown:
+		return 1
+	default:
+		return strings.Compare(a, b)
+	}
 }
 
 func catalogSDK(sdk string) (dialect Dialect, nativeDialect string, translated, supported bool) {

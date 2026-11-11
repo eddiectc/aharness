@@ -58,6 +58,9 @@ type Config struct {
 	// ModelTimeout bounds one model attempt; 0 means no harness deadline.
 	ModelTimeout time.Duration
 	LogRequests  bool
+	// ThinkingEffort is the effective reasoning effort for every model call
+	// in this run. Empty means the provider/model default.
+	ThinkingEffort string
 
 	Interactive bool
 	Stream      bool

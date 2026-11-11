@@ -34,6 +34,7 @@ const (
 	OverlayTable   OverlayKind = "table"
 	OverlayFile    OverlayKind = "file"
 	OverlayModel   OverlayKind = "model"
+	OverlayEffort  OverlayKind = "effort"
 	OverlayImage   OverlayKind = "image"
 )
 
@@ -41,15 +42,16 @@ const (
 // only for the offline recorded-model fallback, which cannot be applied as a
 // new selection until the catalog loads.
 type ModelChoice struct {
-	ID            string
-	Name          string
-	Dialect       model.Dialect
-	ContextWindow int
-	InputLimit    int
-	OutputLimit   int
-	Status        string // "", "alpha", "beta", or "deprecated"
-	Translated    bool
-	Switchable    bool
+	ID               string
+	Name             string
+	Dialect          model.Dialect
+	ContextWindow    int
+	InputLimit       int
+	OutputLimit      int
+	Status           string // "", "alpha", "beta", or "deprecated"
+	Translated       bool
+	Switchable       bool
+	ReasoningEfforts []string
 }
 
 // ModelRefresher is an optional Host capability for the model picker's
@@ -82,6 +84,7 @@ type Info struct {
 	MaxTotalTokens int
 	Turns          int
 	Usage          model.Usage
+	ThinkingEffort string
 }
 
 // Submission is one message to record and run.
@@ -90,9 +93,11 @@ type Submission struct {
 	Source string // "tui", "-task", or "-task-file"
 }
 
-// RunOptions selects the model for the next run.
+// RunOptions selects the model and thinking effort for the next run.
 type RunOptions struct {
-	Model string // empty inherits the current model
+	Model             string // empty inherits the current model
+	ThinkingEffort    string // empty means the provider default
+	ThinkingEffortSet bool   // ThinkingEffort replaces the inherited value
 }
 
 // Run is one in-flight run handle.
@@ -132,6 +137,7 @@ type Details struct {
 	MaxOutputUnset   bool
 	SessionTimeout   time.Duration
 	ModelTimeout     time.Duration
+	ThinkingEffort   string
 }
 
 // DetailsProvider is an optional Host capability for the details overlay.
@@ -175,9 +181,10 @@ type StateSnapshot struct {
 // Protocol semantic event payloads. They are display-only and never durable.
 type (
 	EventRunStarted struct {
-		Run     int
-		Model   string
-		Dialect string
+		Run            int
+		Model          string
+		Dialect        string
+		ThinkingEffort string
 	}
 	EventRunFinished struct {
 		Status   agent.StopReason
@@ -202,8 +209,9 @@ type (
 		TimedOut  bool
 	}
 	EventModelChanged struct {
-		Model   string
-		Dialect string
+		Model          string
+		Dialect        string
+		ThinkingEffort string
 	}
 	EventNotice struct {
 		Kind string
@@ -455,6 +463,8 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.toggleImageViewer()
 	case "f1":
 		return m.openHelpOverlay()
+	case "f2":
+		return m.openEffortOverlay()
 	case "ctrl+x":
 		return m.openDetailsOverlay()
 	}
@@ -636,7 +646,11 @@ func (m *App) startRun(text, source string) tea.Cmd {
 			return nil
 		}
 	}
-	run, err := m.host.Start(Submission{Text: text, Source: source}, RunOptions{Model: m.nextModel}, steer, display)
+	run, err := m.host.Start(Submission{Text: text, Source: source}, RunOptions{
+		Model:             m.nextModel,
+		ThinkingEffort:    m.nextEffort,
+		ThinkingEffortSet: true,
+	}, steer, display)
 	if err != nil {
 		close(stop)
 		m.removeItem(userItem)
@@ -703,10 +717,16 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 	case agent.RunStarted:
 		m.run.model = ev.Model
 		m.run.dialect = ev.Dialect
+		m.nextEffort = ev.ThinkingEffort
 		m.run.state = StateRunning
 		m.dirty = true
 		m.runStartedCount++
-		m.emit(EventRunStarted{Run: m.run.number, Model: ev.Model, Dialect: ev.Dialect})
+		m.emit(EventRunStarted{
+			Run:            m.run.number,
+			Model:          ev.Model,
+			Dialect:        ev.Dialect,
+			ThinkingEffort: ev.ThinkingEffort,
+		})
 		if header := m.runItem(); header != nil {
 			header.model = ev.Model
 			header.dialect = ev.Dialect

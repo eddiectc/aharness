@@ -24,6 +24,8 @@ type fakeCatalogModel struct {
 	ToolCall   bool
 	OutputMods []string // defaults to ["text"]
 	Type       string
+	Reasoning  bool
+	Efforts    []string // reasoning_options effort values, raw and unordered
 }
 
 // testCatalogModel builds a model that advertises tool calls and text output,
@@ -95,6 +97,14 @@ func catalogPayload(models map[string]fakeCatalogModel) []byte {
 		}
 		if m.Type != "" {
 			entry["type"] = m.Type
+		}
+		if m.Reasoning {
+			entry["reasoning"] = true
+		}
+		if len(m.Efforts) > 0 {
+			entry["reasoning_options"] = []any{
+				map[string]any{"type": "effort", "values": m.Efforts},
+			}
 		}
 		encoded[id] = entry
 	}

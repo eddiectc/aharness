@@ -6,7 +6,9 @@
   headless checks pass; the real-provider TUI smoke and the real-terminal Kitty/
   tmux image matrix remain pending environment/credentials. This is a post-v1
   feature. v1 M0–M3 remain implemented; the real-provider streamed v1 smoke is
-  still the v1 release gate.
+  still the v1 release gate. The later [thinking effort](thinking-effort-build.md)
+  feature adds `F2` and optional `thinking_effort` protocol fields; tui.md is
+  authoritative for the shipped keys and protocol.
   The framework decision was revised again on 2026-11-10 after reviewing
   teatest/v2, Glamour v2, and ntcharts v2: **Bubble Tea v2 is the chosen
   application framework**, with Bubbles v2 for widgets, Glamour v2 for

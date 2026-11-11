@@ -32,6 +32,7 @@ type RunStarted struct {
 	ResumedFromSeq uint64
 	Model          string
 	Dialect        string
+	ThinkingEffort string
 }
 
 // ModelStarted is emitted before each transport attempt.

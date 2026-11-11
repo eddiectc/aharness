@@ -1061,6 +1061,171 @@ func TestBinaryUIJSONDeprecatedModelSelectable(t *testing.T) {
 	}
 }
 
+func TestBinaryUIJSONThinkingEffortPickerAndClearing(t *testing.T) {
+	bin := buildHarness(t)
+	catalog := startFakeModelsDev(t)
+	models := defaultFakeCatalogModels()
+	deepseek := models["deepseek-v4.1-flash"]
+	deepseek.Reasoning = true
+	deepseek.Efforts = []string{"max", "low", "high"}
+	models["deepseek-v4.1-flash"] = deepseek
+	catalog.SetModels(models)
+	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
+
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if r.URL.Path == "/responses" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			writeSSE(t, w, "response.output_text.delta", `{"type":"response.output_text.delta","delta":"picked"}`)
+			writeSSE(t, w, "response.completed", `{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"picked"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+			return
+		}
+		sseFinal(t, w, "chat answer")
+	})
+
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"key","key":"esc"}`,
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"first run"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		// Provider default for the second run.
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"key","key":"up"}`,
+		`{"v":1,"type":"key","key":"up"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"second run"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		// Select high again, then switch to a model without effort controls.
+		`{"v":1,"type":"key","key":"f2"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"down"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"text","text":"crouton"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"third run"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRawEnv(t, bin, t.TempDir(), stateDir, f.url, extra,
+		strings.NewReader(script),
+		"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash",
+		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+
+	frame := frameText(t, stdout)
+	for _, want := range []string{
+		"effort low/high/max",
+		"provider default",
+		"thinking effort for the next run: high",
+		"thinking effort for the next run: provider default",
+	} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("frames missing %q:\n%s", want, frame)
+		}
+	}
+	if !strings.Contains(stdout, `"kind":"warning"`) || !strings.Contains(stdout, "cleared") {
+		t.Errorf("stdout missing the effort-clearing warning:\n%s", stdout)
+	}
+
+	var runStarted []map[string]any
+	var changed map[string]any
+	var thinkingNotice bool
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Event string `json:"event"`
+			Kind  string `json:"kind"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode protocol line: %v\n%s", err, line)
+		}
+		if ev.Type != "event" {
+			continue
+		}
+		var fields map[string]any
+		if err := jsonv2.Unmarshal([]byte(line), &fields); err != nil {
+			t.Fatal(err)
+		}
+		switch ev.Event {
+		case "run_started":
+			runStarted = append(runStarted, fields)
+		case "model_changed":
+			changed = fields
+		case "notice":
+			if ev.Kind == "thinking_effort" {
+				thinkingNotice = true
+			}
+		}
+	}
+	if !thinkingNotice {
+		t.Fatalf("missing thinking_effort notice:\n%s", stdout)
+	}
+	if len(runStarted) != 3 {
+		t.Fatalf("run_started events = %d, want 3\n%s", len(runStarted), stdout)
+	}
+	if runStarted[0]["thinking_effort"] != "high" {
+		t.Errorf("first run_started = %v, want high", runStarted[0])
+	}
+	for i := 1; i < len(runStarted); i++ {
+		if _, ok := runStarted[i]["thinking_effort"]; ok {
+			t.Errorf("run_started %d exposed the provider default: %v", i, runStarted[i])
+		}
+	}
+	if changed == nil || changed["model"] != "crouton-alpha-free" {
+		t.Fatalf("model_changed = %v", changed)
+	}
+	if _, ok := changed["thinking_effort"]; ok {
+		t.Fatalf("cleared model_changed exposed effort: %v", changed)
+	}
+
+	files := sessionFiles(t, stateDir)
+	if len(files) != 1 {
+		t.Fatalf("session files = %v", files)
+	}
+	_, starts := recordedSession(t, files[0])
+	if len(starts) != 3 {
+		t.Fatalf("recorded run_start events = %d, want 3", len(starts))
+	}
+	if starts[0].ThinkingEffort != "high" {
+		t.Errorf("first run_start effort = %q, want high", starts[0].ThinkingEffort)
+	}
+	if starts[1].ThinkingEffort != "" || starts[2].ThinkingEffort != "" {
+		t.Errorf("provider-default run_start efforts = %q/%q", starts[1].ThinkingEffort, starts[2].ThinkingEffort)
+	}
+	if starts[2].Model != "crouton-alpha-free" {
+		t.Errorf("third run_start model = %q, want the switched model", starts[2].Model)
+	}
+
+	gotBodies := providerBodies(f)
+	if len(gotBodies) != 3 {
+		t.Fatalf("provider requests = %d, want 3", len(gotBodies))
+	}
+	var effort string
+	if !decodeJSONField(t, gotBodies[0], "reasoning_effort", &effort) || effort != "high" {
+		t.Errorf("first request reasoning_effort = %q present=%v\n%s", effort, hasJSONField(t, gotBodies[0], "reasoning_effort"), gotBodies[0])
+	}
+	if hasJSONField(t, gotBodies[1], "reasoning_effort") {
+		t.Errorf("provider-default chat request sent reasoning_effort:\n%s", gotBodies[1])
+	}
+	if hasJSONField(t, gotBodies[2], "reasoning") {
+		t.Errorf("provider-default responses request sent reasoning:\n%s", gotBodies[2])
+	}
+}
+
 func TestBinaryUIJSONDetailsShowsOutputBudget(t *testing.T) {
 	bin := buildHarness(t)
 	cases := []struct {

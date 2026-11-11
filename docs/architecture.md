@@ -6,7 +6,8 @@
 - **Related:** [Go coding standard](coding-standard.md),
   [bare-minimum harness research](agent-harness-minimum.md),
   [v1 build plan](v1-build.md), [TUI build plan](tui-build.md),
-  [shipped TUI](tui.md)
+  [shipped TUI](tui.md),
+  [thinking effort build plan](thinking-effort-build.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This document
@@ -48,7 +49,8 @@ aharness supports one provider, `opencode-go`, through two OpenAI wire
 dialects: Chat Completions and Responses. `-provider` (or
 `AHARNESS_PROVIDER`) defaults to `opencode-go`; an unknown provider is a config
 error. The usable model set, display names, context/input limits, advertised
-output ceilings, status, dialect, and base URL are discovered from the
+output ceilings, status, dialect, base URL, reasoning support, and per-model
+reasoning effort levels are discovered from the
 [models.dev](https://models.dev) catalog and normalized in `internal/model`.
 Deprecated models are selectable and labeled. Models without tool calls, text
 output, a positive context window, or a supported SDK are retained in the
@@ -141,17 +143,19 @@ The `model` package defines one internal canonical model. Every provider
 dialect is an adapter that maps its wire format into these types; the loop sees
 only the canonical model. The canonical model covers what the loop can act on:
 system and user text, assistant text, tool calls and results correlated by ID,
-a normalized finish reason, token usage, and normalized errors.
+one optional request-side control (the provider-neutral thinking effort), a
+normalized finish reason, token usage, and normalized errors.
 
 Canonical does not mean lossless. Provider-specific material — reasoning or
-thinking blocks, citations, safety metadata, cache controls, opaque options,
-and streaming events — stays in the adapter and is dropped unless the loop or
-the dialect's continuation needs it. If a future feature needs one of those, add
-a typed canonical field when the loop consumes it; do not add a raw
-provider-shaped field. A lossless union schema for OpenAI Responses, OpenAI
-Chat, Anthropic, and Gemini would push provider-specific optional fields and
-invalid states into the loop; that is the thing to avoid. OpenAI Chat is a
-dialect, not a neutral standard, so it is not the canonical model either.
+thinking blocks and their text, citations, safety metadata, cache controls,
+opaque options, and streaming events — stays in the adapter and is dropped
+unless the loop or the dialect's continuation needs it. If a future feature
+needs one of those, add a typed canonical field when the loop consumes it; do
+not add a raw provider-shaped field. A lossless union schema for OpenAI
+Responses, OpenAI Chat, Anthropic, and Gemini would push provider-specific
+optional fields and invalid states into the loop; that is the thing to avoid.
+OpenAI Chat is a dialect, not a neutral standard, so it is not the canonical
+model either.
 
 Each adapter owns the wire format, authentication, tool-schema translation, and
 the mapping of finish reasons, usage, and errors. It uses one `http.Client` with
@@ -161,7 +165,7 @@ capped and redacted before logging.
 
 | Layer | Owns |
 |---|---|
-| Canonical `model` types | System/text messages, tool calls/results, normalized finish reason, usage, normalized errors. |
+| Canonical `model` types | System/text messages, tool calls/results, optional request-side thinking effort, normalized finish reason, usage, normalized errors. |
 | `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, prompt/completion usage. |
 | `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, input/output usage, `store: false` full replay. |
 | Shared `model` HTTP helper | Request execution, auth/session headers, 1 MiB body cap, typed error decoding. |
@@ -187,14 +191,57 @@ Normalization rules:
   adapter-owned continuation for reasoning items remains a future-model
   concern, not a canonical message; the v0 Responses smoke did not need one.
 
+**Thinking effort.** The public name is *thinking effort*; the provider and
+catalog call the same control *reasoning effort*. `model.Request` carries one
+optional provider-neutral field:
+
+```go
+type Request struct {
+	Model           string
+	Messages        []Message
+	Tools           []ToolSchema
+	MaxOutputTokens int
+	ThinkingEffort  string // empty means the provider/model default
+}
+```
+
+| Canonical | Chat Completions | Responses | Empty |
+|---|---|---|---|
+| `ThinkingEffort` | top-level `reasoning_effort` | `reasoning: {"effort": "<value>"}` | Field omitted in both dialects. |
+
+- Both adapters construct buffered and streaming requests with the same
+  `payload` function, so the mapping cannot diverge between paths. Tool-call
+  rounds reuse the run configuration, so every model call in a run carries the
+  same value.
+- The value is sent unchanged; adapters do not rename it between providers,
+  do not validate catalog membership, and never synthesize a value from a
+  toggle or token-budget control. Resolution and membership checks happen in
+  `cmd` before the run (Section 9).
+- The catalog supplies the capability: only `reasoning_options` entries whose
+  type is `effort` contribute values. Values are trimmed, validated against
+  `[a-z][a-z0-9_-]*` and at most 32 bytes, the reserved clear sentinel
+  `default` is dropped, duplicates are removed, the list is ordered `none`,
+  `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, then unknown values
+  lexicographically, and it is capped at 16 values. `reasoning` is retained
+  separately so the CLI can distinguish a model that supports reasoning
+  without an effort control from one that does not reason at all.
+- Reasoning text, reasoning summaries, reasoning-token details, and encrypted
+  reasoning items remain adapter-owned and are dropped. Usage already counts
+  reasoning tokens as output tokens, so no accounting change is needed.
+- A provider rejection of a value the catalog advertised (for example 400 or
+  422) is a normal typed `provider_error`. The harness does not retry without
+  the field or fall back to the provider default.
+
 Provider responses are decoded with `encoding/json/v2` defaults: duplicate
 object names and invalid UTF-8 are rejected and map to `protocol_error`; unknown
 members are ignored for forward compatibility. Tool arguments are stricter:
 typed decoding uses `RejectUnknownMembers(true)` (Section 5). Do not set
 `RejectUnknownMembers(true)` for provider responses.
 
-v1 has no opaque provider options or capability flags. Add adapter-specific
-knobs only when a dialect requires them, and keep them out of the loop.
+v1 has no opaque provider options or per-adapter capability knobs. Catalog
+reasoning support and effort values are discovery metadata resolved by `cmd`,
+not adapter options. Add adapter-specific knobs only when a dialect requires
+them, and keep them out of the loop.
 
 v1 ships `model.OpenAIChat` and `model.OpenAIResponses` over the `opencode-go`
 base URL. Add `anthropic` or `gemini` adapters when a real provider requires
@@ -223,6 +270,10 @@ deltas.
 - Chat Completions sends `stream: true` and
   `stream_options: {"include_usage": true}`. It assembles text, tool-call
   fragments by index, finish reason, and usage from the chunks.
+- Streaming requests use the same adapter `payload` builder as buffered
+  requests, so `max_output_tokens` and `thinking_effort` mapping is identical
+  on both paths; the only additions are `stream` and the dialect's stream
+  options.
 - Responses consumes `response.output_text.delta`,
   `response.function_call_arguments.delta`, and the terminal
   `response.completed`/`response.incomplete`/`response.failed` events. The
@@ -365,16 +416,17 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
 - `model.OpenAIChat` and `model.OpenAIResponses` — concrete dialect adapters
   with `Complete(ctx, model.Request) (model.Response, error)`. `model.Request`
   carries the projected messages with the versioned system prompt first, tool
-  schemas, an optional `max_output_tokens` (zero omits the wire field), and
-  model name. `model.Response` carries assistant text, zero or more tool calls
-  (canonical call ID, name, raw JSON arguments), a normalized finish reason
-  (`stop`, `length`, `tool_calls`, `content_filter`, or `other`), usage, and a
-  display-only `Streamed` flag. Adapters guarantee a non-empty call ID; for a
-  dialect that supplies IDs, a missing or duplicate ID is `protocol_error` and
-  is not repaired. Typed errors (`HTTPError`, `TransportError`,
-  `ProtocolError`, `PartialError`, and context overflow) keep retry policy in
-  `agent`. `cmd` resolves the catalog entry to its dialect, base URL, and
-  limits and wires the corresponding adapter.
+  schemas, an optional `max_output_tokens` (zero omits the wire field), an
+  optional `thinking_effort` (empty omits the wire field and means the
+  provider/model default), and model name. `model.Response` carries assistant
+  text, zero or more tool calls (canonical call ID, name, raw JSON arguments),
+  a normalized finish reason (`stop`, `length`, `tool_calls`, `content_filter`,
+  or `other`), usage, and a display-only `Streamed` flag. Adapters guarantee a
+  non-empty call ID; for a dialect that supplies IDs, a missing or duplicate ID
+  is `protocol_error` and is not repaired. Typed errors (`HTTPError`,
+  `TransportError`, `ProtocolError`, `PartialError`, and context overflow) keep
+  retry policy in `agent`. `cmd` resolves the catalog entry to its dialect,
+  base URL, and limits and wires the corresponding adapter.
 - `model.StreamCompleter` — optional `CompleteStream(ctx, req, emit)` contract.
   `emit` receives display-only text deltas; the returned `Response` is
   authoritative. The agent falls back to `Complete` when an adapter does not
@@ -400,7 +452,8 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   unlocks, and closes.
 - `agent.Inspect(events) (State, error)` — pure function of the durable log. It
   reconstructs session metadata, cumulative turns and usage, the last run's
-  effective configuration and terminal status, and every unpaired tool call.
+  effective configuration (including the latest recorded thinking effort) and
+  terminal status, and every unpaired tool call.
   Unknown event types and fields within v2 are ignored.
 - `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
   once-per-session `session_start` event for a new or forked session.
@@ -816,10 +869,10 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, plus optional `parent_session`/`parent_seq`. |
-| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`. |
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, plus optional `parent_session`/`parent_seq`. |
+| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
-| `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request. |
+| `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage, latency, attempt, `streamed`; 1 MiB total canonical content. |
 | `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |
 | `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag. |
@@ -835,6 +888,15 @@ v1 uses `run_end` and does not emit `session_end`. The projection ignores every
 run/control event. `seq` and `turn` continue across runs. A run without a
 `run_end` is a crash artifact; resume does not fabricate a terminal event for it,
 and the new `run_start` records `resumed_from_seq`.
+
+`thinking_effort` is additive and omitted when empty. It records the effective
+value after resolution; empty means the provider/model default and no wire
+field. `agent.Inspect` uses the latest `run_start` value as the resume/fork
+default, falling back to `session_start` before any run. A fork writes a new
+`session_start` with the fork's effective value and keeps the copied parent
+events' historical values unchanged. Old v2 logs without the field reconstruct
+as empty and resume with the provider default; the schema version stays 2 and
+old readers ignore the added field.
 
 The log is for debugging and resume, not a tamper-proof audit trail. A shell
 running as the same user can reach the state directory. Separating the log from
@@ -920,8 +982,8 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   run before mode selection and session creation and require no task, session,
   or provider token. Their precedence is `-version`, then `-refresh-models`,
   then `-list-models`; `-refresh-models -list-models` refreshes first and then
-  prints the list. Task and session-selection flags are ignored, while
-  `-provider`, `-state-dir`, and the catalog URL apply.
+  prints the list. Task, session-selection, and thinking-effort flags are
+  ignored, while `-provider`, `-state-dir`, and the catalog URL apply.
 - `-refresh-models` performs an unconditional catalog GET, atomically replaces
   the cache, prints `refreshed <n> usable models for <provider> from <source>
   at <RFC3339>` on stdout, and exits 0. With `-list-models` the summary goes to
@@ -929,21 +991,28 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   invalid catalog or unexpected `304` exits 4; the existing cache is unchanged.
   A CLI cache write failure exits 2 because the refresh was not persisted.
 - `-list-models` prints a tab-separated header and one row per usable model:
-  `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`. `OUTPUT` is the
-  advertised per-request ceiling, not an effective budget; a missing ceiling
-  prints as `-`. It revalidates the cache without forcing a full download and
-  keeps stale-cache fallback.
+  `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT`. `OUTPUT` is
+  the advertised per-request ceiling, not an effective budget; a missing
+  ceiling prints as `-`. `EFFORT` is the normalized comma-separated effort list,
+  or `-` when the model advertises no effort values. This is a documented output
+  change: the first six columns keep their positions and values, so positional
+  readers of those columns keep working. It revalidates the cache without
+  forcing a full download and keeps stale-cache fallback.
 - Catalog source: `AHARNESS_MODELS_DEV_URL` overrides the default
   `https://models.dev/api.json` for tests and mirrors; the override must be
   HTTPS except for loopback HTTP. A request times out after 15 seconds and caps
   the response body at 16 MiB. The normalized cache is
   `<state>/cache/models.dev/<provider>.json` with file mode 0600 and directory
-  mode 0700, and cache version 1. A fresh entry is used for 24 hours without a
-  network request; a stale entry triggers a conditional GET. An implicit or
-  `-list-models` refresh failure falls back to a stale valid cache with a
-  warning; no valid cache is a provider (3) or protocol (4) error naming the
-  source URL and cache path. A corrupt or version-mismatched cache is treated as
-  absent.
+  mode 0700, and cache version 2. Version 2 adds the normalized `reasoning` and
+  `reasoning_efforts` fields; a version 1 cache is rejected and refetched rather
+  than trusted without the capability data. A fresh entry is used for 24 hours
+  without a network request; a stale entry triggers a conditional GET. An
+  implicit or `-list-models` refresh failure falls back to a stale valid cache
+  with a warning; no valid cache is a provider (3) or protocol (4) error naming
+  the source URL and cache path. A corrupt, tampered, or version-mismatched
+  cache is treated as absent. A usable cached effort list that exceeds the
+  per-value/per-model caps, repeats a value, or is out of canonical order
+  invalidates the cache, which is refetched.
 - Mode selection happens after flag parsing and before task validation or
   session creation: `-version` first, then explicit `-ui-json`, explicit
   `-batch`, otherwise TUI when stdin and stdout are terminals, otherwise batch.
@@ -1014,21 +1083,57 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   config error. The catalog's advertised output ceiling is informational only.
   A provider rejection of an explicit output budget is a provider error naming
   the requested value.
+- `-thinking-effort` / `AHARNESS_THINKING_EFFORT` selects the provider-neutral
+  reasoning effort carried by every model call in the run. Accepted values are
+  model-specific and discovered from the catalog; there is no harness-wide
+  enum. Resolution is the explicit flag, then the environment, then for
+  resume/fork the latest recorded `run_start.thinking_effort` (falling back to
+  `session_start.thinking_effort`), then unset. Unset omits the wire field and
+  uses the provider/model default. `default` is a reserved clear value, never a
+  catalog level; it clears an inherited value on resume/fork and in the TUI. An
+  explicit empty flag (`-thinking-effort=`) is a config error; an empty
+  environment value is treated as unset. A non-default value must be valid
+  UTF-8, at most 32 bytes, and match `[a-z][a-z0-9_-]*`; the syntax check runs
+  before catalog resolution so a malformed value never reaches a request or the
+  log. For a new session, a non-default value must be advertised by the
+  selected model, or configuration fails with exit 2 and a message naming the
+  model's values, stating that the model does not support reasoning, or stating
+  that it advertises no effort levels. Toggle-only and token-budget controls
+  are not aliases for effort. On resume/fork, an explicit non-default value
+  loads the catalog, resolves the effective model, and validates membership; a
+  fresh cache satisfies this offline, and an unavailable catalog is a clear
+  error. Without an explicit value, the recorded value is inherited without a
+  catalog fetch. A provider that rejects a value the catalog advertised is a
+  terminal `provider_error`; the harness does not retry without the field or
+  silently fall back.
+- A model change (an explicit `-model` on resume/fork or a TUI picker
+  selection) keeps the current effort when the new model advertises it. An
+  unsupported inherited/current value is cleared to the provider default with a
+  visible warning (one `aharness: warning:` stderr line in batch, a TUI notice
+  interactively), and the next `run_start` records the cleared value. An
+  effort and model supplied explicitly together at process start are validated
+  as a pair, so an incompatible combination is a config error rather than a
+  silent clear. `default` always clears and never conflicts with a model
+  change.
 - Prompt and toolset versions are selected from `session_start` and must be
   supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
-- Effective context/output values and the recorded base URL are inherited from
-  the last run unless overridden. On resume/fork, the recorded
-  model/dialect/base URL/context/output values are used without a catalog fetch
-  unless the model is explicit. An explicit provider different from the
-  recorded provider is a config error. Recorded run budgets are not inherited:
-  an explicit positive `-max-turns` or `-max-total-tokens` on resume/fork fails
-  at config validation when the run is already at or over it.
+- Effective context/output values, the recorded base URL, and the effective
+  thinking effort are inherited from the last run unless overridden. On
+  resume/fork, the recorded model/dialect/base URL/context/output values and
+  effort are used without a catalog fetch unless the model is explicit or an
+  explicit non-default effort requires validation. An explicit provider
+  different from the recorded provider is a config error. Recorded run budgets
+  are not inherited: an explicit positive `-max-turns` or `-max-total-tokens`
+  on resume/fork fails at config validation when the run is already at or over
+  it.
 - Exit codes: `completed` 0, limits 2, provider 3, protocol/stuck 4,
   interrupted 130, internal 1. A missing/invalid/locked session, a workspace
   mismatch, an unsupported prompt/toolset version, a task-rule violation, an
-  unknown provider, a missing/ineligible model, or an invalid explicit limit is
-  a config error (2). A corrupt or unreadable existing log is a state failure
-  (1) and writes no new session events. A v0 or unknown schema log is a config
+  unknown provider, a missing/ineligible model, an explicit empty or malformed
+  thinking effort, an effort the effective model does not advertise or an
+  explicit model+effort conflict, or an invalid explicit limit is a config
+  error (2). A corrupt or unreadable existing log is a state failure (1) and
+  writes no new session events. A v0 or unknown schema log is a config
   error (2) with a clear message. Catalog transport failure with no valid cache
   is 3; invalid catalog JSON/schema is 4; an explicit refresh failure uses the
   same mapping and leaves the cache unchanged.
@@ -1062,6 +1167,7 @@ Defaults are deliberately conservative and easy to change:
 | Max turns | 0 (unlimited; `-max-turns`) |
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
 | Max output tokens per call | 0 (unset; the request field is omitted) |
+| Thinking effort | unset (provider/model default; `-thinking-effort` / `AHARNESS_THINKING_EFFORT`) |
 | Max total tokens | 0 (unlimited; `-max-total-tokens`) |
 | Max run wall clock | 0 (none; `-session-timeout`) |
 | Model call timeout | 0 (none; `-model-timeout`) |
@@ -1077,12 +1183,13 @@ Limits are part of the runtime contract; changing one requires updating that
 reference and the code constant.
 
 The main values are the defaults in §9 plus: a 15-second catalog request
-timeout and 16 MiB catalog body cap, a 24-hour catalog cache TTL, a 5% (minimum
-1,000-token) context safety margin; 4 retained turns; 5 transport attempts with
-1s base, 30s max, and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool
-results; 64 KiB command output; a 1 MiB non-streaming provider response; a
-4 MiB SSE event; a 1 MiB assembled response; an 8 MiB total stream; 64 KiB
-partial text; a 1 MiB debug request; a 64 KiB model-response event-text cap
-except for the fully recorded `model_response`; a 64 KiB steering line; and a
-4 MiB session line.
+timeout and 16 MiB catalog body cap, a 24-hour catalog cache TTL (cache version
+2), a 32-byte cap per thinking-effort value and at most 16 normalized values
+per model, a 5% (minimum 1,000-token) context safety margin; 4 retained turns;
+5 transport attempts with 1s base, 30s max, and 25% jitter; a 60s
+`Retry-After` cap; 32 KiB file-tool results; 64 KiB command output; a 1 MiB
+non-streaming provider response; a 4 MiB SSE event; a 1 MiB assembled response;
+an 8 MiB total stream; 64 KiB partial text; a 1 MiB debug request; a 64 KiB
+model-response event-text cap except for the fully recorded `model_response`;
+a 64 KiB steering line; and a 4 MiB session line.
 

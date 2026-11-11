@@ -25,13 +25,18 @@ func NewOpenAIResponses(baseURL, token, sessionID, version string) *OpenAIRespon
 }
 
 type responsesRequest struct {
-	Model           string          `json:"model"`
-	Instructions    string          `json:"instructions,omitempty"`
-	Input           []any           `json:"input"`
-	Tools           []responsesTool `json:"tools,omitempty"`
-	MaxOutputTokens int             `json:"max_output_tokens,omitzero"`
-	Store           bool            `json:"store"`
-	Stream          bool            `json:"stream,omitempty"`
+	Model           string              `json:"model"`
+	Instructions    string              `json:"instructions,omitempty"`
+	Input           []any               `json:"input"`
+	Tools           []responsesTool     `json:"tools,omitempty"`
+	MaxOutputTokens int                 `json:"max_output_tokens,omitzero"`
+	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Store           bool                `json:"store"`
+	Stream          bool                `json:"stream,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort"`
 }
 
 type responsesContentPart struct {
@@ -154,6 +159,9 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 		Input:           make([]any, 0, len(req.Messages)),
 		Tools:           make([]responsesTool, 0, len(req.Tools)),
 		MaxOutputTokens: req.MaxOutputTokens,
+	}
+	if req.ThinkingEffort != "" {
+		payload.Reasoning = &responsesReasoning{Effort: req.ThinkingEffort}
 	}
 	for i, msg := range req.Messages {
 		switch msg.Role {

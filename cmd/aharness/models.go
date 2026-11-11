@@ -65,10 +65,25 @@ func warnCatalog(w io.Writer, cat model.Catalog) {
 	}
 }
 
+// warnCatalogTo routes catalog warnings through a caller-supplied sink, such
+// as the TUI notice stream.
+func warnCatalogTo(warn func(string), cat model.Catalog) {
+	if warn == nil {
+		return
+	}
+	for _, warning := range cat.Warnings {
+		warn(warning)
+	}
+}
+
 // sessionCatalogSource constructs a source only when the caller explicitly
 // changed the model; resume/fork without an explicit model stays offline.
 func sessionCatalogSource(cfg config) (model.CatalogSource, error) {
-	if !cfg.modelSet {
+	// An explicit non-default effort must be validated against the effective
+	// model, even when the recorded model is unchanged. Explicit "default"
+	// and plain resume/fork stay offline.
+	explicitEffort := cfg.thinkingEffortSet && cfg.ThinkingEffort != ""
+	if !cfg.modelSet && !explicitEffort {
 		return nil, nil
 	}
 	return newCatalogSource(cfg)
@@ -119,7 +134,7 @@ func writeRefreshSummary(w io.Writer, cat model.Catalog, usable int) {
 }
 
 func writeCatalogList(w io.Writer, models []model.CatalogModel) {
-	_, _ = fmt.Fprintln(w, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS")
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS\tEFFORT")
 	for _, m := range models {
 		output := "-"
 		if m.OutputLimit > 0 {
@@ -129,9 +144,13 @@ func writeCatalogList(w io.Writer, models []model.CatalogModel) {
 		if status == "" {
 			status = "-"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n",
+		effort := "-"
+		if len(m.ReasoningEfforts) > 0 {
+			effort = strings.Join(m.ReasoningEfforts, ",")
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			catalogField(m.ID, 256), catalogField(m.Name, 200), m.Dialect,
-			m.ContextWindow, output, catalogField(status, 32))
+			m.ContextWindow, output, catalogField(status, 32), catalogField(effort, 256))
 	}
 }
 
@@ -165,10 +184,56 @@ func resolveNewModel(ctx context.Context, cfg *config, source model.CatalogSourc
 	if err := applyCatalogModel(cfg, m, func(w string) { warnf(stderr, "%s", w) }); err != nil {
 		return err
 	}
+	if cfg.thinkingEffortSet && cfg.ThinkingEffort != "" {
+		if err := validateModelThinkingEffort(cfg.ThinkingEffort, m); err != nil {
+			return err
+		}
+	}
 	if m.Deprecated {
 		warnf(stderr, "model %s is deprecated", m.ID)
 	}
 	return validateEffective(cfg)
+}
+
+// validateModelThinkingEffort rejects an explicit effort the effective model
+// does not advertise, with the model's advertised values in the message.
+func validateModelThinkingEffort(value string, m model.CatalogModel) error {
+	id := catalogField(m.ID, 256)
+	if !m.Reasoning {
+		return fmt.Errorf("thinking effort %q is not supported by model %q: the model does not support reasoning", value, id)
+	}
+	if m.SupportsEffort(value) {
+		return nil
+	}
+	if len(m.ReasoningEfforts) == 0 {
+		return fmt.Errorf("thinking effort %q is not supported by model %q: the model advertises no effort levels", value, id)
+	}
+	return fmt.Errorf("thinking effort %q is not supported by model %q; supported: %s",
+		value, id, strings.Join(m.ReasoningEfforts, ", "))
+}
+
+// clearInheritedThinkingEffort applies the model-switch rule: an inherited
+// effort the new model does not advertise is cleared with a visible warning.
+func clearInheritedThinkingEffort(cfg *config, m model.CatalogModel, warn func(string)) {
+	if cfg.ThinkingEffort == "" {
+		return
+	}
+	if m.SupportsEffort(cfg.ThinkingEffort) {
+		return
+	}
+	reason := "does not advertise it"
+	switch {
+	case !m.Reasoning:
+		reason = "does not support reasoning"
+	case len(m.ReasoningEfforts) == 0:
+		reason = "advertises no effort levels"
+	}
+	value := cfg.ThinkingEffort
+	cfg.ThinkingEffort = ""
+	if warn != nil {
+		warn(fmt.Sprintf("thinking effort %q cleared: model %s %s; using the provider default",
+			value, catalogField(m.ID, 256), reason))
+	}
 }
 
 // usableCatalogModel looks up id and rejects entries the harness cannot use.
@@ -210,11 +275,48 @@ func applyCatalogModel(cfg *config, m model.CatalogModel, warn func(string)) err
 	return nil
 }
 
+// resolveSessionThinkingEffort applies the resume/fork precedence: the
+// explicit setting wins, otherwise the latest recorded value is inherited.
+// Only an explicit non-default value requires a catalog fetch when the model
+// is unchanged; an explicit model change already loaded it.
+func resolveSessionThinkingEffort(ctx context.Context, cfg *config, state agent.State, source model.CatalogSource, resolved *model.CatalogModel, warn func(string)) error {
+	if cfg.thinkingEffortSet {
+		if cfg.ThinkingEffort == "" {
+			// Explicit "default": clear any recorded value without a fetch.
+			return nil
+		}
+		if resolved == nil {
+			if source == nil {
+				return errors.New("model catalog is required to set a thinking effort")
+			}
+			loaded, err := source.Load(ctx, cfg.Provider)
+			if err != nil {
+				return err
+			}
+			warnCatalogTo(warn, loaded)
+			m, err := usableCatalogModel(loaded, cfg.Model)
+			if err != nil {
+				return err
+			}
+			resolved = &m
+		}
+		return validateModelThinkingEffort(cfg.ThinkingEffort, *resolved)
+	}
+	cfg.ThinkingEffort = state.ThinkingEffort
+	if resolved != nil {
+		clearInheritedThinkingEffort(cfg, *resolved, warn)
+	}
+	return nil
+}
+
 // applySessionDefaults inherits model, workspace, base URL, and limits from
 // the durable session for resume and fork. Explicit values win. An explicit
 // model change is resolved through the catalog; otherwise the catalog is not
 // consulted and the recorded replay values are authoritative.
-func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, source model.CatalogSource, stderr io.Writer) error {
+func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, source model.CatalogSource, warn func(string)) error {
+	if warn == nil {
+		warn = func(string) {}
+	}
 	if state.Provider != providerName {
 		return fmt.Errorf("session provider %q is not supported; want %q", state.Provider, providerName)
 	}
@@ -228,24 +330,30 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 	if !agent.SupportsToolset(state.ToolsetVersion) {
 		return fmt.Errorf("session toolset version %q is not supported by this binary", state.ToolsetVersion)
 	}
+	var (
+		cat      model.Catalog
+		resolved *model.CatalogModel
+	)
 	if cfg.modelSet {
 		if source == nil {
 			return errors.New("model catalog is required to change the session model")
 		}
-		cat, err := source.Load(ctx, cfg.Provider)
+		var err error
+		cat, err = source.Load(ctx, cfg.Provider)
 		if err != nil {
 			return err
 		}
-		warnCatalog(stderr, cat)
+		warnCatalogTo(warn, cat)
 		m, err := usableCatalogModel(cat, cfg.Model)
 		if err != nil {
 			return err
 		}
-		if err := applyCatalogModel(cfg, m, func(w string) { warnf(stderr, "%s", w) }); err != nil {
+		if err := applyCatalogModel(cfg, m, warn); err != nil {
 			return err
 		}
+		resolved = &m
 		if m.Deprecated {
-			warnf(stderr, "model %s is deprecated", m.ID)
+			warn(fmt.Sprintf("model %s is deprecated", m.ID))
 		}
 	} else {
 		cfg.Model = state.Model
@@ -272,8 +380,8 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 			case cfg.maxContextValue < contextWindow:
 				contextWindow = cfg.maxContextValue
 			case cfg.maxContextValue > contextWindow:
-				warnf(stderr, "max context tokens %d clamped to the recorded session context %d",
-					cfg.maxContextValue, recordedContext)
+				warn(fmt.Sprintf("max context tokens %d clamped to the recorded session context %d",
+					cfg.maxContextValue, recordedContext))
 			}
 		}
 		cfg.MaxContextTokens = contextWindow
@@ -281,6 +389,9 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 		// effective cap is the smaller of it and the new margin-adjusted
 		// context window.
 		cfg.InputLimit = state.Limits.MaxInputTokens
+	}
+	if err := resolveSessionThinkingEffort(ctx, cfg, state, source, resolved, warn); err != nil {
+		return err
 	}
 	if !cfg.workspaceSet {
 		cfg.Workspace = state.Workspace

@@ -25,12 +25,13 @@ func NewOpenAIChat(baseURL, token, sessionID, version string) *OpenAIChat {
 }
 
 type chatRequest struct {
-	Model         string             `json:"model"`
-	Messages      []chatMessage      `json:"messages"`
-	Tools         []chatTool         `json:"tools,omitempty"`
-	MaxTokens     int                `json:"max_tokens,omitzero"`
-	Stream        bool               `json:"stream,omitempty"`
-	StreamOptions *chatStreamOptions `json:"stream_options,omitempty"`
+	Model           string             `json:"model"`
+	Messages        []chatMessage      `json:"messages"`
+	Tools           []chatTool         `json:"tools,omitempty"`
+	MaxTokens       int                `json:"max_tokens,omitzero"`
+	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
+	Stream          bool               `json:"stream,omitempty"`
+	StreamOptions   *chatStreamOptions `json:"stream_options,omitempty"`
 }
 
 type chatStreamOptions struct {
@@ -155,10 +156,11 @@ func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, emit func(
 
 func (a *OpenAIChat) payload(req Request) chatRequest {
 	payload := chatRequest{
-		Model:     req.Model,
-		Messages:  make([]chatMessage, 0, len(req.Messages)),
-		Tools:     make([]chatTool, 0, len(req.Tools)),
-		MaxTokens: req.MaxOutputTokens,
+		Model:           req.Model,
+		Messages:        make([]chatMessage, 0, len(req.Messages)),
+		Tools:           make([]chatTool, 0, len(req.Tools)),
+		MaxTokens:       req.MaxOutputTokens,
+		ReasoningEffort: req.ThinkingEffort,
 	}
 	for _, msg := range req.Messages {
 		wire := chatMessage{

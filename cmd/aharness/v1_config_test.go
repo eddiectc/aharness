@@ -150,7 +150,8 @@ func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
 	state := v1State()
 	// A nil source proves inheritance does not consult the catalog.
 	var stderr bytes.Buffer
-	if err := applySessionDefaults(context.Background(), &cfg, state, nil, &stderr); err != nil {
+	warn := func(w string) { warnf(&stderr, "%s", w) }
+	if err := applySessionDefaults(context.Background(), &cfg, state, nil, warn); err != nil {
 		t.Fatalf("applySessionDefaults: %v", err)
 	}
 	if stderr.Len() != 0 {
@@ -192,7 +193,7 @@ func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
 func TestApplySessionDefaultsExplicitContextClamp(t *testing.T) {
 	cfg := v1ResumeConfig(t, "-max-context-tokens", "150000")
 	state := v1State()
-	if err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard); err != nil {
+	if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
 		t.Fatalf("applySessionDefaults: %v", err)
 	}
 	if cfg.MaxContextTokens != 150_000 {
@@ -211,7 +212,7 @@ func TestApplySessionDefaultsExplicitContextClamp(t *testing.T) {
 func TestApplySessionDefaultsContextCannotExceedRecord(t *testing.T) {
 	cfg := v1ResumeConfig(t, "-max-context-tokens", "400000")
 	state := v1State()
-	if err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard); err != nil {
+	if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
 		t.Fatalf("applySessionDefaults: %v", err)
 	}
 	if cfg.MaxContextTokens != 200_000 {
@@ -226,7 +227,7 @@ func TestApplySessionDefaultsOutputOverrides(t *testing.T) {
 	t.Run("explicit zero clears", func(t *testing.T) {
 		cfg := v1ResumeConfig(t, "-max-output-tokens=0")
 		state := v1State()
-		if err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 		if cfg.MaxOutputTokens != 0 || cfg.Limits.MaxOutputTokens != 0 {
@@ -236,7 +237,7 @@ func TestApplySessionDefaultsOutputOverrides(t *testing.T) {
 	t.Run("explicit positive replaces", func(t *testing.T) {
 		cfg := v1ResumeConfig(t, "-max-output-tokens=4096")
 		state := v1State()
-		if err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 		if cfg.MaxOutputTokens != 4096 || cfg.Limits.MaxOutputTokens != 4096 {
@@ -256,7 +257,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 			t.Fatal(err)
 		}
 		state := v1State()
-		if err := applySessionDefaults(context.Background(), &cfg, state, source, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, source, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 		if cfg.Model != "gpt-6-luna" || cfg.Dialect != model.DialectResponses {
@@ -284,7 +285,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := applySessionDefaults(context.Background(), &cfg, v1State(), source, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, v1State(), source, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 		if cfg.Dialect != model.DialectChat || cfg.MaxContextTokens != 131_072 {
@@ -299,7 +300,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := applySessionDefaults(context.Background(), &cfg, v1State(), source, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, v1State(), source, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 		if cfg.BaseURL != "http://127.0.0.1:4321/v1" {
@@ -309,7 +310,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 
 	t.Run("model change requires a catalog", func(t *testing.T) {
 		cfg := v1ResumeConfig(t, "-model", "gpt-6-luna")
-		err := applySessionDefaults(context.Background(), &cfg, v1State(), nil, io.Discard)
+		err := applySessionDefaults(context.Background(), &cfg, v1State(), nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "catalog is required") {
 			t.Fatalf("error = %v, want a missing-catalog error", err)
 		}
@@ -322,7 +323,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = applySessionDefaults(context.Background(), &cfg, v1State(), source, io.Discard)
+		err = applySessionDefaults(context.Background(), &cfg, v1State(), source, nil)
 		if err == nil || !errors.Is(err, model.ErrModelNotFound) || !strings.Contains(err.Error(), "unknown-model") {
 			t.Fatalf("error = %v, want model-not-found", err)
 		}
@@ -349,7 +350,7 @@ func TestApplySessionDefaultsOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := v1State()
-	if err := applySessionDefaults(context.Background(), &cfg, state, source, io.Discard); err != nil {
+	if err := applySessionDefaults(context.Background(), &cfg, state, source, nil); err != nil {
 		t.Fatalf("applySessionDefaults: %v", err)
 	}
 	if cfg.Model != "crouton-alpha-free" || cfg.Dialect != model.DialectResponses {
@@ -377,7 +378,7 @@ func TestApplySessionDefaultsProviderMismatch(t *testing.T) {
 
 	t.Run("explicit provider differs", func(t *testing.T) {
 		cfg := config{Provider: "other", providerSet: true}
-		err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard)
+		err := applySessionDefaults(context.Background(), &cfg, state, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "does not match the session provider") {
 			t.Fatalf("error = %v, want a provider mismatch", err)
 		}
@@ -385,7 +386,7 @@ func TestApplySessionDefaultsProviderMismatch(t *testing.T) {
 
 	t.Run("explicit provider matches", func(t *testing.T) {
 		cfg := config{Provider: providerName, providerSet: true}
-		if err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
 			t.Fatalf("applySessionDefaults: %v", err)
 		}
 	})
@@ -394,7 +395,7 @@ func TestApplySessionDefaultsProviderMismatch(t *testing.T) {
 		state := v1State()
 		state.Provider = "other"
 		cfg := config{}
-		err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard)
+		err := applySessionDefaults(context.Background(), &cfg, state, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "is not supported") {
 			t.Fatalf("error = %v", err)
 		}
@@ -421,7 +422,7 @@ func TestApplySessionDefaultsRejectsUnsupportedState(t *testing.T) {
 			cfg := base
 			state := v1State()
 			tc.mutate(&state)
-			err := applySessionDefaults(context.Background(), &cfg, state, nil, io.Discard)
+			err := applySessionDefaults(context.Background(), &cfg, state, nil, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want mention of %q", err, tc.want)
 			}

@@ -234,6 +234,7 @@ func (r *Runner) recordModelRequest(req model.Request, turn, estimatedInputToken
 		Messages:             loggableMessages(req.Messages),
 		Tools:                loggableSchemas(req.Tools),
 		MaxOutputTokens:      req.MaxOutputTokens,
+		ThinkingEffort:       req.ThinkingEffort,
 		EstimatedInputTokens: estimatedInputTokens,
 		MessageCount:         len(req.Messages),
 	}
@@ -245,6 +246,7 @@ func (r *Runner) recordModelRequest(req model.Request, turn, estimatedInputToken
 		data = modelRequestData{
 			Model:                req.Model,
 			MaxOutputTokens:      req.MaxOutputTokens,
+			ThinkingEffort:       req.ThinkingEffort,
 			EstimatedInputTokens: estimatedInputTokens,
 			MessageCount:         len(req.Messages),
 			Truncated:            true,

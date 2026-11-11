@@ -7,13 +7,17 @@ by the model context window, termination policies, and errors; run budgets are
 opt-in and unlimited by default.
 
 - **Status:** v1 implementation complete (M0–M3), the post-v1 TUI
-  (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented, and
+  (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented,
   provider/model discovery (the [model discovery build
-  plan](docs/model-discovery-build.md)) is implemented. The TUI is the default
+  plan](docs/model-discovery-build.md)) is implemented, and per-model thinking
+  effort (the [thinking effort build
+  plan](docs/thinking-effort-build.md)) is implemented. The TUI is the default
   in a terminal; `-batch` keeps the one-shot CLI and `-ui-json` is the headless
-  automation surface. Mock-provider, integration, fuzz, race, and §8 gate checks
-  pass. The real-provider TUI smoke remains pending provider credentials; it is
-  the one unverified release gate.
+  automation surface. The mock-provider, integration, fuzz, race, and §8 gate
+  checks are run for each implementation change. The real-provider TUI smoke
+  and the real-provider thinking-effort smoke remain pending provider
+  credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
+  environment); they are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** the Go standard library by default. The approved TUI
   exception is Bubble Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2,
@@ -32,6 +36,12 @@ opt-in and unlimited by default.
 - `-list-models` prints the usable catalog without creating a session;
   `-refresh-models`, and `Ctrl-R` in the TUI model picker, force an
   unconditional catalog refresh. There is no hardcoded model list or default.
+- Per-model thinking effort: `-thinking-effort` / `AHARNESS_THINKING_EFFORT`
+  sends top-level `reasoning_effort` on Chat Completions or
+  `reasoning.effort` on Responses, with values discovered per model from the
+  catalog. Unset omits the field and uses the provider/model default; `default`
+  clears an inherited value. `-list-models` ends with an `EFFORT` column, and
+  the TUI offers a next-run picker on `F2`.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
@@ -77,7 +87,7 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
 | [model-discovery-build.md](docs/model-discovery-build.md) | Implemented `-provider` and opencode-go model/limit/dialect discovery from models.dev; catalog cache, revalidation, refresh, and listing |
 | [limits-removal-build.md](docs/limits-removal-build.md) | Implemented removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
-| [thinking-effort-build.md](docs/thinking-effort-build.md) | Proposed per-model thinking/reasoning effort control, catalog discovery, wire mapping, session persistence, and TUI surface |
+| [thinking-effort-build.md](docs/thinking-effort-build.md) | Implemented per-model thinking/reasoning effort control: catalog discovery, Chat/Responses mapping, CLI/env precedence and clearing, session persistence and inheritance, `-list-models` column, and TUI/`-ui-json` surface |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
@@ -99,6 +109,12 @@ export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
 
 # Force an unconditional catalog refresh and replace the 24-hour cache.
 ./bin/aharness -refresh-models
+
+# Use the model's maximum advertised thinking effort for this run.
+./bin/aharness -model deepseek-v4.1-flash -thinking-effort max -task "Fix the failing test"
+
+# Clear an inherited effort while resuming and use the provider default.
+./bin/aharness -batch -resume <session-id> -thinking-effort default -task "Now add the regression test"
 
 # Default in a terminal: interactive TUI, waiting for the first message.
 ./bin/aharness -model deepseek-v4.1-flash -workspace /path/to/repo
@@ -138,9 +154,10 @@ cap from models.dev, with the normalized catalog cached at
 `AHARNESS_PROVIDER_BASE_URL`) overrides the discovered base URL and can point
 the adapters at a fake or local OpenAI-compatible server; normal runs use the
 catalog URL. Resume/fork inherit the recorded provider, model, dialect, base
-URL, and context/output limits without a catalog fetch; recorded run budgets
-are historical and are not inherited. An explicit model change re-resolves
-through the catalog.
+URL, context/output limits, and thinking effort without a catalog fetch;
+recorded run budgets are historical and are not inherited. An explicit model
+change re-resolves through the catalog, and an explicit non-default thinking
+effort is validated against the effective model (exit 2 if unsupported).
 
 ## Isolation
 

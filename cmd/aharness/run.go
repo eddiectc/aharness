@@ -192,7 +192,9 @@ func executeResume(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-	if err := applySessionDefaults(context.Background(), &cfg, state, source, stderr); err != nil {
+	if err := applySessionDefaults(context.Background(), &cfg, state, source, func(w string) {
+		warnf(stderr, "%s", w)
+	}); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return catalogExitCode(err)
 	}
@@ -241,7 +243,9 @@ func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-	if err := applySessionDefaults(context.Background(), &cfg, state, catSource, stderr); err != nil {
+	if err := applySessionDefaults(context.Background(), &cfg, state, catSource, func(w string) {
+		warnf(stderr, "%s", w)
+	}); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return catalogExitCode(err)
 	}
@@ -395,6 +399,7 @@ func runnerConfig(cfg config) agent.Config {
 		ModelTimeout:   cfg.ModelTimeout,
 		LogRequests:    cfg.LogRequests,
 		Stream:         cfg.Stream,
+		ThinkingEffort: cfg.ThinkingEffort,
 	}
 }
 

@@ -1,10 +1,12 @@
 # aharness limits and timeouts
 
 - **Date:** 2026-11-11
-- **Status:** current for v1, the shipped TUI, and model discovery.
+- **Status:** current for v1, the shipped TUI, model discovery, and thinking
+  effort.
 - **Related:** [architecture](architecture.md), [v1 build plan](v1-build.md),
   [TUI build plan](tui-build.md), [shipped TUI](tui.md),
   [model discovery build plan](model-discovery-build.md),
+  [thinking effort build plan](thinking-effort-build.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
@@ -32,8 +34,10 @@ by its own constant.
 | Catalog stale fallback | implicit and `-list-models` only | On failure, a valid stale cache is used with a warning. Explicit refresh never falls back. |
 | Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R` | Unconditional GET, reusing the 15-second timeout, 16 MiB body cap, and 0600 cache policy. Failure exits 3/4 (CLI) or notifies (TUI); no stale fallback. |
 | Catalog cache file | `<state>/cache/models.dev/<provider>.json` | File 0600, directory 0700; atomic replacement. |
-| Catalog cache version | 1 | A version mismatch or corrupt entry is ignored and treated as absent. |
+| Catalog cache version | 2 | A version mismatch or corrupt entry is ignored and treated as absent. Version 2 carries normalized `reasoning`/`reasoning_efforts`; a version 1 cache is refetched. |
 | Model ID | at most 256 bytes | Valid UTF-8 with no control characters; used only as a JSON value/map key, never a path. |
+| Thinking effort value | at most 32 bytes | Non-empty valid UTF-8 matching `[a-z][a-z0-9_-]*`; `default` is reserved for clearing and is never a catalog value. Applies to the catalog, cache, CLI, and environment. |
+| Effort values per model | 16 | Extra values are dropped after canonical ordering; invalid values are dropped. A model with none advertises no effort control. |
 | Discovered base URL | HTTPS `opencode.ai` | Host must be `opencode.ai` with no userinfo, query, or fragment; an explicit `-provider-base-url` wins. |
 | Session wall clock | 0 (none) | Opt-in `-session-timeout`; per run, checked before each turn. `0` or an omitted flag imposes no deadline; a parent context deadline may still stop the run. |
 | Model call timeout | 0 (none) | Opt-in `-model-timeout`; per model attempt. `0` or an omitted flag imposes no harness deadline; the HTTP client timeout remains the outer network bound. |
@@ -55,6 +59,11 @@ new sessions use the catalog. Recorded `max_turns`, `max_total_tokens`,
 not inherited on resume/fork; only an explicit positive flag enforces a run
 budget. When `-max-total-tokens` is explicit, a 1,000,000-token context can
 consume that cumulative budget quickly.
+
+Thinking effort introduces no run budget. It is bounded only by the model's
+catalog list, the 32-byte per-value cap, and the 16-value normalization cap.
+Reasoning tokens are output tokens: they count against `-max-output-tokens`
+when that flag is set and against total usage, and they add no separate cap.
 
 ## 2. Provider transport and streaming
 
@@ -139,12 +148,13 @@ Other event payloads:
 | Limit | v1 value | Behavior |
 |---|---|---|
 | `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
-| `-list-models` | off | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS` and exits; no session, task, or token. No separate output cap; bounded by the catalog size. |
+| `-list-models` | off | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT` and exits; no session, task, or token. `EFFORT` is comma-separated normalized values or `-`. No separate output cap; bounded by the catalog size. |
 | `-refresh-models` | off | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |
 | `-max-turns` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
 | `-max-total-tokens` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
 | `-max-context-tokens` | 0 (unset) | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
 | `-max-output-tokens` | 0 (unset) | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
+| `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | unset | Provider/model default. An explicit non-default value must be advertised by the effective model and match the 32-byte syntax rule; `default` clears. Flag wins over environment; resume/fork inherit the latest recorded value. Invalid or unsupported values exit 2. No new run budget. |
 | `-session-timeout` | 0 (none) | Per run when explicit and positive; `0`/omitted no deadline; negative is a config error. |
 | `-model-timeout` | 0 (none) | Per model attempt when explicit and positive; `0`/omitted no harness deadline; negative is a config error. |
 | `-task` / `-task-file` | no read cap | Effective transcript text is 64 KiB. |
@@ -185,6 +195,7 @@ contract. See [tui.md](tui.md) for the shipped behavior.
 | Escape timeout | 50 ms | A lone Esc is delivered; modified sequences never interrupt. |
 | Display queue | 256 events | Backpressure; text deltas are not durable. |
 | TUI catalog refresh | `Ctrl-R` in the model picker | Idle only; reuses the catalog timeout/body/cache caps; no `-ui-json` protocol version change. |
+| Thinking effort picker | `F2`; model's normalized list | Idle only; lists `provider default` plus the model's values; no overlay when the model advertises none; next run only; no protocol version change. |
 | `-ui-json` command line | 1 MiB | Longer lines are a protocol error (exit 2). |
 | `-ui-json` text/paste | 64 KiB per command | Longer text is rejected with a protocol error. |
 | `-ui-json` frame size | 20×5–500×200 | `-ui-size`/`resize` outside the range is a config/protocol error. |
@@ -208,6 +219,8 @@ constant:
 - Number of tool calls per response; bounded by the response cap.
 - Number of events per session; bounded by the turn, token, and time budgets
   only when those explicit flags are set.
+- Thinking effort values; bounded by the model's normalized catalog list (at
+  most 16 values, 32 bytes each). No run budget is added.
 - Number of concurrent sessions; one process per session, no global cap.
 - Child process memory and CPU; external isolation is the boundary.
 - Workspace size; file tools enforce their own file-size caps.

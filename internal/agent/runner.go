@@ -68,6 +68,7 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		SessionTimeoutMS: cfg.SessionTimeout.Milliseconds(),
 		ModelTimeoutMS:   cfg.ModelTimeout.Milliseconds(),
 		HarnessVersion:   cfg.HarnessVersion,
+		ThinkingEffort:   cfg.ThinkingEffort,
 	}
 	if parent != nil {
 		data.ParentSession = parent.Session
@@ -166,6 +167,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		ResumedFromSeq: opts.ResumedFromSeq,
 		Model:          r.cfg.Model,
 		Dialect:        r.cfg.Dialect,
+		ThinkingEffort: r.cfg.ThinkingEffort,
 	}); err != nil {
 		if rerr := r.recordError(st.turns, errorClassInternal, err.Error()); rerr != nil {
 			err = errors.Join(err, rerr)
@@ -292,6 +294,7 @@ func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
 		HarnessVersion:   r.cfg.HarnessVersion,
 		Interactive:      r.cfg.Interactive,
 		Stream:           r.cfg.Stream,
+		ThinkingEffort:   r.cfg.ThinkingEffort,
 	}
 	return r.record(session.TypeRunStart, 0, "", data)
 }
@@ -417,6 +420,7 @@ func (r *Runner) executeTurn(ctx context.Context, res *Result, st *runState, pro
 		Messages:        proj.Messages,
 		Tools:           r.tools.Schemas(),
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
+		ThinkingEffort:  r.cfg.ThinkingEffort,
 	}
 
 	opCtx, finish := r.beginOperation(ctx)
@@ -535,6 +539,7 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 		Messages:        next.Messages,
 		Tools:           r.tools.Schemas(),
 		MaxOutputTokens: r.cfg.Limits.MaxOutputTokens,
+		ThinkingEffort:  r.cfg.ThinkingEffort,
 	}
 	opCtx, finish := r.beginOperation(ctx)
 	comp, err := r.callModelOnce(opCtx, req, turn, next.EstimatedInputTokens)

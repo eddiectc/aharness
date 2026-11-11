@@ -65,7 +65,9 @@ type tuiHost struct {
 func (h *tuiHost) Info() tui.Info {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.info
+	info := h.info
+	info.ThinkingEffort = h.cfg.ThinkingEffort
+	return info
 }
 
 func (h *tuiHost) Models() []tui.ModelChoice {
@@ -85,15 +87,16 @@ func modelChoice(m model.CatalogModel) tui.ModelChoice {
 		name = m.ID
 	}
 	return tui.ModelChoice{
-		ID:            m.ID,
-		Name:          name,
-		Dialect:       m.Dialect,
-		ContextWindow: m.ContextWindow,
-		InputLimit:    m.InputLimit,
-		OutputLimit:   m.OutputLimit,
-		Status:        m.Status,
-		Translated:    m.Translated,
-		Switchable:    true,
+		ID:               m.ID,
+		Name:             name,
+		Dialect:          m.Dialect,
+		ContextWindow:    m.ContextWindow,
+		InputLimit:       m.InputLimit,
+		OutputLimit:      m.OutputLimit,
+		Status:           m.Status,
+		Translated:       m.Translated,
+		Switchable:       true,
+		ReasoningEfforts: append([]string(nil), m.ReasoningEfforts...),
 	}
 }
 
@@ -178,6 +181,11 @@ func (h *tuiHost) SelectModel(id string) (tui.ModelChoice, error) {
 	}
 	h.pendingWarning = ""
 	if id == h.cfg.Model {
+		// Keep the recorded fallback's exact limits, but prefer loaded catalog
+		// metadata so a re-selection still carries the advertised efforts.
+		if m, ok := h.catalog[id]; ok && m.Unavailable == "" {
+			return modelChoice(m), nil
+		}
 		return h.recordedChoiceLocked(true), nil
 	}
 	m, ok := h.catalog[id]
@@ -224,6 +232,24 @@ func (h *tuiHost) Details() tui.Details {
 		MaxOutputUnset:   h.cfg.MaxOutputTokens == 0,
 		SessionTimeout:   h.cfg.SessionTimeout,
 		ModelTimeout:     h.cfg.ModelTimeout,
+		ThinkingEffort:   h.cfg.ThinkingEffort,
+	}
+}
+
+// resolveRunThinkingEffort applies the next run's effort selection and the
+// model-switch rule: an explicit option (including the empty provider default)
+// replaces the inherited value, and a value the effective catalog model does
+// not advertise is cleared with a warning. A model absent from the catalog
+// cannot be validated offline, so its recorded value is kept.
+func resolveRunThinkingEffort(cfg *config, catalog map[string]model.CatalogModel, modelName string, opts tui.RunOptions, warn func(string)) {
+	if opts.ThinkingEffortSet {
+		cfg.ThinkingEffort = opts.ThinkingEffort
+	}
+	if cfg.ThinkingEffort == "" {
+		return
+	}
+	if m, ok := catalog[modelName]; ok {
+		clearInheritedThinkingEffort(cfg, m, warn)
 	}
 }
 
@@ -266,6 +292,11 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 			return nil, err
 		}
 	}
+	// An explicit picker/option value replaces the inherited effort; either
+	// way, a value the effective catalog model does not advertise is cleared
+	// with a notice so the provider default is used instead of sending an
+	// unsupported field.
+	resolveRunThinkingEffort(&h.cfg, h.catalog, modelName, opts, warn)
 	dialect := h.cfg.Dialect
 
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -400,7 +431,9 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		state         agent.State
 		catalogSource model.CatalogSource
 		code          int
+		startupWarn   []string
 	)
+	warn := func(text string) { startupWarn = append(startupWarn, text) }
 
 	fail := func(code int) (*tuiHost, int) {
 		if store != nil {
@@ -433,7 +466,7 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return fail(exitConfig)
 		}
-		if err := applySessionDefaults(context.Background(), &cfg, state, source, stderr); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, source, warn); err != nil {
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return fail(catalogExitCode(err))
 		}
@@ -471,7 +504,7 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return nil, exitConfig
 		}
-		if err := applySessionDefaults(context.Background(), &cfg, state, catSource, stderr); err != nil {
+		if err := applySessionDefaults(context.Background(), &cfg, state, catSource, warn); err != nil {
 			_ = source.Close()
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return nil, catalogExitCode(err)
@@ -563,6 +596,7 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		MaxTotalTokens: cfg.MaxTotalTokens,
 		Turns:          state.Turns,
 		Usage:          state.Usage,
+		ThinkingEffort: cfg.ThinkingEffort,
 	}
 	ctx := context.Background()
 	if catalogSource == nil {
@@ -577,12 +611,13 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		}
 	}
 	host := &tuiHost{
-		cfg:       cfg,
-		store:     store,
-		ws:        ws,
-		sessionID: store.ID(),
-		source:    catalogSource,
-		info:      info,
+		cfg:            cfg,
+		store:          store,
+		ws:             ws,
+		sessionID:      store.ID(),
+		source:         catalogSource,
+		info:           info,
+		pendingWarning: strings.Join(startupWarn, "; "),
 	}
 	if loaded != nil {
 		warnCatalog(stderr, *loaded)

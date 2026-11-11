@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"aharness/internal/agent"
 	"aharness/internal/model"
 )
 
@@ -112,6 +113,7 @@ func TestModelPickerRowsShowCatalogMetadata(t *testing.T) {
 			ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash",
 			Dialect: model.DialectResponses, ContextWindow: 200_000, InputLimit: 160_000,
 			OutputLimit: 8_192, Status: "deprecated", Translated: true, Switchable: true,
+			ReasoningEfforts: []string{"low", "high", "max"},
 		},
 	}
 	if got, want := item.Title(), "DeepSeek V4.1 Flash (current)"; got != want {
@@ -120,7 +122,7 @@ func TestModelPickerRowsShowCatalogMetadata(t *testing.T) {
 	description := item.Description()
 	for _, want := range []string{
 		"deepseek-v4.1-flash", "openai-responses", "ctx 200000", "in 160000",
-		"out 8192", "deprecated", "translated",
+		"out 8192", "effort low/high/max", "deprecated", "translated",
 	} {
 		if !strings.Contains(description, want) {
 			t.Errorf("Description() = %q, missing %q", description, want)
@@ -139,6 +141,9 @@ func TestModelPickerRowsShowCatalogMetadata(t *testing.T) {
 	}
 	if !strings.Contains(fallback.Description(), "out -") {
 		t.Fatalf("missing output ceiling placeholder: %q", fallback.Description())
+	}
+	if !strings.Contains(fallback.Description(), "effort -") {
+		t.Fatalf("missing effort placeholder: %q", fallback.Description())
 	}
 
 	untrusted := modelItem{choice: ModelChoice{
@@ -192,12 +197,14 @@ func TestModelPickerMarksCurrentAndSelectsDeprecated(t *testing.T) {
 func TestModelPickerSwitchShowsSelectorWarning(t *testing.T) {
 	host := &warningHost{
 		selectingHost: &selectingHost{manualHost: newManualHost()},
-		warning:       "max context tokens 500000 clamped to the selected model context 262144",
 	}
 	host.result = ModelChoice{
 		ID: "kimi-k2.7-code", Dialect: model.DialectChat, ContextWindow: 262_144, Switchable: true,
 	}
 	app, _ := newTestAppWithEvents(t, host)
+	// The app consumes one startup warning in New; a selection warning is
+	// produced later by the host.
+	host.warning = "max context tokens 500000 clamped to the selected model context 262144"
 	press(t, app, "ctrl+p")
 	press(t, app, "down")
 	press(t, app, "enter")
@@ -241,6 +248,268 @@ func TestModelPickerSwitchUsesSelector(t *testing.T) {
 		}
 	default:
 		t.Fatal("no model_changed event emitted")
+	}
+}
+
+func TestModelPickerSwitchKeepsSupportedEffort(t *testing.T) {
+	host := &selectingHost{manualHost: newManualHost()}
+	host.info.ThinkingEffort = "high"
+	host.result = ModelChoice{
+		ID: "muse-spark", Name: "Muse Spark", Dialect: model.DialectResponses,
+		ReasoningEfforts: []string{"low", "high", "max"}, Switchable: true,
+	}
+	app, events := newTestAppWithEvents(t, host)
+	press(t, app, "ctrl+p")
+	press(t, app, "down")
+	press(t, app, "enter")
+	if app.nextEffort != "high" {
+		t.Fatalf("nextEffort = %q, want the supported inherited value", app.nextEffort)
+	}
+	if strings.Contains(app.notice, "cleared") {
+		t.Fatalf("supported effort was cleared: %q", app.notice)
+	}
+	select {
+	case event := <-events:
+		changed, ok := event.(EventModelChanged)
+		if !ok {
+			t.Fatalf("event = %T, want EventModelChanged", event)
+		}
+		if changed.ThinkingEffort != "high" {
+			t.Fatalf("model_changed effort = %q, want high", changed.ThinkingEffort)
+		}
+	default:
+		t.Fatal("no model_changed event emitted")
+	}
+}
+
+func TestModelPickerSwitchClearsUnsupportedEffort(t *testing.T) {
+	host := &selectingHost{manualHost: newManualHost()}
+	host.info.ThinkingEffort = "high"
+	host.result = ModelChoice{
+		ID: "muse-spark", Name: "Muse Spark", Dialect: model.DialectResponses,
+		ReasoningEfforts: []string{"low"}, Switchable: true,
+	}
+	app, events := newTestAppWithEvents(t, host)
+	press(t, app, "ctrl+p")
+	press(t, app, "down")
+	press(t, app, "enter")
+	if app.nextEffort != "" {
+		t.Fatalf("nextEffort = %q, want the provider default", app.nextEffort)
+	}
+	for _, want := range []string{"cleared", "high", "provider default"} {
+		if !strings.Contains(app.notice, want) {
+			t.Fatalf("notice = %q, missing %q", app.notice, want)
+		}
+	}
+	var notice, changed *string
+	var modelChanged EventModelChanged
+	for len(events) > 0 {
+		event := <-events
+		switch event := event.(type) {
+		case EventNotice:
+			if event.Kind == "warning" {
+				text := event.Text
+				notice = &text
+			}
+		case EventModelChanged:
+			modelChanged = event
+			text := event.ThinkingEffort
+			changed = &text
+		}
+	}
+	if notice == nil || !strings.Contains(*notice, "cleared") {
+		t.Fatalf("warning notice = %v, want the clearing notice", notice)
+	}
+	if changed == nil || modelChanged.ThinkingEffort != "" {
+		t.Fatalf("model_changed effort = %q, want the provider default", modelChanged.ThinkingEffort)
+	}
+}
+
+func TestStartupModelWarningConsumedOnce(t *testing.T) {
+	host := &warningHost{
+		selectingHost: &selectingHost{manualHost: newManualHost()},
+		warning:       `thinking effort "high" cleared: model small does not advertise it; using the provider default`,
+	}
+	app, _ := newTestAppWithEvents(t, host)
+	if got := host.TakeModelWarning(); got != "" {
+		t.Fatalf("startup warning was not consumed: %q", got)
+	}
+	count := func() int {
+		n := 0
+		for _, item := range app.items {
+			if item.kind == itemNotice && strings.Contains(item.text, "cleared") {
+				n++
+			}
+		}
+		return n
+	}
+	if count() != 1 {
+		t.Fatalf("startup warning notices = %d, want 1", count())
+	}
+	host.result = ModelChoice{ID: "small", Dialect: model.DialectChat, Switchable: true}
+	press(t, app, "ctrl+p")
+	press(t, app, "down")
+	press(t, app, "enter")
+	if count() != 1 {
+		t.Fatalf("startup warning repeated after a model selection: %d notices", count())
+	}
+}
+
+func TestEffortPickerOpensSelectsAndReachesRunOptions(t *testing.T) {
+	host := newManualHost()
+	host.models[0].ReasoningEfforts = []string{"low", "high", "max"}
+	app, events := newTestAppWithEvents(t, host)
+	press(t, app, "f2")
+	if app.overlay.kind != OverlayEffort {
+		t.Fatalf("overlay = %q, want effort", app.overlay.kind)
+	}
+	items := app.overlay.effort.list.Items()
+	if len(items) != 4 {
+		t.Fatalf("effort rows = %d, want 4", len(items))
+	}
+	wantRows := []string{"provider default", "low", "high", "max"}
+	for i, want := range wantRows {
+		item, ok := items[i].(effortItem)
+		if !ok || item.Title() != want {
+			t.Fatalf("row %d = %+v, want %q", i, items[i], want)
+		}
+	}
+	press(t, app, "down")
+	press(t, app, "enter")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("selection did not close the picker: %q", app.overlay.kind)
+	}
+	if app.nextEffort != "low" {
+		t.Fatalf("nextEffort = %q, want low", app.nextEffort)
+	}
+	if !strings.Contains(app.notice, "thinking effort for the next run: low") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+	select {
+	case event := <-events:
+		notice, ok := event.(EventNotice)
+		if !ok || notice.Kind != "thinking_effort" || !strings.Contains(notice.Text, "low") {
+			t.Fatalf("event = %+v, want a thinking_effort notice", event)
+		}
+	default:
+		t.Fatal("no thinking_effort notice emitted")
+	}
+	typeText(t, app, "run with effort")
+	press(t, app, "enter")
+	_, call, ok := host.last()
+	if !ok {
+		t.Fatal("run did not start")
+	}
+	if call.opts.ThinkingEffort != "low" || !call.opts.ThinkingEffortSet {
+		t.Fatalf("Start options = %+v, want low with the set flag", call.opts)
+	}
+}
+
+func TestEffortPickerProviderDefaultSelection(t *testing.T) {
+	host := newManualHost()
+	host.info.ThinkingEffort = "high"
+	host.models[0].ReasoningEfforts = []string{"low", "high", "max"}
+	app, events := newTestAppWithEvents(t, host)
+	press(t, app, "f2")
+	// The current value is highlighted; move back to provider default.
+	press(t, app, "up")
+	press(t, app, "up")
+	press(t, app, "enter")
+	if app.nextEffort != "" {
+		t.Fatalf("nextEffort = %q, want the provider default", app.nextEffort)
+	}
+	select {
+	case event := <-events:
+		notice, ok := event.(EventNotice)
+		if !ok || notice.Kind != "thinking_effort" || !strings.Contains(notice.Text, "provider default") {
+			t.Fatalf("event = %+v, want a provider-default notice", event)
+		}
+	default:
+		t.Fatal("no thinking_effort notice emitted")
+	}
+	typeText(t, app, "run with default effort")
+	press(t, app, "enter")
+	_, call, ok := host.last()
+	if !ok {
+		t.Fatal("run did not start")
+	}
+	if call.opts.ThinkingEffort != "" || !call.opts.ThinkingEffortSet {
+		t.Fatalf("Start options = %+v, want an explicit empty effort", call.opts)
+	}
+}
+
+func TestEffortPickerNoValuesAndDisabledDuringRun(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	press(t, app, "f2")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay = %q, want none", app.overlay.kind)
+	}
+	if !strings.Contains(app.notice, "advertises no effort levels") {
+		t.Fatalf("notice = %q, want the no-effort notice", app.notice)
+	}
+
+	host.models[0].ReasoningEfforts = []string{"low"}
+	run, _ := startTestRun(t, app, "task")
+	press(t, app, "f2")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("effort picker opened during a run: %q", app.overlay.kind)
+	}
+	if !strings.Contains(app.notice, "disabled while a run is active") {
+		t.Fatalf("notice = %q, want the disabled notice", app.notice)
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestEffortPickerRequiresModelMetadata(t *testing.T) {
+	host := newManualHost()
+	host.info.Model = "unknown-model"
+	host.models = []ModelChoice{catalogChoice("other-model", "Other", "", true)}
+	app := newTestApp(t, host)
+	press(t, app, "f2")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay = %q, want none", app.overlay.kind)
+	}
+	if !strings.Contains(app.notice, "unknown-model") || !strings.Contains(app.notice, "advertises no effort levels") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
+func TestRunStartedTracksEffectiveEffort(t *testing.T) {
+	host := newManualHost()
+	app, events := newTestAppWithEvents(t, host)
+	run, _ := startTestRun(t, app, "task")
+	deliver(app, agent.RunStarted{
+		Model: "muse-spark", Dialect: "openai-responses", ThinkingEffort: "max",
+	})
+	if app.nextEffort != "max" {
+		t.Fatalf("nextEffort = %q, want the recorded run effort", app.nextEffort)
+	}
+	select {
+	case event := <-events:
+		started, ok := event.(EventRunStarted)
+		if !ok {
+			t.Fatalf("event = %T, want EventRunStarted", event)
+		}
+		if started.ThinkingEffort != "max" || started.Model != "muse-spark" {
+			t.Fatalf("event = %+v", started)
+		}
+	default:
+		t.Fatal("no run_started event emitted")
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestHelpOverlayDocumentsF2(t *testing.T) {
+	app := newTestApp(t, newManualHost())
+	press(t, app, "f1")
+	text := strings.Join(app.overlay.help, "\n")
+	if !strings.Contains(text, "F2") || !strings.Contains(text, "thinking effort picker") {
+		t.Fatalf("help does not document F2:\n%s", text)
 	}
 }
 
@@ -562,6 +831,31 @@ func TestDetailsOverlayOutputBudget(t *testing.T) {
 				t.Fatalf("details unexpectedly contain %q:\n%s", test.absent, text)
 			}
 		})
+	}
+}
+
+func TestDetailsOverlayThinkingEffort(t *testing.T) {
+	host := newManualHost()
+	host.models[0].ReasoningEfforts = []string{"low", "high", "max"}
+	app := newTestApp(t, host)
+	press(t, app, "ctrl+x")
+	text := strings.Join(app.overlay.help, "\n")
+	if !strings.Contains(text, "thinking effort: provider default") {
+		t.Fatalf("details missing the provider default effort:\n%s", text)
+	}
+	press(t, app, "esc")
+
+	press(t, app, "f2")
+	press(t, app, "down")
+	press(t, app, "down")
+	press(t, app, "enter")
+	if app.nextEffort != "high" {
+		t.Fatalf("nextEffort = %q, want high", app.nextEffort)
+	}
+	press(t, app, "ctrl+x")
+	text = strings.Join(app.overlay.help, "\n")
+	if !strings.Contains(text, "thinking effort: high") {
+		t.Fatalf("details did not reflect the F2 selection:\n%s", text)
 	}
 }
 

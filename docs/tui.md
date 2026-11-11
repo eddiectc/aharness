@@ -2,9 +2,10 @@
 
 - **Date:** 2026-11-11
 - **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
-  picker from [model discovery](model-discovery-build.md). The full contract and
-  milestone rationale are in [tui-build.md](tui-build.md); this document records
-  the shipped surface and verification status.
+  picker from [model discovery](model-discovery-build.md) and the thinking
+  effort controls from [thinking effort](thinking-effort-build.md). The full
+  contract and milestone rationale are in [tui-build.md](tui-build.md); this
+  document records the shipped surface and verification status.
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
   steering, interrupts, resume, fork, signals), headless `x/vt` frames and SVG
   snapshots, race tests, and a manual PTY smoke under `script(1)` at 80x24.
@@ -61,6 +62,7 @@ submitted message while idle starts one run.
 | `Ctrl-P` | catalog-backed model picker for the next run | disabled with a notice |
 | `Ctrl-O` | workspace file picker (Bubbles list; see note) | disabled with a notice |
 | `F1` | help overlay | help overlay |
+| `F2` | thinking-effort picker for the next run | disabled with a notice |
 | `Ctrl-X` | details overlay | details overlay |
 | `Tab` | composer tab (four spaces) | composer tab (four spaces) |
 | Overlay `Tab`/`Shift-Tab` | move focus | move focus |
@@ -68,24 +70,31 @@ submitted message while idle starts one run.
 
 A bare `Esc` is recognized only after the 50 ms escape timeout. Option/Alt
 sequences, including Option-`[` and Option-`]`, are decoded as modified keys
-and never interrupt; `Ctrl-C` remains the authoritative global interrupt.
+and never interrupt; `Ctrl-C` remains the authoritative global interrupt. The
+help overlay (`F1`) lists the shipped keys, including `F2` and the overlay
+keys.
 
 ## Model picker
 
 `Ctrl-P` opens the catalog-backed model picker while idle; a run disables it
 with a notice. Entries are the usable models from models.dev, sorted by ID. Each
 row shows the display name, ID, dialect, context and input limits, advertised
-output ceiling, and a `deprecated` / `alpha` / `beta` marker and a `translated`
-marker when applicable. Deprecated models remain selectable and are never chosen
-automatically. The advertised output ceiling is catalog metadata, not the
+output ceiling, the normalized supported effort values (`effort low/high/max`,
+or `effort -` when the model advertises none), and a `deprecated` / `alpha` /
+`beta` marker and a `translated` marker when applicable. Deprecated models
+remain selectable and are never chosen automatically. The advertised output
+ceiling is catalog metadata, not the
 effective request budget: unless `-max-output-tokens` is explicit, output is
 unset and the request omits the field.
 
 Selecting a model changes only the next run's dialect, base URL, and limits;
 the current run and existing log are untouched. An explicit context limit is
 clamped to the new model's window; an explicit output budget is sent unchanged.
-The details overlay (`Ctrl-X`) shows the effective values for the current or
-next run and displays `max output: unset` when no explicit budget applies.
+A next-run thinking effort is kept when the new model advertises it; otherwise
+it is cleared to the provider default with a notice, and the next `run_start`
+records the cleared value. The details overlay (`Ctrl-X`) shows the effective
+values for the current or next run and displays `max output: unset` when no
+explicit budget applies.
 
 `Ctrl-R` in the picker performs the same unconditional refresh as
 `-refresh-models`: the footer shows `refreshing models…`, a second `Ctrl-R`
@@ -104,6 +113,31 @@ fetch and, on success, expands the picker to the usable catalog and enables
 switching. A recorded model absent from the catalog is still shown and usable
 from the session record; switching to another model requires catalog metadata.
 
+## Thinking effort
+
+The public name is *thinking effort*; the provider and catalog call it
+*reasoning effort*. Values are model-specific and come from the effective
+model's normalized catalog entry; there is no harness-wide enum.
+
+`F2` opens a picker for the next run while idle. It lists `provider default`
+first, then the effective model's advertised values in canonical order
+(`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, then unknown
+values lexicographically). Selecting a value changes only the next run: the
+active run, the transcript, and existing log events are untouched, and the
+value is recorded in the next `run_start`. Selecting `provider default` clears
+the setting and omits the wire field.
+
+- If the effective model advertises no effort values (including a model whose
+  reasoning is model-fixed), `F2` shows a notice and opens no overlay.
+- During a run, `F2` shows the same disabled notice as the model picker.
+- `default` is a clear sentinel, never a catalog level; a toggle-only or
+  token-budget-only control is not an effort level.
+
+The details overlay (`Ctrl-X`) shows `thinking effort: <value>` or
+`thinking effort: provider default`. A model switch keeps a supported
+next-run value and clears an unsupported one with a notice, as described under
+[model picker](#model-picker).
+
 ## Status line and details
 
 The status line shows `turns N` and `tokens N` while those budgets are
@@ -112,7 +146,8 @@ unlimited; it shows `turns N/M` and `tokens N/M` only when the corresponding
 values never render as `0/0`.
 
 The details overlay (`Ctrl-X`) shows the observed `turns: N` and
-`tokens: <human>` under the session block, and the configured limits under
+`tokens: <human>` under the session block, the effective `thinking effort:
+<value>` (or `provider default`), and the configured limits under
 configuration: `max turns: unlimited` (or the integer), `total tokens:
 unlimited` (or a human token count), `run timeout: none` (or a duration), and
 `model timeout: none` (or a duration). Unlimited values never render as `0s`.
@@ -131,7 +166,7 @@ Commands: `text`, `key`, `paste`, `resize`, `wait`, `frame`, `snapshot`,
 key table plus `enter`, `esc`, `up`, `down`, `left`, `right`, `home`, `end`,
 `pgup`, `pgdown`, `backspace`, `delete`, `tab`, `shift-tab`, `ctrl-c`,
 `ctrl-d`, `ctrl-l`, `ctrl-u`, `ctrl-w`, `ctrl-a`, `ctrl-e`, `ctrl-k`, `ctrl-p`,
-`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, and `f1`.
+`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, and `f2`.
 
 Output lines:
 
@@ -144,6 +179,11 @@ Output lines:
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
   `model_changed`, `notice`, `error`, with the fields documented in
   [tui-build.md §2.7](tui-build.md#27-machine-readable-ui-mode---ui-json).
+  `run_started` and `model_changed` carry an optional `thinking_effort` field
+  for the effective value; an omitted field means the provider default.
+  Selecting an effort with `F2` emits a `notice` with
+  `kind: "thinking_effort"`. No new event type is introduced, and the protocol
+  version stays 1; clients that do not know the optional field ignore it.
 - `snapshot`: a deterministic SVG of the current `x/vt` cells at the current
   frame `seq`; it contains no timestamps, random IDs, durations, or ANSI, and
   does not emit an extra frame.
@@ -171,6 +211,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Table columns / rows | 12 / 500 | Column width cap 40 cells; the overlay scrolls horizontally. |
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
 | Overlay stack | 4 | Deeper requests close the oldest overlay. |
+| Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |
 | Images per transcript / thumbnail | 32 / 60×20 cells | Older images fall off; thumbnails are half-block glyphs. |
 | Tool output | 4 KiB or 40 lines folded | Expanded output remains in the log, up to the logged cap. |

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
+	"unicode/utf8"
 )
 
 // DefaultCatalogURL is the public models.dev catalog used by default.
@@ -22,6 +24,13 @@ const CatalogRequestTimeout = 15 * time.Second
 // MaxCatalogBytes caps the catalog response body. A larger body is a protocol
 // error rather than a partial parse.
 const MaxCatalogBytes = 16 << 20
+
+// MaxThinkingEffortBytes bounds one effort value. The same limit applies to
+// catalog values, cache entries, the CLI, and the environment.
+const MaxThinkingEffortBytes = 32
+
+// MaxReasoningEfforts bounds the normalized effort values retained per model.
+const MaxReasoningEfforts = 16
 
 // Catalog errors are stable categories used by the CLI to select exit codes.
 var (
@@ -54,6 +63,36 @@ type CatalogModel struct {
 	Deprecated    bool    `json:"deprecated,omitempty"`
 	Translated    bool    `json:"translated,omitempty"`
 	Unavailable   string  `json:"unavailable,omitempty"`
+	// Reasoning reports whether the model supports reasoning. It stays
+	// meaningful even when ReasoningEfforts is empty: the model may reason
+	// without exposing an effort control.
+	Reasoning bool `json:"reasoning"`
+	// ReasoningEfforts is the normalized, deduplicated, canonically ordered
+	// set of effort values the model advertises. Empty means no effort
+	// control.
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+}
+
+// SupportsEffort reports whether the model advertises value as an effort.
+func (m CatalogModel) SupportsEffort(value string) bool {
+	return m.Reasoning && slices.Contains(m.ReasoningEfforts, value)
+}
+
+// ValidReasoningEffort reports whether value is a syntactically valid catalog
+// effort. The reserved clear sentinel "default" is not a catalog value.
+func ValidReasoningEffort(value string) bool {
+	if value == "" || value == "default" || len(value) > MaxThinkingEffortBytes || !utf8.ValidString(value) {
+		return false
+	}
+	for i, r := range value {
+		switch {
+		case i == 0 && r >= 'a' && r <= 'z':
+		case i > 0 && ((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Usable reports whether the harness can select the model.

@@ -1,8 +1,9 @@
 # aharness v1 testing strategy
 
 - **Date:** 2026-11-11
-- **Status:** normative testing strategy for v1, the shipped TUI, and model discovery
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md), [model discovery build plan](model-discovery-build.md)
+- **Status:** normative testing strategy for v1, the shipped TUI, model
+  discovery, and thinking effort
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md), [model discovery build plan](model-discovery-build.md), [thinking effort build plan](thinking-effort-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and
@@ -30,11 +31,27 @@ real timeouts for subprocess and signal tests.
   version mismatch, atomic write and modes; explicit refresh without
   `If-None-Match`, unexpected `304` rejection, and preservation of the previous
   cache on every failure.
+- Catalog reasoning effort: `reasoning` and `reasoning_options` decoding;
+  effort-only, multiple effort options, toggle-only, token-budget-only, empty
+  array, and unknown option types; flattening, trimming, deduplication, and
+  canonical ordering (`none` … `max`, then unknown lexicographic); invalid
+  syntax, over-32-byte values, case rejection, control characters, the reserved
+  `default` value, and the 16-value cap; a malformed `reasoning_options` value
+  yields no effort control rather than a catalog failure; cache version 2 round
+  trip, version 1 rejection and refetch, and rejection of a tampered cache
+  effort list (count, duplicate, order, or syntax).
 - Streaming adapters: SSE text and tool-call assembly for both dialects;
   `[DONE]`; comments, CRLF, and multi-line data; malformed JSON, duplicate
   names, invalid UTF-8; 4 MiB event, 1 MiB assembled-response, and 8 MiB
   total-stream caps; missing usage; non-SSE JSON fallback; error-body
   redaction; and `PartialError` after the first display delta.
+- Thinking effort adapters: a Chat request body has top-level
+  `reasoning_effort` and no nested `reasoning`; a Responses body has
+  `reasoning.effort` and no top-level field; an empty effort sends neither;
+  buffered and streaming requests carry the same value through the shared
+  payload builder; a tool-call round trip repeats the value on every call; the
+  value is sent unchanged with no provider-name translation; unknown members
+  remain tolerated.
 - Session v2: envelope round-trip; v0/unknown version rejection; one version per
   file; unknown fields and event types; run/control payloads; `seq`/`session`
   validation; UUID validation; exclusive and shared `flock`; torn-final repair
@@ -47,6 +64,16 @@ real timeouts for subprocess and signal tests.
   model/workspace/base URL/context/output values; explicit overrides; at-or-over
   checks only for explicit positive turn/token flags; workspace mismatch;
   unsupported prompt/toolset; parent immutability.
+- Session thinking effort: `session_start` and `run_start` record the effective
+  optional value; the latest `run_start` wins for reconstruction; a
+  `session_start` value applies before the first run; a v2 log without the
+  field reconstructs as empty and resumes with the provider default; a fork
+  records the fork's effective value while copied events keep historical values;
+  malformed known payloads still error and unknown fields remain ignored.
+- Agent request: `ThinkingEffort` is copied into every constructed model request
+  (including the context-overflow retry), `model_request` logging includes it in
+  both the full and truncated payloads, retries preserve the same request, and
+  usage/finish handling is unchanged.
 - Loop: scripted model sequences for all terminal states; every call paired;
   panic paired then `internal_error`; duplicate call IDs stop with
   `protocol_error`; code-based stuck detection; one `final` and one `run_end`
@@ -60,8 +87,9 @@ real timeouts for subprocess and signal tests.
   fallback printed once, retry before the first delta, no retry after a delta,
   partial error fields, and oversized responses rejected before tools.
 - TUI/display: display-event order for streamed, fallback, tool, retry, and
-  error paths; `RunStarted` model/dialect/resume sequence; display failure maps
-  to `internal_error` and pairs tool calls; nil display disables events.
+  error paths; `RunStarted` model/dialect/resume sequence and effective
+  thinking effort; display failure maps to `internal_error` and pairs tool
+  calls; nil display disables events.
 - History: multiple runs, run headers, assistant text once, tool pairing,
   canceled/panic/repaired results, anomalies, hints/notices, partial text,
   fork metadata, malformed payloads, unknown events/fields, and caps.
@@ -73,10 +101,21 @@ real timeouts for subprocess and signal tests.
   for unlimited budgets and `N/M` only for explicit positive budgets, never
   `0/0`; the details overlay renders `unlimited`/`none`; old `max_turns`/
   `time_limit` terminal states still render.
+- TUI thinking effort: `F2` opens and closes the next-run picker; it is
+  disabled with a notice during a run; entries are `provider default` then the
+  model's values in canonical order; a model with no effort values shows a
+  notice and no overlay; the selection changes only the next run; the details
+  overlay row; model-picker effort metadata; a model switch keeps a supported
+  value and clears an unsupported one with a notice; deterministic frames for
+  each state.
 - Headless UI: `-ui-json` decode/encode, caps, `wait` conditions/timeouts,
   frame/style/cursor/image metadata, SVG determinism, forced glyph mode, and
   no ANSI/raw image bytes. `x/vt` cell/style fixtures cover wide/CJK, combining
-  marks, emoji, and cursor state.
+  marks, emoji, and cursor state. Thinking effort: `f2` is accepted; the
+  selection updates the next run's request and `run_start`; `model_changed` and
+  `run_started` expose the optional `thinking_effort` field; the `F2` selection
+  emits `notice` with `kind: "thinking_effort"`; a client that ignores the
+  field still parses the version 1 frames.
 - Markdown/images: Glamour fixtures for headings/emphasis/code/lists/tables/
   links, raw HTML inert, over-deep/over-block fallback, workspace-contained
   PNG/JPEG/GIF decode caps, placeholders, glyph thumbnails, viewer, and
@@ -92,6 +131,16 @@ real timeouts for subprocess and signal tests.
   rejection; exit-code mapping; unlimited `0` defaults for turns/tokens/session
   timeout/model timeout; explicit `0` and explicit positive values; negative
   rejection naming the flag; recorded-budget ignoring on resume/fork.
+- Thinking-effort config: flag-over-environment precedence; explicit
+  `default`; an explicitly empty flag rejected while an empty environment value
+  is unset; malformed syntax, over-32-byte values, and leading non-lowercase
+  characters rejected before catalog resolution; an unsupported value for the
+  effective model; a model that does not reason versus one that advertises no
+  effort levels; an explicit effort+model conflict; an inherited supported
+  value kept on model change; an inherited unsupported value cleared with a
+  warning and an empty recorded value; explicit non-default effort on
+  resume/fork requiring a catalog fetch while an inherited value does not; and
+  `-list-models`/`-refresh-models` ignoring the setting.
 
 Tests follow the coding standard: table-driven where cases share logic; no
 assert or mock frameworks; fakes at consumer interfaces; `httptest` for the
@@ -140,7 +189,17 @@ diagnostic, not a gate.
   values; an explicit model change resolves through the catalog; an explicit
   provider mismatch exits 2.
 - `-list-models`: assert the tab-separated header and rows, exit 0, no session
-  file, no task/token requirement, and stale-cache fallback.
+  file, no task/token requirement, and stale-cache fallback. The header ends
+  with `EFFORT`; rows print the normalized comma-separated values and `-` for a
+  model with no effort control.
+- Thinking effort end to end: a fake catalog with differing per-model effort
+  lists and a fake provider asserting exact request bodies for a new session,
+  an omitted setting (no field), an explicit value, resume inheritance, fork,
+  a model change that keeps a supported value, a model change that clears an
+  unsupported value with a stderr warning, and an explicit `default` clear.
+  Unsupported values and an explicit incompatible model+effort combination exit
+  2 before any provider request; `session_start`/`run_start` record the effective
+  value, and `-ui-json` `f2` reaches the next request.
 - `-refresh-models`: the fake catalog server observes an unconditional request
   with no `If-None-Match` and no provider token; the summary is printed and no
   session file is created. Server-down and invalid-catalog cases exit 3/4 and
@@ -187,7 +246,9 @@ diagnostic, not a gate.
 Fuzz targets cover the SSE decoder, the v2 JSONL reader/repair path, the TUI
 terminal sanitizer, markdown input, file-path/image containment, the
 `-ui-json` command decoder and frame/event/snapshot encoders, `agent.History`,
-and the models.dev catalog decoder at the trust boundary. Seeds live under
+and the models.dev catalog decoder at the trust boundary. Catalog payloads
+include arbitrary `reasoning_options` shapes and values: no panic, no unbounded
+allocation, and deterministic normalization. Seeds live under
 `internal/model/testdata/fuzz` and `internal/session/testdata/fuzz`; the
 TUI/history targets use built-in seeds. The unit test run executes the seeds; a
 scheduled job MAY run longer fuzzing. The fuzz targets must not make real
@@ -227,6 +288,26 @@ record. Use `AHARNESS_LOG_REQUESTS=1` to confirm a default request body has no
 `max_tokens` / `max_output_tokens` field; exercise one explicit output budget
 and one provider `length`/context-overflow outcome.
 
+For thinking effort: pick a model whose `-list-models` `EFFORT` column is
+non-empty, choose one advertised value, and run a small tool-call round trip
+with `AHARNESS_LOG_REQUESTS=1`; confirm the request body carries the value in
+the dialect's field (top-level `reasoning_effort` for Chat, nested
+`reasoning.effort` for Responses) and that the provider accepts the request.
+Repeat for a model on each native SDK path the catalog uses
+(`@ai-sdk/openai-compatible`, `@ai-sdk/openai`, `@ai-sdk/anthropic`,
+`@ai-sdk/google`); if a translated path rejects the field, record the exact
+model, value, and error, and do not claim support for that path. Confirm an
+omitted setting sends no reasoning field, `-thinking-effort default` clears on
+resume, and `session_start`/`run_start` record the effective value. In the TUI,
+select an effort with `F2` and confirm the next run's request and `run_start`,
+then switch to a model that does not advertise it and confirm the notice and
+cleared value.
+
+This real-provider thinking-effort smoke has **not** been run: provider
+credentials (`AHARNESS_PROVIDER_TOKEN`) are unavailable in the implementation
+environment. It remains an explicit release prerequisite, and mock-provider or
+request-body tests do not claim that the hosted provider accepted the value.
+
 For run budgets: confirm a default run can exceed the old 30-turn and 2M-token
 thresholds without a `limit` event and without a wall-clock or per-call
 deadline; resume or fork a seeded log with recorded budgets and confirm it
@@ -255,4 +336,6 @@ eval infrastructure are out of scope.
 
 The v0 smoke passed for `deepseek-v4.1-flash` (2026-11-09) and
 `muse-spark-1.3-contributor` (2026-11-10). v1 manual smoke results are recorded
-with the implementation change that produced them.
+with the implementation change that produced them. The thinking-effort
+real-provider smoke is pending provider credentials and is a release
+prerequisite, not a completed check.

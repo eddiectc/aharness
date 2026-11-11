@@ -36,6 +36,7 @@ type recordedSessionStart struct {
 	MaxTotalTokens   int            `json:"max_total_tokens"`
 	SessionTimeoutMS int64          `json:"session_timeout_ms"`
 	ModelTimeoutMS   int64          `json:"model_timeout_ms"`
+	ThinkingEffort   string         `json:"thinking_effort"`
 }
 
 type recordedRunStart struct {
@@ -48,6 +49,7 @@ type recordedRunStart struct {
 	MaxTotalTokens   int            `json:"max_total_tokens"`
 	SessionTimeoutMS int64          `json:"session_timeout_ms"`
 	ModelTimeoutMS   int64          `json:"model_timeout_ms"`
+	ThinkingEffort   string         `json:"thinking_effort"`
 }
 
 // recordedSession decodes the session_start and every run_start payload.
@@ -132,7 +134,7 @@ func TestBinaryListModels(t *testing.T) {
 			t.Errorf("stderr missing the ineligible-model diagnostic %q:\n%s", diagnostic, stderr)
 		}
 	}
-	if !strings.HasPrefix(stdout, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS\n") {
+	if !strings.HasPrefix(stdout, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS\tEFFORT\n") {
 		t.Fatalf("stdout does not start with the documented header:\n%s", stdout)
 	}
 	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
@@ -140,13 +142,13 @@ func TestBinaryListModels(t *testing.T) {
 		t.Fatalf("list rows = %d, want header plus 7 usable models:\n%s", len(lines)-1, stdout)
 	}
 	wantRows := []string{
-		"crouton-alpha-free\tCrouton Alpha Free\topenai-responses\t200000\t8192\t-",
-		"deepseek-v4.1-flash\tDeepSeek V4.1 Flash\topenai-chat\t1000000\t384000\t-",
-		"gpt-6-luna\tGPT-6 Luna\topenai-responses\t1050000\t128000\t-",
-		"kimi-k2.7-code\tKimi K2.7 Code\topenai-chat\t262144\t262144\t-",
-		"muse-spark-1.3-contributor\tMuse Spark 1.3 Contributor\topenai-responses\t200000\t8192\t-",
-		"old-deprecated\tOld Deprecated\topenai-chat\t100000\t8192\tdeprecated",
-		"qwen3.7-plus\tQwen3.7 Plus\topenai-chat\t131072\t8192\t-",
+		"crouton-alpha-free\tCrouton Alpha Free\topenai-responses\t200000\t8192\t-\t-",
+		"deepseek-v4.1-flash\tDeepSeek V4.1 Flash\topenai-chat\t1000000\t384000\t-\t-",
+		"gpt-6-luna\tGPT-6 Luna\topenai-responses\t1050000\t128000\t-\t-",
+		"kimi-k2.7-code\tKimi K2.7 Code\topenai-chat\t262144\t262144\t-\t-",
+		"muse-spark-1.3-contributor\tMuse Spark 1.3 Contributor\topenai-responses\t200000\t8192\t-\t-",
+		"old-deprecated\tOld Deprecated\topenai-chat\t100000\t8192\tdeprecated\t-",
+		"qwen3.7-plus\tQwen3.7 Plus\topenai-chat\t131072\t8192\t-\t-",
 	}
 	for i, want := range wantRows {
 		if got := lines[i+1]; got != want {
@@ -294,7 +296,7 @@ func TestBinaryRefreshThenList(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", exit, stderr)
 	}
-	if !strings.HasPrefix(stdout, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS\n") {
+	if !strings.HasPrefix(stdout, "ID\tNAME\tDIALECT\tCONTEXT\tOUTPUT\tSTATUS\tEFFORT\n") {
 		t.Fatalf("stdout does not start with the list header:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "refreshed ") {
