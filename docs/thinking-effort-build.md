@@ -554,7 +554,7 @@ Deviations and clarifications against the contract above:
 | Cache validation | Version 2 validation additionally requires unique values in strictly canonical order, on top of the 32-byte, 16-value, and syntax rules. A tampered or misordered usable entry invalidates the cache, which is refetched. |
 | Inheritance without a fetch | An inherited effort is validated against the catalog only when the effective model is resolved (an explicit model change). A resume/fork that changes no model trusts the recorded value without a fetch, as §3.2 specifies. |
 | Clear sentinel | `default` is converted to the empty value immediately after the syntax check, so it never reaches catalog validation, an adapter request, or the session log. |
-| TUI and `-ui-json` | `F2`, the details row, model-picker effort metadata, the model-switch clearing notice, the `f2` key, and the optional `thinking_effort` fields follow §3.6. No new event type; protocol version stays 1. |
+| TUI and `-ui-json` | `F2`, the details row, model-picker effort metadata, the model-switch clearing notice, the `f2` key, and the optional `thinking_effort` fields follow §3.6. The header line additionally shows `effort <value>` (or `effort default`) for the next run, so the effective value stays visible without opening the details overlay. No new event type; protocol version stays 1. |
 | Live catalog | Values remain catalog-driven. On 2026-11-11 the catalog advertised different lists per model (for example `low,high,max` for `deepseek-v4.1-flash` and other sets including `none`), so the shipped docs do not hardcode a list. Catalog drift changes `-list-models` and picker output without a harness release; the mechanism does not depend on any observed entry. |
 
 Verification:

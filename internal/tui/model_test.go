@@ -889,6 +889,31 @@ func TestStatusLineExplicitBudgets(t *testing.T) {
 	}
 }
 
+func TestHeaderLineThinkingEffort(t *testing.T) {
+	host := newManualHost()
+	host.info.ThinkingEffort = "max"
+	host.models[0].ReasoningEfforts = []string{"low", "high", "max"}
+	app := newTestApp(t, host)
+	if line := app.headerLine(); !strings.Contains(line, "effort max") {
+		t.Fatalf("header = %q, want the inherited effort", line)
+	}
+
+	press(t, app, "f2")
+	press(t, app, "up")
+	press(t, app, "up")
+	press(t, app, "enter")
+	if line := app.headerLine(); !strings.Contains(line, "effort low") {
+		t.Fatalf("header = %q, want the selected effort", line)
+	}
+
+	press(t, app, "f2")
+	press(t, app, "up")
+	press(t, app, "enter")
+	if line := app.headerLine(); !strings.Contains(line, "effort default") {
+		t.Fatalf("header = %q, want the provider default", line)
+	}
+}
+
 func TestDetailsOverlayRunBudgets(t *testing.T) {
 	t.Run("unlimited", func(t *testing.T) {
 		host := newManualHost()

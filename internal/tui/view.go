@@ -128,8 +128,13 @@ func (m *App) headerLine() string {
 	if m.headless {
 		sessionLabel = "session --"
 	}
+	effort := "effort default"
+	if m.nextEffort != "" {
+		effort = "effort " + SanitizeLine(m.nextEffort)
+	}
 	line := t.title.Render("aharness") + "  " + t.header.Render(modelName) +
-		"  " + t.dim.Render(sessionLabel) + "  " + t.dim.Render(workspace)
+		"  " + t.dim.Render(effort) + "  " + t.dim.Render(sessionLabel) +
+		"  " + t.dim.Render(workspace)
 	return ansi.Truncate(line, m.width, "")
 }
 

@@ -154,10 +154,12 @@ next-run value and clears an unsupported one with a notice, as described under
 
 ## Status line and details
 
-The status line shows `turns N` and `tokens N` while those budgets are
-unlimited; it shows `turns N/M` and `tokens N/M` only when the corresponding
-`-max-turns` / `-max-total-tokens` flag is explicit and positive. Unlimited
-values never render as `0/0`.
+The header line shows `effort <value>` for the next run, or `effort default`
+when the provider/model default applies, so the effective effort stays visible
+without opening an overlay. The status line shows `turns N` and `tokens N`
+while those budgets are unlimited; it shows `turns N/M` and `tokens N/M` only
+when the corresponding `-max-turns` / `-max-total-tokens` flag is explicit and
+positive. Unlimited values never render as `0/0`.
 
 The details overlay (`Ctrl-X`) shows the observed `turns: N` and
 `tokens: <human>` under the session block, the effective `thinking effort:

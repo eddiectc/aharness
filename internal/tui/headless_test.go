@@ -299,6 +299,17 @@ func TestHeadlessEffortPickerSelectsNextRun(t *testing.T) {
 	if !runStarted || !effortNotice {
 		t.Fatalf("missing run_started or thinking_effort notice:\n%s", raw)
 	}
+	lastFrame := ""
+	for _, line := range parseOutput(t, raw) {
+		if line["type"] != "frame" {
+			continue
+		}
+		frameLines, _ := line["lines"].([]any)
+		lastFrame = strings.Join(anyStrings(frameLines), "\n")
+	}
+	if !strings.Contains(lastFrame, "effort high") {
+		t.Fatalf("TUI header does not show the effective effort:\n%s", lastFrame)
+	}
 }
 
 func TestHeadlessEffortPickerProviderDefaultOmitsField(t *testing.T) {
@@ -342,6 +353,9 @@ func TestHeadlessEffortPickerProviderDefaultOmitsField(t *testing.T) {
 	}
 	if !strings.Contains(raw, "thinking effort for the next run: provider default") {
 		t.Fatalf("missing provider default notice:\n%s", raw)
+	}
+	if !strings.Contains(raw, "effort default") {
+		t.Fatalf("TUI header does not show the provider default:\n%s", raw)
 	}
 }
 
