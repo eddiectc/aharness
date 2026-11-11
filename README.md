@@ -155,6 +155,8 @@ export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
 ```
 
 `make build` and `make test` wrap the same build and race-test commands.
+`make install` builds the binary and installs it to `~/.local/bin`
+(override with `INSTALL_DIR=/some/dir`).
 
 Development measurement tooling is separate from the runtime binary:
 `go build -trimpath -o bin/aharness-eval ./cmd/aharness-eval` builds the

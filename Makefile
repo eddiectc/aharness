@@ -3,15 +3,20 @@ GOIMPORTS ?= goimports
 GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
 BIN := bin/aharness
+INSTALL_DIR ?= $(HOME)/.local/bin
 PKGS := ./...
 
-.PHONY: all build test vet clean docs-check fmt-check lint vuln dod
+.PHONY: all build install test vet clean docs-check fmt-check lint vuln dod
 
 all: build test
 
 build:
 	mkdir -p bin
 	$(GO) build -trimpath -o $(BIN) ./cmd/aharness
+
+install: build
+	mkdir -p $(INSTALL_DIR)
+	install -m 0755 $(BIN) $(INSTALL_DIR)/aharness
 
 test:
 	$(GO) test -race -count=1 $(PKGS)
