@@ -78,8 +78,10 @@ type chatChoice struct {
 }
 
 type chatResponseMessage struct {
-	Content   string         `json:"content"`
-	ToolCalls []chatToolCall `json:"tool_calls"`
+	Content          string         `json:"content"`
+	ReasoningContent string         `json:"reasoning_content"`
+	Reasoning        string         `json:"reasoning"`
+	ToolCalls        []chatToolCall `json:"tool_calls"`
 }
 
 type chatUsage struct {
@@ -136,8 +138,10 @@ type chatChunkChoice struct {
 }
 
 type chatDelta struct {
-	Content   string              `json:"content"`
-	ToolCalls []chatDeltaToolCall `json:"tool_calls"`
+	Content          string              `json:"content"`
+	ReasoningContent string              `json:"reasoning_content"`
+	Reasoning        string              `json:"reasoning"`
+	ToolCalls        []chatDeltaToolCall `json:"tool_calls"`
 }
 
 type chatDeltaToolCall struct {
@@ -169,8 +173,9 @@ func (a *OpenAIChat) Complete(ctx context.Context, req Request) (Response, error
 }
 
 // CompleteStream sends a streaming Chat Completions request. Assistant-text
-// deltas are display-only; the assembled response is authoritative.
-func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error) {
+// and reasoning deltas are display-only; the assembled response is
+// authoritative.
+func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, stream StreamHandler) (Response, error) {
 	payload := a.payload(req)
 	payload.Stream = true
 	payload.StreamOptions = &chatStreamOptions{IncludeUsage: true}
@@ -188,7 +193,7 @@ func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, emit func(
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	return consumeChatStream(resp.Body, emit)
+	return consumeChatStream(resp.Body, stream)
 }
 
 func (a *OpenAIChat) payload(req Request) chatRequest {
@@ -234,11 +239,12 @@ func decodeChatResponse(body []byte) (Response, error) {
 	return decoded.canonical()
 }
 
-func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
+func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
 	dec := newSSEDecoder(r)
 	var (
 		text         strings.Builder
 		emittedText  strings.Builder
+		reasoning    strings.Builder
 		emittedBytes int
 		argBytes     int
 		calls        = make(map[int]*chatStreamCall)
@@ -279,6 +285,21 @@ func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
 			finishReason = *choice.FinishReason
 		}
+		// DeepSeek-compatible servers stream thinking as reasoning_content;
+		// OpenAI-compatible servers use reasoning. Either is display-only.
+		for _, delta := range [...]string{choice.Delta.ReasoningContent, choice.Delta.Reasoning} {
+			if delta == "" {
+				continue
+			}
+			delta = acceptReasoning(reasoning.Len(), delta)
+			if delta == "" {
+				continue
+			}
+			reasoning.WriteString(delta)
+			if err := stream.reasoning(delta); err != nil {
+				return Response{}, err
+			}
+		}
 		if delta := choice.Delta.Content; delta != "" {
 			if text.Len()+argBytes+len(delta) > MaxCanonicalResponse {
 				return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
@@ -286,7 +307,7 @@ func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
 			text.WriteString(delta)
 			emittedText.WriteString(delta)
 			emittedBytes += len(delta)
-			if err := emit(delta); err != nil {
+			if err := stream.text(delta); err != nil {
 				return Response{}, err
 			}
 		}
@@ -329,9 +350,10 @@ func consumeChatStream(r io.Reader, emit func(string) error) (Response, error) {
 	}
 
 	out := Response{
-		Text:     text.String(),
-		Usage:    usageValue,
-		Streamed: true,
+		Text:      text.String(),
+		Reasoning: reasoning.String(),
+		Usage:     usageValue,
+		Streamed:  true,
 	}
 	seen := make(map[string]struct{}, len(calls))
 	for _, index := range order {
@@ -371,9 +393,14 @@ func (r chatResponse) canonical() (Response, error) {
 	}
 
 	choice := r.Choices[0]
+	reasoning := choice.Message.ReasoningContent
+	if reasoning == "" {
+		reasoning = choice.Message.Reasoning
+	}
 	out := Response{
-		Text:  choice.Message.Content,
-		Usage: r.Usage.canonical(),
+		Text:      choice.Message.Content,
+		Reasoning: capReasoning(reasoning),
+		Usage:     r.Usage.canonical(),
 	}
 	if err := validateUsage(out.Usage); err != nil {
 		return Response{}, err

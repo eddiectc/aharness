@@ -25,6 +25,7 @@ type uiTheme struct {
 	label    lipgloss.Style
 	user     lipgloss.Style
 	assist   lipgloss.Style
+	think    lipgloss.Style
 	tool     lipgloss.Style
 	dim      lipgloss.Style
 	notice   lipgloss.Style
@@ -40,6 +41,7 @@ func newTheme(noColor bool) uiTheme {
 			plain:  true,
 			title:  lipgloss.NewStyle().Bold(true),
 			label:  lipgloss.NewStyle().Bold(true),
+			think:  lipgloss.NewStyle().Italic(true),
 			status: lipgloss.NewStyle(),
 			header: lipgloss.NewStyle(),
 			box:    lipgloss.NewStyle(),
@@ -56,6 +58,7 @@ func newTheme(noColor bool) uiTheme {
 		label:    lipgloss.NewStyle().Bold(true).Foreground(accent),
 		user:     lipgloss.NewStyle().Bold(true).Foreground(green),
 		assist:   lipgloss.NewStyle().Foreground(text),
+		think:    lipgloss.NewStyle().Foreground(muted).Italic(true),
 		tool:     lipgloss.NewStyle().Foreground(yellow),
 		dim:      lipgloss.NewStyle().Foreground(muted),
 		notice:   lipgloss.NewStyle().Foreground(yellow),
@@ -283,6 +286,8 @@ func (m *App) transcriptLines() []string {
 			}
 		case itemAssistant:
 			lines = append(lines, m.renderAssistant(t, it)...)
+		case itemThinking:
+			lines = append(lines, m.renderThinking(t, it)...)
 		case itemTool:
 			lines = append(lines, m.renderTool(t, it)...)
 		case itemNotice:
@@ -358,6 +363,43 @@ func (m *App) renderAssistant(t uiTheme, it *transcriptItem) []string {
 	for i, line := range body {
 		if i == 0 {
 			lines = append(lines, label+t.assist.Render(line))
+		} else {
+			lines = append(lines, indent+line)
+		}
+	}
+	return lines
+}
+
+// renderThinking renders one thinking block as preformatted, wrapped text. The
+// header shows whether the model is still thinking; the body is never parsed
+// as markdown because it is provider prose, not assistant output.
+func (m *App) renderThinking(t uiTheme, it *transcriptItem) []string {
+	header := "thinking"
+	if it.thinking {
+		header = "thinking…"
+	}
+	label := t.label.Render(header + " ")
+	labelWidth := lipgloss.Width(label)
+	width := max(1, m.width-labelWidth)
+	// Sanitize again at the render boundary: terminal safety must not depend on
+	// every future producer of a thinking item remembering to sanitize.
+	body := strings.Split(strings.TrimRight(Sanitize(it.text), "\n"), "\n")
+	if len(body) == 1 && body[0] == "" {
+		body = []string{"…"}
+	}
+	indent := strings.Repeat(" ", labelWidth)
+	// Long thinking lines wrap so reasoning stays readable instead of being
+	// cut at the right edge like a status line.
+	wrapped := make([]string, 0, len(body))
+	for _, line := range body {
+		for _, part := range strings.Split(ansi.Wrap(line, width, " "), "\n") {
+			wrapped = append(wrapped, t.think.Render(part))
+		}
+	}
+	lines := make([]string, 0, len(wrapped)+1)
+	for i, line := range wrapped {
+		if i == 0 {
+			lines = append(lines, label+line)
 		} else {
 			lines = append(lines, indent+line)
 		}

@@ -7,7 +7,8 @@ import (
 )
 
 // textDisplay adapts the runner display stream to the batch stdout sink. It
-// handles only assistant text deltas; every other event is ignored.
+// handles only assistant text deltas; every other event, including
+// ReasoningDelta, is ignored so batch stdout stays assistant text only.
 func textDisplay(sink *textSink) func(agent.DisplayEvent) error {
 	return func(ev agent.DisplayEvent) error {
 		delta, ok := ev.(agent.TextDelta)

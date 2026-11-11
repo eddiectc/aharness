@@ -9,11 +9,13 @@ opt-in and unlimited by default.
 - **Status:** v1 implementation complete. The agent-tooling M0–M3 work is also
   implemented, including usage/cost accounting, the contiguous 2,000-line read
   contract with `toolset-v1` replay, search/command improvements, and the
-  dev-only eval driver and 30-task suite. The default TUI, provider/model discovery, and per-model
-  thinking effort are implemented. The TUI is the default in a terminal;
+  dev-only eval driver and 30-task suite. The default TUI, provider/model discovery, per-model
+  thinking effort, and display-only thinking text are implemented. The TUI is
+  the default in a terminal;
   `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
   surface. Mock-provider, integration, fuzz, race, and §8 gate checks pass. The
-  real-provider TUI, thinking-effort, and eval baseline/A-B runs remain pending
+  real-provider TUI, thinking-effort, thinking-display, and eval baseline/A-B
+  runs remain pending
   provider credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
   environment); they are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
@@ -44,6 +46,11 @@ opt-in and unlimited by default.
   clears an inherited value. The effective value is recorded and inherited on
   resume/fork unless explicitly changed. `-list-models` ends with an `EFFORT`
   column, and the TUI offers a next-run picker on `F2`.
+- Display-only thinking text: the TUI shows provider reasoning
+  (`reasoning_content`/`reasoning` on Chat, reasoning summaries on Responses) as
+  a `thinking` transcript block. It is never logged, projected, replayed, or
+  printed in batch mode, so the session log and the one-shot stdout contract are
+  unchanged.
 - Provider usage detail and an observational cost estimate. `model.Usage`
   keeps input/output totals plus cached-input, cache-write, and
   reasoning-output subsets and a `reported` flag; `run_start` records the
@@ -63,7 +70,8 @@ opt-in and unlimited by default.
 - Opt-in `-stream` assistant-text streaming for both dialects in batch mode.
   The TUI and `-ui-json` always stream. The canonical response is the only
   transcript record; deltas are display-only.
-- The default interactive TUI: a full-screen transcript, streaming text, tool
+- The default interactive TUI: a full-screen transcript, streaming text, a
+  display-only `thinking` block for model reasoning, tool
   activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
   a workspace file picker, catalog-backed next-run model and thinking-effort
   pickers, details and help overlays, and workspace-contained images. One

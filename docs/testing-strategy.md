@@ -84,8 +84,19 @@ real timeouts for subprocess and signal tests.
   `-session-timeout`/`-model-timeout` `0` means no deadline while an explicit
   value enforces one.
 - Streaming loop: deltas emitted once, no reprint after deltas, non-streaming
-  fallback printed once, retry before the first delta, no retry after a delta,
-  partial error fields, and oversized responses rejected before tools.
+  fallback printed once, retry before the first delta, no retry after a text or
+  thinking delta, partial error fields, and oversized responses rejected before
+  tools.
+- Thinking: both adapters map buffered and streamed `reasoning_content`/
+  `reasoning` and Responses reasoning summary/content into display-only
+  `Response.Reasoning`; encrypted reasoning content is dropped; the 64 KiB cap
+  clamps streamed and settled text at a rune boundary; thinking never counts
+  toward `responseContentBytes`; the runner emits `ReasoningDelta` before
+  `ResponseCompleted`, reprints buffered reasoning once (and only once), and
+  never writes thinking into any session event; the TUI streams it into a
+  `thinking` block, sanitizes control bytes, settles the header on assistant
+  text, and caps the item. `-ui-json` end to end: frames show the thinking
+  block for both dialects and the session log contains none of it.
 - TUI/display: display-event order for streamed, fallback, tool, retry, and
   error paths; `RunStarted` model/dialect/resume sequence and effective
   thinking effort; display failure maps to `internal_error` and pairs tool
@@ -380,10 +391,20 @@ select an effort with `F2` and confirm the next run's request and `run_start`,
 then switch to a model that does not advertise it and confirm the notice and
 cleared value.
 
-This real-provider thinking-effort smoke has **not** been run: provider
-credentials (`AHARNESS_PROVIDER_TOKEN`) are unavailable in the implementation
-environment. It remains an explicit release prerequisite, and mock-provider or
-request-body tests do not claim that the hosted provider accepted the value.
+For thinking display: with a reasoning model and a non-minimal effort, confirm
+the TUI shows a `thinking…` block that grows as the model thinks, settles to
+`thinking` when the answer starts, and precedes the assistant text. Confirm the
+session log has no thinking text (grep the JSONL for a phrase visible on
+screen), that resume shows no prior thinking, and that `Enter` on a long
+thinking block does not corrupt the transcript. Confirm a model or effort with
+no thinking produces no block, and that `Ctrl-R` toggles only assistant
+markdown.
+
+This real-provider thinking-effort and thinking-display smoke has **not** been
+run: provider credentials (`AHARNESS_PROVIDER_TOKEN`) are unavailable in the
+implementation environment. It remains an explicit release prerequisite, and
+mock-provider or request-body tests do not claim that the hosted provider
+accepted the value or returned thinking text.
 
 For run budgets: confirm a default run can exceed the old 30-turn and 2M-token
 thresholds without a `limit` event and without a wall-clock or per-call

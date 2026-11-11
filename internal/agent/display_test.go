@@ -19,6 +19,8 @@ func eventName(ev DisplayEvent) string {
 		return "model_started"
 	case TextDelta:
 		return "text_delta"
+	case ReasoningDelta:
+		return "reasoning_delta"
 	case ResponseCompleted:
 		return "response_completed"
 	case ToolStarted:
@@ -197,6 +199,99 @@ func TestDisplayNilDisablesEvents(t *testing.T) {
 	cfg.Display = nil
 	if _, res, err := runTask(t, cfg, &fakeCompleter{steps: []scriptStep{{resp: model.Response{Text: "ok", FinishReason: model.FinishStop}}}}, &fakeToolset{}); err != nil || res.Status != StopCompleted {
 		t.Fatalf("result = %+v err = %v", res, err)
+	}
+}
+
+func TestDisplayThinkingStreamsAndIsNeverLogged(t *testing.T) {
+	cfg := testConfig()
+	cfg.Stream = true
+	var reasoning, text string
+	cfg.Display = func(ev DisplayEvent) error {
+		switch ev := ev.(type) {
+		case ReasoningDelta:
+			reasoning += ev.Text
+		case TextDelta:
+			text += ev.Text
+		case ResponseCompleted:
+			if ev.Reasoning != "think hard" {
+				t.Errorf("ResponseCompleted.Reasoning = %q, want the canonical thinking text", ev.Reasoning)
+			}
+		}
+		return nil
+	}
+	comp := &fakeStreamCompleter{steps: []streamStep{{
+		reasoning: []string{"think ", "hard"},
+		deltas:    []string{"answer"},
+		resp: model.Response{
+			Text: "answer", Reasoning: "think hard",
+			FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+		},
+	}}}
+	store, res, err := runTask(t, cfg, comp, &fakeToolset{})
+	if err != nil || res.Status != StopCompleted {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	if reasoning != "think hard" || text != "answer" {
+		t.Fatalf("reasoning = %q, text = %q, want streamed thinking and one answer", reasoning, text)
+	}
+	// Thinking is display-only: the durable model_response never carries it and
+	// no new event type is written.
+	for _, ev := range store.events {
+		if strings.Contains(string(ev.Data), "think hard") {
+			t.Fatalf("%s event leaked thinking text: %s", ev.Type, ev.Data)
+		}
+	}
+	if countEvents(store, session.TypeModelResponse) != 1 {
+		t.Fatalf("model_response events = %d, want 1", countEvents(store, session.TypeModelResponse))
+	}
+}
+
+func TestDisplayBufferedReasoningShownOnce(t *testing.T) {
+	cfg := testConfig()
+	cfg.Stream = true
+	var reasoning []string
+	cfg.Display = func(ev DisplayEvent) error {
+		if delta, ok := ev.(ReasoningDelta); ok {
+			reasoning = append(reasoning, delta.Text)
+		}
+		return nil
+	}
+	// The adapter streamed text but no thinking deltas, so the completed
+	// reasoning is displayed once before the response is finalized.
+	comp := &fakeStreamCompleter{steps: []streamStep{{
+		deltas: []string{"answer"},
+		resp: model.Response{
+			Text: "answer", Reasoning: "buffered thought",
+			FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+		},
+	}}}
+	if _, _, err := runTask(t, cfg, comp, &fakeToolset{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(reasoning) != 1 || reasoning[0] != "buffered thought" {
+		t.Fatalf("reasoning deltas = %v, want the buffered reasoning once", reasoning)
+	}
+}
+
+func TestDisplayNonStreamingReasoningEmitted(t *testing.T) {
+	cfg := testConfig()
+	cfg.Stream = false
+	var reasoning []string
+	cfg.Display = func(ev DisplayEvent) error {
+		if delta, ok := ev.(ReasoningDelta); ok {
+			reasoning = append(reasoning, delta.Text)
+		}
+		return nil
+	}
+	comp := &fakeCompleter{steps: []scriptStep{{resp: model.Response{
+		Text: "answer", Reasoning: "buffered thought",
+		FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+	}}}}
+	if _, _, err := runTask(t, cfg, comp, &fakeToolset{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(reasoning) != 1 || reasoning[0] != "buffered thought" {
+		t.Fatalf("reasoning deltas = %v, want one buffered block", reasoning)
 	}
 }
 

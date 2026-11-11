@@ -142,20 +142,23 @@ canonical model never carries raw provider shapes.
 The `model` package defines one internal canonical model. Every provider
 dialect is an adapter that maps its wire format into these types; the loop sees
 only the canonical model. The canonical model covers what the loop can act on:
-system and user text, assistant text, tool calls and results correlated by ID,
-one optional request-side control (the provider-neutral thinking effort), a
-normalized finish reason, token usage, and normalized errors.
+system and user text, assistant text, display-only thinking text, tool calls and
+results correlated by ID, one optional request-side control (the
+provider-neutral thinking effort), a normalized finish reason, token usage, and
+normalized errors.
 
-Canonical does not mean lossless. Provider-specific material — reasoning or
-thinking blocks and their text, citations, safety metadata, cache controls,
-opaque options, and streaming events — stays in the adapter and is dropped
-unless the loop or the dialect's continuation needs it. If a future feature
-needs one of those, add a typed canonical field when the loop consumes it; do
-not add a raw provider-shaped field. A lossless union schema for OpenAI
-Responses, OpenAI Chat, Anthropic, and Gemini would push provider-specific
-optional fields and invalid states into the loop; that is the thing to avoid.
-OpenAI Chat is a dialect, not a neutral standard, so it is not the canonical
-model either.
+Canonical does not mean lossless. Provider-specific material — encrypted
+reasoning items, reasoning identifiers, citations, safety metadata, cache
+controls, opaque options, and streaming events — stays in the adapter and is
+dropped unless the loop or the dialect's continuation needs it. Thinking text is
+the one exception: it is mapped into the typed display-only
+`model.Response.Reasoning` field so the TUI can show it, and it is never logged,
+projected, or replayed. If a future feature needs another provider field, add a
+typed canonical field when the loop consumes it; do not add a raw
+provider-shaped field. A lossless union schema for OpenAI Responses, OpenAI
+Chat, Anthropic, and Gemini would push provider-specific optional fields and
+invalid states into the loop; that is the thing to avoid. OpenAI Chat is a
+dialect, not a neutral standard, so it is not the canonical model either.
 
 Each adapter owns the wire format, authentication, tool-schema translation, and
 the mapping of finish reasons, usage, and errors. It uses one `http.Client` with
@@ -165,9 +168,9 @@ capped and redacted before logging.
 
 | Layer | Owns |
 |---|---|
-| Canonical `model` types | System/text messages, tool calls/results, optional request-side thinking effort, normalized finish reason, usage, normalized errors. |
-| `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, prompt/completion usage. |
-| `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, input/output usage, `store: false` full replay. |
+| Canonical `model` types | System/text messages, display-only thinking text, tool calls/results, optional request-side thinking effort, normalized finish reason, usage, normalized errors. |
+| `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, `reasoning_content`/`reasoning` thinking text, prompt/completion usage. |
+| `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, reasoning item summaries, input/output usage, `store: false` full replay. |
 | Shared `model` HTTP helper | Request execution, auth/session headers, 1 MiB body cap, typed error decoding. |
 
 Normalization rules:
@@ -235,9 +238,15 @@ type Request struct {
   lexicographically, and it is capped at 16 values. `reasoning` is retained
   separately so the CLI can distinguish a model that supports reasoning
   without an effort control from one that does not reason at all.
-- Reasoning text, reasoning summaries, reasoning-token details, and encrypted
-  reasoning items remain adapter-owned and are dropped. Usage already counts
-  reasoning tokens as output tokens, so no accounting change is needed.
+- Thinking text is display-only. `model.Response.Reasoning` carries the
+  provider's thinking: Chat reads `reasoning_content` (DeepSeek-compatible) and
+  falls back to `reasoning`; Responses concatenates `reasoning` item summary
+  and content text and ignores encrypted content. It is capped at 64 KiB, never
+  counted against the canonical response cap, never written to the log, and
+  never replayed to the provider. Usage already counts reasoning tokens as
+  output tokens, so no accounting change is needed. When a provider requires
+  reasoning continuation across tool rounds, that remains adapter-owned and
+  unimplemented; the harness does not echo thinking text back.
 - A provider rejection of a value the catalog advertised (for example 400 or
   422) is a normal typed `provider_error`. The harness does not retry without
   the field or fall back to the provider default.
@@ -264,38 +273,46 @@ schema beyond the canonical model.
 Each adapter optionally implements:
 
 ```go
+type StreamHandler struct {
+	Text      func(string) error // assistant text
+	Reasoning func(string) error // thinking text
+}
+
 type StreamCompleter interface {
-	CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error)
+	CompleteStream(ctx context.Context, req Request, stream StreamHandler) (Response, error)
 }
 ```
 
 `CompleteStream` is used when streaming is requested. Batch enables it through
 `-stream`; TUI and `-ui-json` always stream, and an explicit `-stream=false`
 there is a config error. The agent keeps `Completer` and falls back to `Complete`
-when the adapter does not implement streaming. The callback is display-only; the
-returned canonical `Response` is authoritative and is the only transcript
-record. Tool calls are assembled inside the adapter and are never exposed as
-deltas.
+when the adapter does not implement streaming. A nil callback discards that
+kind. Both callbacks are display-only; the returned canonical `Response` is
+authoritative and is the only transcript record. Tool calls are assembled inside
+the adapter and are never exposed as deltas.
 
 - Chat Completions sends `stream: true` and
-  `stream_options: {"include_usage": true}`. It assembles text, tool-call
-  fragments by index, finish reason, and usage from the chunks.
+  `stream_options: {"include_usage": true}`. It assembles text, thinking text
+  (`reasoning_content` then `reasoning`), tool-call fragments by index, finish
+  reason, and usage from the chunks.
 - Streaming requests use the same adapter `payload` builder as buffered
   requests, so `max_output_tokens` and `thinking_effort` mapping is identical
   on both paths; the only additions are `stream` and the dialect's stream
   options.
 - Responses consumes `response.output_text.delta`,
+  `response.reasoning_summary_text.delta`, `response.reasoning_text.delta`,
   `response.function_call_arguments.delta`, and the terminal
   `response.completed`/`response.incomplete`/`response.failed` events. The
-  completed response is authoritative.
+  completed response is authoritative; its reasoning item, when present,
+  replaces the accumulated streamed thinking.
 - A 2xx response whose content type is not `text/event-stream` is decoded as a
   normal JSON response, so local OpenAI-compatible servers keep working.
 - Final usage is required. A completed stream without usage is a
   `protocol_error`; the harness does not silently undercount tokens.
-- Retries happen only before the first delta. After the first delta, any
-  failure is terminal and is wrapped in `PartialError` carrying capped partial
-  text and the emitted byte count; it is never retried, because a retry would
-  duplicate stdout and could duplicate tool calls.
+- Retries happen only before the first display output. After the first text or
+  thinking delta, any failure is terminal and is wrapped in `PartialError`
+  carrying capped partial text and the emitted byte count; it is never retried,
+  because a retry would duplicate the display and could duplicate tool calls.
 - Caps: 4 MiB per SSE event, 1 MiB for the assembled canonical response, 8 MiB
   for the total stream, and 64 KiB for partial text on an interrupt or failed
   stream. The event cap is larger than the response cap because a terminal
@@ -438,18 +455,19 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   schemas, an optional `max_output_tokens` (zero omits the wire field), an
   optional `thinking_effort` (empty omits the wire field and means the
   provider/model default), and model name. `model.Response` carries assistant
-  text, zero or more tool calls (canonical call ID, name, raw JSON arguments),
-  a normalized finish reason (`stop`, `length`, `tool_calls`, `content_filter`,
-  or `other`), usage, and a display-only `Streamed` flag. Adapters guarantee a
+  text, display-only thinking text, zero or more tool calls (canonical call ID,
+  name, raw JSON arguments), a normalized finish reason (`stop`, `length`,
+  `tool_calls`, `content_filter`, or `other`), usage, and display-only
+  `Reasoning`/`Streamed` fields. Adapters guarantee a
   non-empty call ID; for a dialect that supplies IDs, a missing or duplicate ID
   is `protocol_error` and is not repaired. Typed errors (`HTTPError`,
   `TransportError`, `ProtocolError`, `PartialError`, and context overflow) keep
   retry policy in `agent`. `cmd` resolves the catalog entry to its dialect,
   base URL, and limits and wires the corresponding adapter.
-- `model.StreamCompleter` — optional `CompleteStream(ctx, req, emit)` contract.
-  `emit` receives display-only text deltas; the returned `Response` is
-  authoritative. The agent falls back to `Complete` when an adapter does not
-  implement it.
+- `model.StreamCompleter` — optional `CompleteStream(ctx, req, StreamHandler)`
+  contract. The handler receives display-only text and thinking deltas; the
+  returned `Response` is authoritative. The agent falls back to `Complete` when
+  an adapter does not implement it.
 - `tools.Registry` — concrete registry with `Schemas() []model.ToolSchema` and
   `Execute(ctx, name string, args json.RawMessage) tools.Result`. The dispatcher
   validates arguments and converts errors into `tools.Result`; a panic is
@@ -503,12 +521,14 @@ schema version.
 
 - **Display.** `agent.Config.Display func(DisplayEvent) error` is the single
   runner-to-UI observation path; it replaces the old `EmitText`. Events are
-  `RunStarted`, `ModelStarted`, `TextDelta`, `ResponseCompleted`, `ToolStarted`,
-  `ToolCompleted`, `MessageRecorded`, `Notice`, and `RunFinished`, emitted in
+  `RunStarted`, `ModelStarted`, `ReasoningDelta`, `TextDelta`,
+  `ResponseCompleted`, `ToolStarted`, `ToolCompleted`, `MessageRecorded`,
+  `Notice`, and `RunFinished`, emitted in
   that contract order around the matching durable events. They are display-only
   and carry no provider token or ANSI. A display failure before `RunFinished` is
   an internal error; during a tool round it pairs the current and unstarted
-  calls with `canceled`.
+  calls with `canceled`. `ReasoningDelta` and
+  `ResponseCompleted.Reasoning` carry thinking text that is never logged.
 - **History.** `agent.History(events)` reconstructs a capped, display-only
   transcript from the log: run headers with effective model/dialect and terminal
   status, user messages, assistant markdown source, tool calls/results paired by
@@ -573,11 +593,13 @@ schema version.
    budgets are unlimited.
 6. Rebuild the model input from the event log through `agent.Project`.
 7. Call the model with retries (Section 8). With `-stream`, use the adapter's
-   `CompleteStream` and emit display-only deltas; otherwise use `Complete`. Each
+   `CompleteStream` and emit display-only text and thinking deltas; otherwise
+   use `Complete` and emit any thinking once before the assistant text. Each
    failed transport attempt that will be retried appends `model_retry` with its
    attempt number, error class, HTTP status, and delay. The successful attempt
    appends exactly one `model_response`, including text, tool calls, finish
-   reason, usage, latency, attempt number, and `streamed`. Failed attempts do not
+   reason, usage, latency, attempt number, and `streamed`; thinking text is
+   never included. Failed attempts do not
    append `model_response`. A response over 1 MiB is `protocol_error` before any
    tool executes.
 8. If there are no tool calls, act on the normalized finish reason: `stop` (or

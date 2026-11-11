@@ -137,6 +137,16 @@ type responsesFunctionCallItem struct {
 	Arguments string `json:"arguments"`
 }
 
+type responsesSummaryPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type responsesReasoningItem struct {
+	Summary []responsesSummaryPart `json:"summary"`
+	Content []responsesSummaryPart `json:"content"`
+}
+
 type responsesOutputPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -146,6 +156,7 @@ type responsesStreamEvent struct {
 	Type     string             `json:"type"`
 	Response *responsesResponse `json:"response"`
 	Delta    string             `json:"delta"`
+	Text     string             `json:"text"`
 	Error    *responsesError    `json:"error"`
 	Code     string             `json:"code"`
 	Message  string             `json:"message"`
@@ -162,9 +173,10 @@ func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, 
 	return decodeResponsesResponse(body, a.transport.token)
 }
 
-// CompleteStream sends a streaming Responses request. Text deltas are
-// display-only; the terminal completed response is authoritative.
-func (a *OpenAIResponses) CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error) {
+// CompleteStream sends a streaming Responses request. Text and reasoning
+// summary deltas are display-only; the terminal completed response is
+// authoritative.
+func (a *OpenAIResponses) CompleteStream(ctx context.Context, req Request, stream StreamHandler) (Response, error) {
 	payload := a.payload(req)
 	payload.Stream = true
 	resp, err := a.transport.postStream(ctx, payload)
@@ -181,7 +193,7 @@ func (a *OpenAIResponses) CompleteStream(ctx context.Context, req Request, emit 
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	return consumeResponsesStream(resp.Body, emit, a.transport.token)
+	return consumeResponsesStream(resp.Body, stream, a.transport.token)
 }
 
 func (a *OpenAIResponses) payload(req Request) responsesRequest {
@@ -251,11 +263,12 @@ func decodeResponsesResponse(body []byte, token string) (Response, error) {
 	return decoded.canonical(token)
 }
 
-func consumeResponsesStream(r io.Reader, emit func(string) error, token string) (Response, error) {
+func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Response, error) {
 	dec := newSSEDecoder(r)
 	var (
 		emittedText  strings.Builder
 		emittedBytes int
+		reasoning    strings.Builder
 	)
 	fail := func(err error) (Response, error) {
 		if emittedBytes > 0 {
@@ -292,7 +305,24 @@ func consumeResponsesStream(r io.Reader, emit func(string) error, token string) 
 			}
 			emittedText.WriteString(decoded.Delta)
 			emittedBytes += len(decoded.Delta)
-			if err := emit(decoded.Delta); err != nil {
+			if err := stream.text(decoded.Delta); err != nil {
+				return Response{}, err
+			}
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			// Thinking summaries and raw reasoning text are display-only.
+			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
+				return fail(&ProtocolError{Err: fmt.Errorf("decode reasoning delta: %w", err)})
+			}
+			delta := decoded.Delta
+			if delta == "" {
+				continue
+			}
+			delta = acceptReasoning(reasoning.Len(), delta)
+			if delta == "" {
+				continue
+			}
+			reasoning.WriteString(delta)
+			if err := stream.reasoning(delta); err != nil {
 				return Response{}, err
 			}
 		case "response.function_call_arguments.delta":
@@ -314,6 +344,11 @@ func consumeResponsesStream(r io.Reader, emit func(string) error, token string) 
 			resp, err := decoded.Response.canonical(token)
 			if err != nil {
 				return fail(err)
+			}
+			// The terminal item text is authoritative; the accumulated deltas
+			// are the fallback for servers that summarize without an item.
+			if resp.Reasoning == "" {
+				resp.Reasoning = reasoning.String()
 			}
 			if responseContentBytes(resp) > MaxCanonicalResponse {
 				return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
@@ -352,8 +387,9 @@ func consumeResponsesStream(r io.Reader, emit func(string) error, token string) 
 }
 
 // canonical maps Responses output items into a canonical response. Message
-// items contribute output_text in order; function_call items are correlated
-// by call_id, never by the provider item id.
+// items contribute output_text in order; reasoning items contribute thinking
+// text for display only; function_call items are correlated by call_id, never
+// by the provider item id.
 func (r responsesResponse) canonical(token string) (Response, error) {
 	var out Response
 	if r.Usage != nil {
@@ -363,7 +399,7 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 		}
 	}
 
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	seen := make(map[string]struct{})
 	for _, raw := range r.Output {
 		var kind responsesOutputKind
@@ -380,6 +416,17 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 				if part.Type == "output_text" {
 					text.WriteString(part.Text)
 				}
+			}
+		case "reasoning":
+			var item responsesReasoningItem
+			if err := jsonv2.Unmarshal([]byte(raw), &item); err != nil {
+				return Response{}, &ProtocolError{Err: fmt.Errorf("decode response reasoning item: %w", err)}
+			}
+			for _, part := range item.Summary {
+				appendReasoningPart(&reasoning, part)
+			}
+			for _, part := range item.Content {
+				appendReasoningPart(&reasoning, part)
 			}
 		case "function_call":
 			var item responsesFunctionCallItem
@@ -407,6 +454,7 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 		}
 	}
 	out.Text = text.String()
+	out.Reasoning = capReasoning(reasoning.String())
 
 	finish, err := r.finishReason(len(out.ToolCalls) > 0, token)
 	if err != nil {
@@ -414,6 +462,24 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 	}
 	out.FinishReason = finish
 	return out, nil
+}
+
+// appendReasoningPart adds one reasoning summary or content part under the
+// display cap. Non-text parts (for example encrypted content) are ignored.
+func appendReasoningPart(b *strings.Builder, part responsesSummaryPart) {
+	if part.Text == "" || (part.Type != "" && part.Type != "summary_text" && part.Type != "reasoning_text") {
+		return
+	}
+	separator := ""
+	if b.Len() > 0 {
+		separator = "\n\n"
+	}
+	text := acceptReasoning(b.Len()+len(separator), part.Text)
+	if text == "" {
+		return
+	}
+	b.WriteString(separator)
+	b.WriteString(text)
 }
 
 // finishReason normalizes the Responses status and incomplete reason. A failed

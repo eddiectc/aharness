@@ -621,8 +621,15 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 		res.Err = errors.New(message)
 		return r.finishTerminal(res, st, StopProtocolError, message)
 	}
-	// A streamed response that produced no deltas is displayed once here,
-	// before the canonical ResponseCompleted event.
+	// A streamed response that produced no text deltas is displayed once here,
+	// before the canonical ResponseCompleted event. Thinking text is displayed
+	// when the provider did not stream it (a buffered call or a provider that
+	// only reports a reasoning summary on the completed response).
+	if comp.resp.Reasoning != "" && !comp.reasoningEmitted {
+		if err := r.emit(ReasoningDelta{Text: comp.resp.Reasoning}); err != nil {
+			return r.failDisplay(res, st, err, "failed to display the model reasoning")
+		}
+	}
 	if r.cfg.Stream && !comp.emitted && comp.resp.Text != "" {
 		if err := r.emit(TextDelta{Text: comp.resp.Text}); err != nil {
 			return r.failDisplay(res, st, err, "failed to display the model response")
@@ -640,6 +647,7 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 	if err := r.emit(ResponseCompleted{
 		Turn:         turn,
 		Text:         cleanText(comp.resp.Text),
+		Reasoning:    cleanText(comp.resp.Reasoning),
 		ToolCalls:    comp.resp.ToolCalls,
 		FinishReason: comp.resp.FinishReason,
 		Usage:        comp.resp.Usage,

@@ -256,9 +256,10 @@ func TestRunnerResumeOutputIsRunLocal(t *testing.T) {
 // fakeStreamCompleter implements Completer and StreamCompleter with a script
 // of streaming attempts.
 type streamStep struct {
-	deltas []string
-	resp   model.Response
-	err    error
+	deltas    []string
+	reasoning []string
+	resp      model.Response
+	err       error
 }
 
 type fakeStreamCompleter struct {
@@ -272,7 +273,7 @@ func (f *fakeStreamCompleter) Complete(context.Context, model.Request) (model.Re
 	return model.Response{}, errors.New("Complete must not be called")
 }
 
-func (f *fakeStreamCompleter) CompleteStream(ctx context.Context, req model.Request, emit func(string) error) (model.Response, error) {
+func (f *fakeStreamCompleter) CompleteStream(ctx context.Context, req model.Request, stream model.StreamHandler) (model.Response, error) {
 	f.requests = append(f.requests, req)
 	index := f.calls
 	f.calls++
@@ -281,9 +282,14 @@ func (f *fakeStreamCompleter) CompleteStream(ctx context.Context, req model.Requ
 	}
 	step := f.steps[index]
 	var emitted strings.Builder
+	for _, delta := range step.reasoning {
+		if err := stream.Reasoning(delta); err != nil {
+			return model.Response{}, err
+		}
+	}
 	for _, delta := range step.deltas {
 		emitted.WriteString(delta)
-		if err := emit(delta); err != nil {
+		if err := stream.Text(delta); err != nil {
 			return model.Response{}, err
 		}
 	}
@@ -462,6 +468,60 @@ func TestRunnerRetriesOnlyBeforeFirstDelta(t *testing.T) {
 			t.Fatalf("model_retry events = %d, want 0", got)
 		}
 	})
+}
+
+func TestRunnerNoRetryAfterReasoningOnlyOutput(t *testing.T) {
+	cfg := testConfig()
+	cfg.Stream = true
+	var reasoning strings.Builder
+	cfg.Display = func(ev DisplayEvent) error {
+		if delta, ok := ev.(ReasoningDelta); ok {
+			reasoning.WriteString(delta.Text)
+		}
+		return nil
+	}
+	// Thinking already reached the screen, so a retry would duplicate it even
+	// though no assistant text was emitted.
+	comp := &fakeStreamCompleter{noPartial: true, steps: []streamStep{{
+		reasoning: []string{"thinking"},
+		err:       &model.TransportError{Err: errors.New("connection reset")},
+	}}}
+	store, res, err := runTask(t, cfg, comp, &fakeToolset{})
+	if res.Status != StopProviderError {
+		t.Fatalf("status = %q, want provider_error", res.Status)
+	}
+	if err == nil {
+		t.Fatal("Run error = nil, want provider error")
+	}
+	if comp.calls != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry after thinking output)", comp.calls)
+	}
+	if reasoning.String() != "thinking" {
+		t.Fatalf("reasoning = %q", reasoning.String())
+	}
+	if got := len(eventsByType(store, session.TypeModelRetry)); got != 0 {
+		t.Fatalf("model_retry events = %d, want 0", got)
+	}
+}
+
+func TestRunnerRetriesWhenOnlyAnEmptyReasoningDeltaArrived(t *testing.T) {
+	cfg := testConfig()
+	cfg.Stream = true
+	comp := &fakeStreamCompleter{steps: []streamStep{
+		{reasoning: []string{""}, err: &model.HTTPError{StatusCode: 503, Status: "503 Service Unavailable"}},
+		{deltas: []string{"ok"}, resp: model.Response{Text: "ok", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}}},
+	}}
+	store := &fakeStore{}
+	runner := newRunner(cfg, comp, &fakeToolset{}, store)
+	startTestSession(t, runner)
+	runner.jitter = func(time.Duration) time.Duration { return 0 }
+	res, err := runner.Run(t.Context(), defaultRunOptions())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != StopCompleted || comp.calls != 2 {
+		t.Fatalf("result = %+v calls = %d", res, comp.calls)
+	}
 }
 
 func TestRunnerRejectsOversizedResponseBeforeTools(t *testing.T) {

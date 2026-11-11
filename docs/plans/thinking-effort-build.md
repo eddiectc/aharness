@@ -100,7 +100,9 @@
   The harness does not invent a token budget from an effort name.
 - A harness-wide `off`/`on` switch for models that expose no effort values.
 - Reasoning/thinking text display, reasoning summaries, or replay of reasoning
-  items across tool rounds.
+  items across tool rounds. *(Superseded for display only: the shipped TUI shows
+  a display-only thinking block. Reasoning replay and echo back to the provider
+  remain out of scope; see §9.)*
 - Automatic effort selection, model-based selection, cost-based selection, or
   a default effort different from the provider default.
 - Native Anthropic Messages or Google generate-content adapters. Those models
@@ -560,6 +562,7 @@ Deviations and clarifications against the contract above:
 | Clear sentinel | `default` is converted to the empty value immediately after the syntax check, so it never reaches catalog validation, an adapter request, or the session log. |
 | TUI and `-ui-json` | `F2`, the details row, model-picker effort metadata, the model-switch clearing notice, the `f2` key, and the optional `thinking_effort` fields follow §3.6. The header line additionally shows `effort <value>` (or `effort default`) for the next run, so the effective value stays visible without opening the details overlay. No new event type; protocol version stays 1. |
 | Live catalog | Values remain catalog-driven. On 2026-11-11 the catalog advertised different lists per model (for example `low,high,max` for `deepseek-v4.1-flash` and other sets including `none`), so the shipped docs do not hardcode a list. Catalog drift changes `-list-models` and picker output without a harness release; the mechanism does not depend on any observed entry. |
+| Thinking display | Added after this plan shipped, and it supersedes the §1.3 exclusion of reasoning text display. The adapters now map provider thinking into the display-only `model.Response.Reasoning` field and the TUI renders a separate `thinking` block. The exclusion of reasoning *replay* still holds: thinking is never logged, projected, or echoed back to the provider. See [tui.md § Thinking](../tui.md#thinking) and [architecture.md §2.2](../architecture.md#22-canonical-model-and-dialect-adapters). |
 
 Verification:
 

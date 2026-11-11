@@ -37,7 +37,14 @@ type completion struct {
 	attempt  int
 	latency  time.Duration
 	streamed bool
-	emitted  bool
+	// emitted reports that assistant text reached the display.
+	emitted bool
+	// reasoningEmitted reports that thinking text reached the display, so the
+	// completed reasoning is not reprinted.
+	reasoningEmitted bool
+	// displayed reports that any model display output (text or thinking)
+	// reached the display; a retry after that point would duplicate it.
+	displayed bool
 }
 
 // callModel calls the completer with the transport retry budget. The request
@@ -53,9 +60,12 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 		if err := r.emit(ModelStarted{Turn: turn, Attempt: attempt}); err != nil {
 			return completion{}, err
 		}
-		resp, latency, emitted, err := r.completeOnce(ctx, req)
+		resp, latency, emitted, reasoningEmitted, displayed, err := r.completeOnce(ctx, req)
 		if err == nil {
-			return completion{resp: resp, attempt: attempt, latency: latency, streamed: resp.Streamed, emitted: emitted}, nil
+			return completion{
+				resp: resp, attempt: attempt, latency: latency, streamed: resp.Streamed,
+				emitted: emitted, reasoningEmitted: reasoningEmitted, displayed: displayed,
+			}, nil
 		}
 		// A canceled operation is never retried. The caller classifies it as
 		// an interactive interrupt, a session timeout, or a run signal.
@@ -63,9 +73,9 @@ func (r *Runner) callModel(ctx context.Context, req model.Request, turn, estimat
 			return completion{}, err
 		}
 		// Display output began; a retry would duplicate stdout. Adapters also
-		// wrap this in PartialError, but the emitted flag is the loop's own
+		// wrap this in PartialError, but the displayed flag is the loop's own
 		// guard.
-		if emitted {
+		if displayed {
 			return completion{}, err
 		}
 		if errors.Is(err, model.ErrContextOverflow) {
@@ -119,16 +129,22 @@ func (r *Runner) callModelOnce(ctx context.Context, req model.Request, turn, est
 	if err := r.emit(ModelStarted{Turn: turn, Attempt: 1}); err != nil {
 		return completion{}, err
 	}
-	resp, latency, emitted, err := r.completeOnce(ctx, req)
+	resp, latency, emitted, reasoningEmitted, displayed, err := r.completeOnce(ctx, req)
 	if err != nil {
 		return completion{}, err
 	}
-	return completion{resp: resp, attempt: 1, latency: latency, streamed: resp.Streamed, emitted: emitted}, nil
+	return completion{
+		resp: resp, attempt: 1, latency: latency, streamed: resp.Streamed,
+		emitted: emitted, reasoningEmitted: reasoningEmitted, displayed: displayed,
+	}, nil
 }
 
 // completeOnce performs one attempt with the per-call timeout. It prefers the
 // streaming adapter when -stream is set and falls back to Complete otherwise.
-func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Response, time.Duration, bool, error) {
+// It reports whether assistant text and thinking text were emitted, and
+// whether any display output was emitted at all, because a retry may duplicate
+// either.
+func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Response, time.Duration, bool, bool, bool, error) {
 	callCtx := ctx
 	var cancel context.CancelFunc
 	if r.cfg.ModelTimeout > 0 {
@@ -139,18 +155,31 @@ func (r *Runner) completeOnce(ctx context.Context, req model.Request) (model.Res
 	if r.cfg.Stream {
 		if streamer, ok := r.model.(model.StreamCompleter); ok {
 			emitted := false
-			resp, err := streamer.CompleteStream(callCtx, req, func(delta string) error {
-				if delta == "" {
-					return nil
-				}
-				emitted = true
-				return r.emit(TextDelta{Text: delta})
+			reasoningEmitted := false
+			displayed := false
+			resp, err := streamer.CompleteStream(callCtx, req, model.StreamHandler{
+				Text: func(delta string) error {
+					if delta == "" {
+						return nil
+					}
+					emitted = true
+					displayed = true
+					return r.emit(TextDelta{Text: delta})
+				},
+				Reasoning: func(delta string) error {
+					if delta == "" {
+						return nil
+					}
+					reasoningEmitted = true
+					displayed = true
+					return r.emit(ReasoningDelta{Text: delta})
+				},
 			})
-			return resp, time.Since(start), emitted, err
+			return resp, time.Since(start), emitted, reasoningEmitted, displayed, err
 		}
 	}
 	resp, err := r.model.Complete(callCtx, req)
-	return resp, time.Since(start), false, err
+	return resp, time.Since(start), false, false, false, err
 }
 
 func retryableError(err error) bool {

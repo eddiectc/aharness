@@ -177,6 +177,36 @@ func writeSSE(t *testing.T, w http.ResponseWriter, event, data string) {
 	w.(http.Flusher).Flush()
 }
 
+func TestBinaryBatchStdoutExcludesThinking(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"reasoning_content":"SECRET-THOUGHT"}}]}`)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"content":"the answer"}}]}`)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+		writeSSE(t, w, "", `{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}`)
+		writeSSE(t, w, "", `[DONE]`)
+	})
+	stateDir := t.TempDir()
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, nil,
+		"-batch", "-stream", "-task", "answer the question", "-model", "deepseek-v4.1-flash",
+		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "the answer") {
+		t.Fatalf("stdout lacks the assistant text: %q", stdout)
+	}
+	if strings.Contains(stdout, "SECRET-THOUGHT") || strings.Contains(stderr, "SECRET-THOUGHT") {
+		t.Fatalf("thinking text leaked into batch output:\nstdout:%q\nstderr:%q", stdout, stderr)
+	}
+	files := sessionFiles(t, stateDir)
+	if data := string(mustRead(t, files[0])); strings.Contains(data, "SECRET-THOUGHT") {
+		t.Fatalf("thinking text leaked into the session log:\n%s", data)
+	}
+}
+
 func TestBinaryStreamsBothDialects(t *testing.T) {
 	bin := buildHarness(t)
 	tests := []struct {

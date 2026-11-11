@@ -75,6 +75,7 @@ when that flag is set and against total usage, and they add no separate cap.
 | SSE event | 4 MiB | A terminal `response.completed` event wraps the full response. |
 | Assembled canonical response | 1 MiB | Text plus tool calls; larger is `protocol_error` before any tool executes. |
 | Total stream | 8 MiB | Bounds deltas, keepalives, and the terminal event. |
+| Thinking text | 64 KiB per response | Display-only reasoning retained for the TUI; larger text is dropped from the display and never logged. |
 | Partial text on interrupt or failed stream | 64 KiB | Diagnostics only; never projected. |
 | Model request debug event | 1 MiB | Only when `AHARNESS_LOG_REQUESTS=1`; over-cap is replaced by a truncation marker. |
 | Error event message | 2 KiB | Fatal error class and message; no secrets. |
@@ -185,6 +186,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Transcript items | 20,000 | Oldest UI items are dropped with an "older history omitted" marker. |
 | Transcript text | 16 MiB | Oldest UI items are dropped; the log is unchanged. |
 | Assistant text per item | 64 KiB displayed | Truncation marker; the full response stays in the log. |
+| Thinking text per item | 64 KiB displayed | Display-only; truncation marker. Never logged, so a resumed session shows no prior thinking. |
 | Markdown source per item | 64 KiB | Longer is rendered as plain text with a marker. |
 | Markdown blocks per item | 4,000 | Excess input falls back to plain text with a notice. |
 | Markdown nesting | 16 levels | Deeper input falls back to plain text with a notice. |

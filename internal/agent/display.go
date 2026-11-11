@@ -47,10 +47,18 @@ type TextDelta struct {
 	Text string
 }
 
+// ReasoningDelta carries display-only model thinking text (provider
+// reasoning). It is never logged and is not replayed on resume; the TUI shows
+// it as a separate thinking block. ResponseCompleted carries the final text.
+type ReasoningDelta struct {
+	Text string
+}
+
 // ResponseCompleted is emitted after model_response is appended.
 type ResponseCompleted struct {
 	Turn         int
 	Text         string
+	Reasoning    string
 	ToolCalls    []model.ToolCall
 	FinishReason model.FinishReason
 	Usage        model.Usage
@@ -106,6 +114,7 @@ type RunFinished struct {
 func (RunStarted) isDisplayEvent()        {}
 func (ModelStarted) isDisplayEvent()      {}
 func (TextDelta) isDisplayEvent()         {}
+func (ReasoningDelta) isDisplayEvent()    {}
 func (ResponseCompleted) isDisplayEvent() {}
 func (ToolStarted) isDisplayEvent()       {}
 func (ToolCompleted) isDisplayEvent()     {}
@@ -121,8 +130,12 @@ func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
 	case TextDelta:
 		ev.Text = displaySafe(ev.Text)
 		return ev
+	case ReasoningDelta:
+		ev.Text = displaySafe(ev.Text)
+		return ev
 	case ResponseCompleted:
 		ev.Text = displaySafe(ev.Text)
+		ev.Reasoning = displaySafe(ev.Reasoning)
 		return ev
 	case ToolCompleted:
 		ev.Output = displaySafe(ev.Output)

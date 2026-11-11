@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 )
 
 // Role is a canonical message role.
@@ -120,11 +122,16 @@ func validateUsage(u Usage) error {
 // Response is one canonical model response. Streamed reports that the
 // response was assembled from an SSE stream; it is display/provenance metadata,
 // not transcript content. The completed response remains authoritative.
+//
+// Reasoning is provider thinking text. It is display-only: it is never logged,
+// projected, replayed to the provider, or counted against the canonical
+// response cap, and it may be absent when a provider does not expose thinking.
 type Response struct {
 	Text         string       `json:"text,omitempty"`
 	ToolCalls    []ToolCall   `json:"tool_calls,omitempty"`
 	FinishReason FinishReason `json:"finish_reason"`
 	Usage        Usage        `json:"usage"`
+	Reasoning    string       `json:"-"`
 	Streamed     bool         `json:"-"`
 }
 
@@ -134,16 +141,75 @@ type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
 
-// StreamCompleter is the optional streaming contract. emit receives
-// display-only assistant-text deltas; the returned Response is authoritative
-// and is the only value recorded in the transcript.
+// StreamHandler receives display-only deltas from one streaming response.
+// Either callback may be nil, which discards that kind. Text is assistant text;
+// Reasoning is provider thinking text. Neither is durable: the returned
+// Response is authoritative and is the only value recorded in the transcript.
+type StreamHandler struct {
+	Text      func(string) error
+	Reasoning func(string) error
+}
+
+// text and reasoning deliver one delta to the optional callbacks.
+func (h StreamHandler) text(delta string) error {
+	if h.Text == nil {
+		return nil
+	}
+	return h.Text(delta)
+}
+
+func (h StreamHandler) reasoning(delta string) error {
+	if h.Reasoning == nil {
+		return nil
+	}
+	return h.Reasoning(delta)
+}
+
+// StreamCompleter is the optional streaming contract. The returned Response is
+// authoritative and is the only value recorded in the transcript.
 type StreamCompleter interface {
-	CompleteStream(ctx context.Context, req Request, emit func(string) error) (Response, error)
+	CompleteStream(ctx context.Context, req Request, stream StreamHandler) (Response, error)
 }
 
 // MaxCanonicalResponse is the largest assembled canonical response accepted
 // before any tool executes.
 const MaxCanonicalResponse = 1 << 20
+
+// MaxReasoningText is the largest thinking text retained for display. The
+// adapters drop reasoning deltas beyond it so the streamed display and the
+// completed response agree.
+const MaxReasoningText = 64 << 10
+
+// acceptReasoning returns the prefix of delta that fits the reasoning budget
+// after used bytes, at a rune boundary. An empty result means the budget is
+// exhausted.
+func acceptReasoning(used int, delta string) string {
+	room := MaxReasoningText - used
+	if room <= 0 {
+		return ""
+	}
+	if len(delta) <= room {
+		return delta
+	}
+	cut := room
+	for cut > 0 && !utf8.RuneStart(delta[cut]) {
+		cut--
+	}
+	return delta[:cut]
+}
+
+// capReasoning bounds a complete reasoning string for display.
+func capReasoning(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if len(s) <= MaxReasoningText {
+		return s
+	}
+	cut := MaxReasoningText
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 // responseContentBytes counts the response fields that must be replayed
 // exactly: text, tool-call IDs, names, and raw arguments.

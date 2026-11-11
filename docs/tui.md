@@ -31,6 +31,8 @@ TUI and `-ui-json`:
 
 - create a new session eagerly and allow an omitted task;
 - always stream assistant text; `-stream=false` is a config error;
+- show model thinking as a separate, display-only `thinking` transcript block
+  under the run it belongs to (see [Thinking](#thinking));
 - auto-submit `-task`/`-task-file` after the first frame;
 - allow new/resume/fork, with `-fork` optionally having no task;
 - never print final assistant text to stdout;
@@ -152,6 +154,36 @@ The details overlay (`Ctrl-X`) shows `thinking effort: <value>` or
 next-run value and clears an unsupported one with a notice, as described under
 [model picker](#model-picker).
 
+## Thinking
+
+Model thinking (provider reasoning) is shown in the transcript as a separate
+`thinking` block, indented under the assistant text it precedes. It is
+display-only and never durable: it is not written to the session log, not
+replayed on resume or fork, not counted against the response cap, and never
+echoed back to the provider. A resumed or forked session therefore shows only
+new thinking.
+
+- While the model is still thinking the block header is `thinking…`; it becomes
+  `thinking` when assistant text arrives or the response completes.
+- DeepSeek-compatible Chat endpoints stream `reasoning_content`;
+  OpenAI-compatible endpoints may use `reasoning`. The Responses adapter streams
+  `response.reasoning_summary_text.delta` and `response.reasoning_text.delta`,
+  and uses the terminal reasoning item's summary/content as authoritative.
+- A buffered response, or a provider that only reports reasoning on its
+  completed response, is displayed once before the assistant text.
+- Thinking is capped at 64 KiB per response. Long lines wrap; the block is
+  preformatted and never parsed as markdown.
+- Models and providers that expose no thinking produce no block; nothing
+  changes for them. `Ctrl-R` rich/raw applies only to assistant markdown, so a
+  thinking block renders the same in both modes.
+- The block is not part of `-ui-json` semantic events; it appears in `frame`
+  lines and snapshots like any other transcript text, so the protocol version
+  stays 1. A client that waits for a frame during streaming does not see
+  thinking deltas until it requests `frame`.
+- Batch mode never prints thinking: `-batch`/`-stream` stdout remains assistant
+  text only, so the one-shot stdout contract is unchanged. Thinking is also not
+  part of `-ui-json` events.
+
 ## Status line and details
 
 The header line shows `effort <value>` for the next run, or `effort default`
@@ -233,6 +265,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Task/steering message | 64 KiB | Longer is rejected with a notice; the run continues. |
 | Transcript items / text | 20,000 / 16 MiB | Oldest UI items are dropped with an "older history omitted" marker; the log is unchanged. |
 | Assistant text per item | 64 KiB | Truncation marker; the canonical response remains in the log. |
+| Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. |
 | Markdown source / blocks / nesting | 64 KiB / 4,000 / 16 | Over-cap input falls back to plain text with a notice. |
 | Table columns / rows | 12 / 500 | Column width cap 40 cells; the overlay scrolls horizontally. |
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
@@ -266,7 +299,8 @@ reaches Glamour, Bubbles, or a transcript cell: invalid UTF-8 is repaired,
 tabs expand to four spaces, C0/C1 controls and ESC become visible glyphs,
 bidi overrides/isolates are stripped, and OSC/CSI/DCS text cannot become a
 control. Raw HTML is never interpreted. Glamour's OSC 8 hyperlinks are
-stripped. Tool output is preformatted and never parsed as markdown.
+stripped. Tool output is preformatted and never parsed as markdown; the same
+holds for thinking text.
 
 Images are display-only workspace files resolved with `os.Root`,
 `filepath.IsLocal`, no `.git` or symlink components, and no network fetch.

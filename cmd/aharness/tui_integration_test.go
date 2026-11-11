@@ -139,6 +139,121 @@ func sseFinal(t *testing.T, w http.ResponseWriter, text string) {
 	writeSSE(t, w, "", `[DONE]`)
 }
 
+// TestBinaryUIJSONShowsThinking proves the model's reasoning reaches the TUI
+// transcript while staying out of the durable log.
+func TestBinaryUIJSONShowsThinking(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"reasoning_content":"Let me check the failing test "}}]}`)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"reasoning_content":"before editing."}}]}`)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"content":"all done"}}]}`)
+		writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+		writeSSE(t, w, "", `{"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4}}`)
+		writeSSE(t, w, "", `[DONE]`)
+	})
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"text","text":"show your thinking"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+		"-ui-json", "-ui-size", "90x30", "-model", "deepseek-v4.1-flash",
+		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	var finalText string
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var head struct {
+			Type  string   `json:"type"`
+			Lines []string `json:"lines"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &head); err != nil {
+			t.Fatalf("decode protocol line: %v\n%s", err, line)
+		}
+		if head.Type == "frame" {
+			finalText = strings.Join(head.Lines, "\n")
+		}
+	}
+	if !strings.Contains(finalText, "thinking") {
+		t.Fatalf("final frame has no thinking block:\n%s", finalText)
+	}
+	if !strings.Contains(finalText, "Let me check the failing test before editing.") {
+		t.Fatalf("final frame lacks the streamed reasoning:\n%s", finalText)
+	}
+	if !strings.Contains(finalText, "all done") {
+		t.Fatalf("final frame lacks the assistant answer:\n%s", finalText)
+	}
+
+	files := sessionFiles(t, stateDir)
+	if len(files) != 1 {
+		t.Fatalf("session files = %v", files)
+	}
+	if data := string(mustRead(t, files[0])); strings.Contains(data, "Let me check the failing test") {
+		t.Fatalf("thinking text leaked into the session log:\n%s", data)
+	}
+}
+
+// TestBinaryUIJSONShowsResponsesReasoning proves the Responses dialect's
+// reasoning summary reaches the transcript through the terminal event.
+func TestBinaryUIJSONShowsResponsesReasoning(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		writeSSE(t, w, "response.output_text.delta", `{"type":"response.output_text.delta","delta":"all done"}`)
+		writeSSE(t, w, "response.completed", `{"type":"response.completed","response":{"status":"completed","output":[`+
+			`{"type":"reasoning","summary":[{"type":"summary_text","text":"Checked the projection first."}]},`+
+			`{"type":"message","content":[{"type":"output_text","text":"all done"}]}],`+
+			`"usage":{"input_tokens":9,"output_tokens":4}}}`)
+	})
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"text","text":"show your reasoning"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+		"-ui-json", "-ui-size", "90x30", "-model", "crouton-alpha-free",
+		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	var finalText string
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var head struct {
+			Type  string   `json:"type"`
+			Lines []string `json:"lines"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &head); err != nil {
+			t.Fatalf("decode protocol line: %v\n%s", err, line)
+		}
+		if head.Type == "frame" {
+			finalText = strings.Join(head.Lines, "\n")
+		}
+	}
+	if !strings.Contains(finalText, "thinking") || !strings.Contains(finalText, "Checked the projection first.") {
+		t.Fatalf("final frame lacks the Responses reasoning summary:\n%s", finalText)
+	}
+	files := sessionFiles(t, stateDir)
+	if data := string(mustRead(t, files[0])); strings.Contains(data, "Checked the projection first.") {
+		t.Fatalf("reasoning summary leaked into the session log:\n%s", data)
+	}
+}
+
 func TestBinaryUIJSONSeededTask(t *testing.T) {
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {

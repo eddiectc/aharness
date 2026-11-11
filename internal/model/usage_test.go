@@ -142,7 +142,7 @@ func TestChatStreamUsageDetails(t *testing.T) {
 	body := "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20," +
 		"\"prompt_tokens_details\":{\"cached_tokens\":40,\"cache_write_tokens\":10}," +
 		"\"completion_tokens_details\":{\"reasoning_tokens\":5}}}\n\ndata: [DONE]\n\n"
-	resp, err := consumeChatStream(bytes.NewReader([]byte(body)), func(string) error { return nil })
+	resp, err := consumeChatStream(bytes.NewReader([]byte(body)), StreamHandler{})
 	if err != nil {
 		t.Fatalf("consumeChatStream() error = %v", err)
 	}
@@ -159,7 +159,7 @@ func TestChatStreamUsageDetails(t *testing.T) {
 func TestChatStreamUsageSubsetValidation(t *testing.T) {
 	body := "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2," +
 		"\"prompt_tokens_details\":{\"cached_tokens\":9}}}\n\ndata: [DONE]\n\n"
-	if _, err := consumeChatStream(bytes.NewReader([]byte(body)), func(string) error { return nil }); err == nil {
+	if _, err := consumeChatStream(bytes.NewReader([]byte(body)), StreamHandler{}); err == nil {
 		t.Fatal("consumeChatStream() error = nil, want protocol error")
 	}
 }
@@ -215,7 +215,7 @@ func TestResponsesStreamUsageDetails(t *testing.T) {
 		"\"usage\":{\"input_tokens\":100,\"output_tokens\":20," +
 		"\"input_tokens_details\":{\"cached_tokens\":40,\"cache_write_tokens\":10}," +
 		"\"output_tokens_details\":{\"reasoning_tokens\":5}}}}\n\n"
-	resp, err := consumeResponsesStream(bytes.NewReader([]byte(body)), func(string) error { return nil }, "token")
+	resp, err := consumeResponsesStream(bytes.NewReader([]byte(body)), StreamHandler{}, "token")
 	if err != nil {
 		t.Fatalf("consumeResponsesStream() error = %v", err)
 	}
@@ -231,7 +231,7 @@ func TestResponsesStreamUsageDetails(t *testing.T) {
 
 func TestResponsesStreamPresentEmptyUsage(t *testing.T) {
 	body := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{}}}\n\n"
-	resp, err := consumeResponsesStream(bytes.NewReader([]byte(body)), func(string) error { return nil }, "token")
+	resp, err := consumeResponsesStream(bytes.NewReader([]byte(body)), StreamHandler{}, "token")
 	if err != nil {
 		t.Fatalf("consumeResponsesStream() error = %v", err)
 	}

@@ -29,7 +29,7 @@ func FuzzChatStream(f *testing.F) {
 	f.Add([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":9}}}\n\ndata: [DONE]\n\n"))
 	f.Add([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"completion_tokens_details\":{\"reasoning_tokens\":9}}}\n\ndata: [DONE]\n\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = consumeChatStream(bytes.NewReader(data), func(string) error { return nil })
+		_, _ = consumeChatStream(bytes.NewReader(data), StreamHandler{})
 	})
 }
 
@@ -40,6 +40,6 @@ func FuzzResponsesStream(f *testing.F) {
 	f.Add([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":9}}}}\n\n"))
 	f.Add([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = consumeResponsesStream(bytes.NewReader(data), func(string) error { return nil }, "token")
+		_, _ = consumeResponsesStream(bytes.NewReader(data), StreamHandler{}, "token")
 	})
 }

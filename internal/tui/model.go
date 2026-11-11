@@ -21,6 +21,7 @@ const (
 	maxTranscriptItems    = 20_000
 	maxTranscriptText     = 16 << 20
 	maxTranscriptItemText = 64 << 10
+	maxThinkingItemText   = 64 << 10
 	maxInputHistory       = 100
 	escapeTimeout         = 50 * time.Millisecond
 )
@@ -31,13 +32,15 @@ const (
 	itemRun       itemKind = "run"
 	itemUser      itemKind = "user"
 	itemAssistant itemKind = "assistant"
+	itemThinking  itemKind = "thinking"
 	itemTool      itemKind = "tool"
 	itemNotice    itemKind = "notice"
 	itemImage     itemKind = "image"
 )
 
 // transcriptItem is one display-only transcript entry. Assistant text is
-// markdown source; rendered caches are keyed by width and rich/raw mode.
+// markdown source; thinking text is preformatted provider reasoning. Rendered
+// caches are keyed by width and rich/raw mode.
 type transcriptItem struct {
 	kind   itemKind
 	run    int
@@ -62,6 +65,9 @@ type transcriptItem struct {
 	// User item.
 	queued bool
 	acked  bool
+
+	// Thinking item: true while the model is still streaming.
+	thinking bool
 
 	// Tool item.
 	callID    string
@@ -106,6 +112,7 @@ type liveRun struct {
 	turn         int
 	started      time.Time
 	streamed     *transcriptItem
+	thinking     *transcriptItem
 	pending      map[string]*transcriptItem
 	ctrlArmed    bool
 	finished     bool
@@ -309,15 +316,54 @@ func (m *App) loadHistory(items []agent.HistoryItem) {
 func (m *App) addItem(it *transcriptItem) {
 	m.dirty = true
 	m.items = append(m.items, it)
-	m.textSize += len(it.text) + len(it.output) + len(it.errText) + len(it.args)
-	for (len(m.items) > maxTranscriptItems || m.textSize > maxTranscriptText) && len(m.items) > 1 {
-		dropped := m.items[0]
-		m.textSize -= len(dropped.text) + len(dropped.output) + len(dropped.errText) + len(dropped.args)
-		m.items = m.items[1:]
-		if !m.hasOmittedMarker() {
-			m.items = append([]*transcriptItem{{kind: itemNotice, text: "older history omitted by the display cap", noticeKind: agent.NoticeWarning}}, m.items...)
+	m.textSize += itemTextBytes(it)
+	m.trimItems()
+}
+
+// insertItemBefore inserts it immediately before target (or appends when target
+// is absent) and then applies the display caps.
+func (m *App) insertItemBefore(it, target *transcriptItem) {
+	if target == nil {
+		m.addItem(it)
+		return
+	}
+	for i, existing := range m.items {
+		if existing == target {
+			m.dirty = true
+			m.items = append(m.items, nil)
+			copy(m.items[i+1:], m.items[i:])
+			m.items[i] = it
+			m.textSize += itemTextBytes(it)
+			m.trimItems()
+			return
 		}
 	}
+	m.addItem(it)
+}
+
+// trimItems drops the oldest items until both display caps hold. It reserves
+// one slot for the omitted-history marker, which is prepended once after
+// trimming; the marker is never part of the drop candidate set, so the loop
+// always makes progress and the transcript stays within maxTranscriptItems.
+func (m *App) trimItems() {
+	if len(m.items) <= maxTranscriptItems && m.textSize <= maxTranscriptText {
+		return
+	}
+	for len(m.items) > 1 && (len(m.items) >= maxTranscriptItems || m.textSize > maxTranscriptText) {
+		m.textSize -= itemTextBytes(m.items[0])
+		m.items = m.items[1:]
+	}
+	if m.hasOmittedMarker() {
+		return
+	}
+	marker := &transcriptItem{kind: itemNotice, text: "older history omitted by the display cap", noticeKind: agent.NoticeWarning}
+	m.items = append([]*transcriptItem{marker}, m.items...)
+	m.textSize += itemTextBytes(marker)
+}
+
+// itemTextBytes is the capped display weight of one item.
+func itemTextBytes(it *transcriptItem) int {
+	return len(it.text) + len(it.output) + len(it.errText) + len(it.args)
 }
 
 func (m *App) hasOmittedMarker() bool {
@@ -330,6 +376,21 @@ func (m *App) appendNotice(kind agent.NoticeKind, text string) {
 
 func (m *App) appendAssistant(turn int, text string) *transcriptItem {
 	it := &transcriptItem{kind: itemAssistant, run: m.run.number, turn: turn, text: CapText(Sanitize(text), maxTranscriptItemText)}
+	m.addItem(it)
+	return it
+}
+
+// appendThinking adds one thinking block. Thinking is display-only and is
+// never reconstructed from the log, so a resumed or forked session shows only
+// new reasoning.
+func (m *App) appendThinking(turn int, text string) *transcriptItem {
+	it := &transcriptItem{
+		kind:     itemThinking,
+		run:      m.run.number,
+		turn:     turn,
+		text:     CapText(Sanitize(text), maxThinkingItemText),
+		thinking: true,
+	}
 	m.addItem(it)
 	return it
 }

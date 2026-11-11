@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"aharness/internal/agent"
 	"aharness/internal/model"
@@ -116,6 +118,238 @@ func updateApp(t *testing.T, app *App, msg tea.Msg) tea.Cmd {
 		t.Fatalf("Update returned a different model")
 	}
 	return cmd
+}
+
+func TestThinkingStreamsIntoTheTranscript(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "use thinking")
+
+	deliver(app, agent.ModelStarted{Turn: 1, Attempt: 1})
+	deliver(app, agent.ReasoningDelta{Text: "look at "})
+	deliver(app, agent.ReasoningDelta{Text: "the file"})
+	deliver(app, agent.TextDelta{Text: "done"})
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, Text: "done", Reasoning: "look at the file",
+		FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+	})
+
+	thinking := app.items[len(app.items)-2]
+	if thinking.kind != itemThinking {
+		t.Fatalf("item kinds = %v", itemKinds(app.items))
+	}
+	if thinking.text != "look at the file" {
+		t.Fatalf("thinking text = %q", thinking.text)
+	}
+	if thinking.thinking {
+		t.Fatal("settled thinking block is still marked streaming")
+	}
+	if app.run.thinking != nil {
+		t.Fatal("thinking pointer was not cleared on response completion")
+	}
+	rendered := strings.Join(app.transcriptLines(), "\n")
+	if !strings.Contains(rendered, "thinking") || !strings.Contains(rendered, "look at the file") {
+		t.Fatalf("transcript lacks the thinking block:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "assistant") || !strings.Contains(rendered, "done") {
+		t.Fatalf("transcript lacks the assistant text:\n%s", rendered)
+	}
+
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestThinkingShownForABufferedResponse(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "buffered")
+
+	// A provider that returned a completed response without reasoning deltas
+	// still shows its thinking, once, above the answer it explains.
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, Text: "answer", Reasoning: "one thought",
+		FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+	})
+	var blocks []*transcriptItem
+	var assistantIndex, thinkingIndex int
+	for i, item := range app.items {
+		switch item.kind {
+		case itemThinking:
+			blocks = append(blocks, item)
+			thinkingIndex = i
+		case itemAssistant:
+			assistantIndex = i
+		}
+	}
+	if len(blocks) != 1 || blocks[0].text != "one thought" || blocks[0].thinking {
+		t.Fatalf("thinking blocks = %+v", blocks)
+	}
+	if thinkingIndex > assistantIndex {
+		t.Fatalf("thinking item %d is below the assistant item %d", thinkingIndex, assistantIndex)
+	}
+
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestThinkingAbsentWhenTheProviderSendsNone(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "no thinking")
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, Text: "answer", FinishReason: model.FinishStop,
+		Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+	})
+	for _, item := range app.items {
+		if item.kind == itemThinking {
+			t.Fatalf("unexpected thinking block: %+v", item)
+		}
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestThinkingSettlesAcrossAnInterruptedAttempt(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "interrupt while thinking")
+
+	deliver(app, agent.ModelStarted{Turn: 1, Attempt: 1})
+	deliver(app, agent.ReasoningDelta{Text: "partial thought"})
+	if app.run.thinking == nil || !app.run.thinking.thinking {
+		t.Fatal("thinking block did not start streaming")
+	}
+	// The caller interrupts before any assistant text; the next attempt must
+	// not append into the stale block.
+	deliver(app, agent.ModelStarted{Turn: 1, Attempt: 1})
+	if app.run.thinking != nil {
+		t.Fatal("a new attempt kept the stale thinking pointer")
+	}
+	deliver(app, agent.ReasoningDelta{Text: "second thought"})
+	var blocks []*transcriptItem
+	for _, item := range app.items {
+		if item.kind == itemThinking {
+			blocks = append(blocks, item)
+		}
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("thinking blocks = %d, want one per attempt", len(blocks))
+	}
+	if blocks[0].text != "partial thought" || blocks[0].thinking {
+		t.Fatalf("stale block = %+v, want a settled first thought", blocks[0])
+	}
+	if blocks[1].text != "second thought" || !blocks[1].thinking {
+		t.Fatalf("current block = %+v, want the in-progress second thought", blocks[1])
+	}
+
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestThinkingItemsRespectTheTranscriptCap(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "many thoughts")
+	// Pushing past the item cap keeps the display bounded and keeps one
+	// omitted-history marker at the front.
+	for i := range maxTranscriptItems + 50 {
+		it := &transcriptItem{kind: itemThinking, run: 1, turn: 1, text: fmt.Sprintf("thought %d", i)}
+		app.addItem(it)
+	}
+	if len(app.items) > maxTranscriptItems {
+		t.Fatalf("items = %d, want at most %d", len(app.items), maxTranscriptItems)
+	}
+	if !app.hasOmittedMarker() {
+		t.Fatal("older history marker missing after the cap was hit")
+	}
+	markers := 0
+	for _, item := range app.items {
+		if item.kind == itemNotice && strings.Contains(item.text, "older history omitted") {
+			markers++
+		}
+	}
+	if markers != 1 {
+		t.Fatalf("omitted-history markers = %d, want 1", markers)
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestTranscriptTextCapDropsOldestItems(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "many large thoughts")
+	// Two oversized items exceed the text cap on their own; trimming must make
+	// progress and leave a bounded transcript instead of spinning.
+	big := strings.Repeat("x", maxTranscriptText/2+1)
+	app.addItem(&transcriptItem{kind: itemThinking, text: big})
+	app.addItem(&transcriptItem{kind: itemThinking, text: big})
+	if app.textSize > maxTranscriptText {
+		t.Fatalf("textSize = %d, want at most %d", app.textSize, maxTranscriptText)
+	}
+	if !app.hasOmittedMarker() {
+		t.Fatal("older history marker missing after the text cap was hit")
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+func TestThinkingIsSanitizedAndCapped(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "hostile thinking")
+	hostile := "a\x1b]52;c;x\x07b\u202e"
+	deliver(app, agent.ReasoningDelta{Text: hostile})
+	if len(app.items) == 0 {
+		t.Fatal("thinking block was not added")
+	}
+	item := app.items[len(app.items)-1]
+	if item.kind != itemThinking {
+		t.Fatalf("item kind = %q", item.kind)
+	}
+	if strings.ContainsRune(item.text, '\x1b') || strings.ContainsRune(item.text, '\x07') {
+		t.Fatalf("thinking text was not sanitized: %q", item.text)
+	}
+	thinkingLines := app.renderThinking(newTheme(true), item)
+	plain := ansi.Strip(strings.Join(thinkingLines, "\n"))
+	if strings.ContainsRune(plain, '\x1b') {
+		t.Fatalf("rendered thinking line contains a raw ESC: %q", plain)
+	}
+	// Control bytes became visible glyphs instead of terminal commands.
+	if !strings.Contains(plain, "␛]52;c;x␇b") {
+		t.Fatalf("control bytes were not rendered as glyphs: %q", plain)
+	}
+
+	// A settled block over the display cap is truncated with a marker.
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, Text: "answer", Reasoning: strings.Repeat("t", maxThinkingItemText+64),
+		FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 2},
+	})
+	item = app.items[len(app.items)-1]
+	if item.kind != itemThinking && app.items[len(app.items)-2].kind == itemThinking {
+		item = app.items[len(app.items)-2]
+	}
+	if !strings.Contains(item.text, "[truncated") {
+		t.Fatalf("over-cap thinking was not marked: %d bytes", len(item.text))
+	}
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
+// itemKinds lists the transcript item kinds for failure messages.
+func itemKinds(items []*transcriptItem) []itemKind {
+	kinds := make([]itemKind, len(items))
+	for i, item := range items {
+		kinds[i] = item.kind
+	}
+	return kinds
 }
 
 func TestRunLineRendersLegacyLimitStatuses(t *testing.T) {

@@ -789,11 +789,40 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 	case agent.ModelStarted:
 		m.run.state = StateRunning
 		m.run.turn = ev.Turn
+		// A retry or a new turn starts a fresh attempt: settle any thinking
+		// block left open by an interrupted call so later deltas cannot append
+		// to a stale block.
+		if m.run.thinking != nil {
+			m.run.thinking.thinking = false
+			m.run.thinking = nil
+		}
+	case agent.ReasoningDelta:
+		if ev.Text == "" {
+			return m.waitDisplayCmd()
+		}
+		m.run.state = StateStreaming
+		if m.run.thinking == nil {
+			m.run.thinking = m.appendThinking(m.run.turn, "")
+		}
+		m.run.thinking.text = CapText(m.run.thinking.text+Sanitize(ev.Text), maxThinkingItemText)
+		m.dirty = true
+		m.follow = true
+		if m.coalesceScheduled {
+			return m.waitDisplayCmd()
+		}
+		m.coalesceScheduled = true
+		return tea.Batch(m.waitDisplayCmd(), tea.Tick(coalesceDelay, func(time.Time) tea.Msg {
+			return coalesceMsg{}
+		}))
 	case agent.TextDelta:
 		if ev.Text == "" {
 			return m.waitDisplayCmd()
 		}
 		m.run.state = StateStreaming
+		// Assistant text means thinking is over; settle the block header.
+		if m.run.thinking != nil {
+			m.run.thinking.thinking = false
+		}
 		if m.run.streamed == nil {
 			m.run.streamed = m.appendAssistant(m.run.turn, "")
 		}
@@ -812,15 +841,36 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.run.state = StateRunning
 		m.dirty = true
 		text := CapText(Sanitize(ev.Text), maxTranscriptItemText)
-		if m.run.streamed == nil {
+		streamed := m.run.streamed
+		if streamed == nil {
 			if text != "" {
-				m.run.streamed = m.appendAssistant(ev.Turn, text)
+				streamed = m.appendAssistant(ev.Turn, text)
 			}
 		} else {
-			m.run.streamed.text = text
-			m.run.streamed.renderedSet = false
+			streamed.text = text
+			streamed.renderedSet = false
 		}
 		m.run.streamed = nil
+		// The completed reasoning is authoritative for the settled thinking
+		// block; a streamed block already holds the deltas. Reasoning that was
+		// never streamed is inserted above this response's assistant text so a
+		// thinking block always precedes the answer it explains.
+		if thinking := m.run.thinking; thinking != nil {
+			if reasoning := CapText(Sanitize(ev.Reasoning), maxThinkingItemText); reasoning != "" && reasoning != thinking.text {
+				thinking.text = reasoning
+				m.dirty = true
+			}
+			thinking.thinking = false
+			m.run.thinking = nil
+		} else if reasoning := CapText(Sanitize(ev.Reasoning), maxThinkingItemText); reasoning != "" {
+			it := &transcriptItem{
+				kind: itemThinking,
+				run:  m.run.number,
+				turn: ev.Turn,
+				text: reasoning,
+			}
+			m.insertItemBefore(it, streamed)
+		}
 		for _, call := range ev.ToolCalls {
 			it := &transcriptItem{
 				kind:    itemTool,
@@ -1001,6 +1051,10 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	m.steerCh = nil
 	m.run.pending = map[string]*transcriptItem{}
 	m.run.streamed = nil
+	if thinking := m.run.thinking; thinking != nil {
+		thinking.thinking = false
+		m.run.thinking = nil
+	}
 	m.run.ctrlArmed = false
 	alreadyFinished := m.run.finished
 	m.run.finished = true
@@ -1069,7 +1123,7 @@ func (m *App) removeItem(target *transcriptItem) {
 	}
 	for i, it := range m.items {
 		if it == target {
-			m.textSize -= len(it.text) + len(it.output) + len(it.errText) + len(it.args)
+			m.textSize -= itemTextBytes(it)
 			m.items = append(m.items[:i], m.items[i+1:]...)
 			return
 		}

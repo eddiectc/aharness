@@ -401,7 +401,7 @@ func TestOpenAIChatReasoningEffortBody(t *testing.T) {
 			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
 			req := Request{Model: "deepseek-v4.1-flash", ThinkingEffort: tc.effort}
 			if tc.streaming {
-				if _, err := adapter.CompleteStream(t.Context(), req, func(string) error { return nil }); err != nil {
+				if _, err := adapter.CompleteStream(t.Context(), req, StreamHandler{}); err != nil {
 					t.Fatalf("CompleteStream() error = %v", err)
 				}
 			} else if _, err := adapter.Complete(t.Context(), req); err != nil {
@@ -453,7 +453,7 @@ func TestOpenAIResponsesReasoningEffortBody(t *testing.T) {
 			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
 			req := Request{Model: "crouton-alpha-free", ThinkingEffort: tc.effort}
 			if tc.streaming {
-				if _, err := adapter.CompleteStream(t.Context(), req, func(string) error { return nil }); err != nil {
+				if _, err := adapter.CompleteStream(t.Context(), req, StreamHandler{}); err != nil {
 					t.Fatalf("CompleteStream() error = %v", err)
 				}
 			} else if _, err := adapter.Complete(t.Context(), req); err != nil {
