@@ -4,10 +4,10 @@
 - **Status:** normative for v1 and the shipped TUI structure and runtime
   contracts
 - **Related:** [Go coding standard](coding-standard.md),
-  [bare-minimum harness research](agent-harness-minimum.md),
-  [v1 build plan](v1-build.md), [TUI build plan](tui-build.md),
+  [bare-minimum harness research](research/agent-harness-minimum.md),
+  [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md),
   [shipped TUI](tui.md), [slash commands](commands.md),
-  [thinking effort build plan](thinking-effort-build.md)
+  [thinking effort build plan](plans/thinking-effort-build.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This document
@@ -126,7 +126,7 @@ adapters at another OpenAI-compatible server. The CLI resolves the base URL from
 an explicit `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL`, then the
 catalog entry; the flag also supports integration tests and local endpoints.
 This is the resolution of
-[v0-build.md §4.3 item 4](v0-build.md#43-prerequisites-and-resolutions).
+[v0-build.md §4.3 item 4](plans/v0-build.md#43-prerequisites-and-resolutions).
 Production runs use the catalog URL.
 
 Both adapters send the full projected input on every call and keep no
@@ -134,7 +134,7 @@ server-side conversation state. The Responses adapter sets `store: false` and
 never uses `previous_response_id`. If a future Responses model requires
 reasoning items or encrypted content across tool rounds, that continuation is
 adapter-owned; the v0 Responses smoke did not require one
-([v0-build.md §4.3](v0-build.md#43-prerequisites-and-resolutions)). The
+([v0-build.md §4.3](plans/v0-build.md#43-prerequisites-and-resolutions)). The
 canonical model never carries raw provider shapes.
 
 ### 2.2 Canonical model and dialect adapters
@@ -392,7 +392,7 @@ boundary justifies it; do not add `pkg/`, `util`, `common`, or `types`.
 Dependencies stay deliberately small: the Go standard library by default. The
 TUI is the one approved framework-scale exception (Bubble Tea v2, Bubbles v2,
 Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt`); its rationale and binary
-impact are in the coding standard §3 and the [TUI plan](tui-build.md#28-package-layout-and-wiring).
+impact are in the coding standard §3 and the [TUI plan](plans/tui-build.md#28-package-layout-and-wiring).
 Typed structs and explicit checks validate tool arguments; a JSON Schema
 validator is not needed. The provider adapters use `net/http` with the OpenAI
 Chat Completions and Responses dialects; no provider SDK is used (Section 2.1).

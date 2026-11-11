@@ -6,22 +6,21 @@
   checks pass.
 - **Source:** [v0 build plan](v0-build.md); v0 is complete, including both
   dialect smoke runs.
-- **Research:** [Bare-Minimum Agent Harness](agent-harness-minimum.md). v1
+- **Research:** [Bare-Minimum Agent Harness](../research/agent-harness-minimum.md). v1
   follows its Tier 2 ordering for streaming/interrupt and the replay/fork part
   of session continuity. The Tier 1 sandbox/approval boundary remains external;
   workspace snapshots, hooks, metrics/evals, and Tier 3 remain out.
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [repository architecture](architecture.md) currently
-  describes the shipped v0 behavior; it is updated during v1 milestones as each
-  contract lands. Until then, this document is normative for the v1 scope and
-  contract deltas in §2; on Go practice, the
-  [coding standard](coding-standard.md) still wins.
-- **Testing:** the [repository testing strategy](testing-strategy.md) currently
-  describes the shipped v0 behavior; v1 updates it alongside §4 here as
-  milestones land.
-- **Limits:** [caps, limits, and timeouts](limits.md), including the v1 planned
-  values.
-- **Definition of done:** §1.4.
+- **Architecture:** the shipped v1 contracts are in the
+  [repository architecture](../architecture.md) and
+  [testing strategy](../testing-strategy.md); this document records the v1
+  scope, milestones, decisions, and release criteria. On Go practice, the
+  [coding standard](../coding-standard.md) wins.
+- **Testing:** the shipped layers and cases are in the
+  [testing strategy](../testing-strategy.md); §4 here records the v1 test plan.
+- **Limits:** [caps, limits, and timeouts](../limits.md) are the current values.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4.
 
 v1 turns the one-shot v0 loop into an interactive, resumable single-agent
 harness. It keeps the same provider, tools, workspace policy, and deterministic
@@ -65,7 +64,8 @@ stdin lines, v0 log migration or backward compatibility, or an interactive TUI.
 
 ### 1.4 Definition of done
 
-v1 is complete when every item below holds.
+v1 is complete when the [project definition of
+done](../definition-of-done.md) holds and every item below holds.
 
 - [x] **Streaming (local).** The built binary streams assistant text from a
       fake SSE server for both dialects. The adapters fall back to non-streamed

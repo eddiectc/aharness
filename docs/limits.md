@@ -3,11 +3,11 @@
 - **Date:** 2026-11-11
 - **Status:** current for v1, the shipped TUI, model discovery, and thinking
   effort.
-- **Related:** [architecture](architecture.md), [v1 build plan](v1-build.md),
-  [TUI build plan](tui-build.md), [shipped TUI](tui.md),
+- **Related:** [architecture](architecture.md), [v1 build plan](plans/v1-build.md),
+  [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
   [slash commands](commands.md),
-  [model discovery build plan](model-discovery-build.md),
-  [thinking effort build plan](thinking-effort-build.md),
+  [model discovery build plan](plans/model-discovery-build.md),
+  [thinking effort build plan](plans/thinking-effort-build.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,

@@ -7,11 +7,12 @@
 - **Source:** the shipped v1 run budgets and the output-cap decision in
   [model-discovery-build.md](model-discovery-build.md) §3.4.
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [architecture.md](architecture.md) §4 (agent loop), §9
+- **Architecture:** [architecture.md](../architecture.md) §4 (agent loop), §9
   (CLI/config), and §10 (defaults).
-- **Limits:** [limits.md](limits.md) §1 and §5.
-- **Testing:** [testing-strategy.md](testing-strategy.md) plus §6 here.
-- **Definition of done:** §1.4.
+- **Limits:** [limits.md](../limits.md) §1 and §5.
+- **Testing:** [testing-strategy.md](../testing-strategy.md) plus §6 here.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4.
 
 ## Decision summary
 
@@ -79,6 +80,9 @@
   tools, or the wire adapters.
 
 ### 1.4 Definition of done
+
+In addition to the [project definition of done](../definition-of-done.md), the
+removal is complete when every item below holds.
 
 - [x] Defaults are `0` for max turns, max total tokens, session timeout, and
       model timeout; no run is stopped by those budgets unless a flag is
@@ -316,7 +320,7 @@ responsibility.
 
 ## 7. Limits updates
 
-Update [limits.md](limits.md) §1:
+Update [limits.md](../limits.md) §1:
 
 | Limit | New behavior |
 |---|---|
@@ -381,8 +385,8 @@ recorded run budgets on old logs are historical and are not re-enforced.
 
 ## 10. Documentation updates
 
-- `README.md`: add this plan to the documentation table; update the bounded-loop
-  bullets to say budgets are opt-in.
+- `README.md`: describe the user-facing budget behavior; the plan itself is
+  indexed in `docs/README.md`, not the README documentation table.
 - `docs/architecture.md`: §4.1 loop checks, §4.2 terminal-state meanings, §9 CLI
   flags/defaults/precedence, §10 defaults table.
 - `docs/limits.md`: §1 rows and §5 flag table; mark the old values as opt-in and
@@ -390,9 +394,9 @@ recorded run budgets on old logs are historical and are not re-enforced.
 - `docs/testing-strategy.md`: unlimited-run, explicit-0, replay, and TUI
   display scenarios.
 - `docs/tui.md`: unlimited status/details labels and no `0/0`.
-- `docs/limits-removal-build.md`: status becomes implemented with the
+- `docs/plans/limits-removal-build.md`: status becomes implemented with the
   milestone/date and any deviations.
-- `docs/model-discovery-build.md`: cross-reference this plan for the run-budget
+- `docs/plans/model-discovery-build.md`: cross-reference this plan for the run-budget
   boundary if both are revised together.
 
 ## 11. Implementation deviations

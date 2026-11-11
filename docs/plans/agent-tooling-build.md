@@ -3,13 +3,14 @@
 - **Date:** 2026-11-11
 - **Status:** proposed; **not implemented**. This document is a plan and a
   contract sketch, not a description of shipped behavior.
-- **Source:** [agent tooling, limits, and measurement research](agent-tooling-research.md).
+- **Source:** [agent tooling, limits, and measurement research](../research/agent-tooling-research.md).
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [architecture.md](architecture.md) §2 (canonical model and
+- **Architecture:** [architecture.md](../architecture.md) §2 (canonical model and
   usage), §4 (agent loop), §5 (tools), §9 (CLI/config), §10 (defaults).
-- **Limits:** [limits.md](limits.md) §1, §4, and §5.
-- **Testing:** [testing-strategy.md](testing-strategy.md) plus §6 here.
-- **Definition of done:** §1.4.
+- **Limits:** [limits.md](../limits.md) §1, §4, and §5.
+- **Testing:** [testing-strategy.md](../testing-strategy.md) plus §6 here.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4.
 
 ## Decision summary
 
@@ -91,7 +92,9 @@ read interface, then build the A/B instrument, then polish search/command.
 
 ### 1.4 Definition of done
 
-All items are unchecked because the plan is not implemented.
+In addition to the [project definition of done](../definition-of-done.md), all
+items below must hold. All items are unchecked because the plan is not
+implemented.
 
 - [ ] `model.Usage` carries cached-input, cache-write-input, and
       reasoning-output subsets plus a `reported` flag; Chat and Responses map
@@ -581,7 +584,7 @@ Run the coding-standard §8 gates: `goimports`, `go vet`,
 
 ## 7. Limits updates
 
-Update [limits.md](limits.md):
+Update [limits.md](../limits.md):
 
 | Limit | New behavior |
 |---|---|
@@ -656,17 +659,17 @@ tool-result field, 4 MiB session line, and 16 MiB catalog body stay.
 
 When implemented, update:
 
-- `README.md`: add this plan to the documentation table; mention usage detail,
-  cost, and the eval command.
+- `README.md`: describe the user-facing behavior; the plan itself is indexed
+  in `docs/README.md`, not the README documentation table.
 - `docs/architecture.md`: canonical usage fields, cost/pricing, read
   continuation, toolset schema selection, `-require-usage`, eval boundary.
 - `docs/limits.md`: the table in §7; note the event-cap interaction.
 - `docs/testing-strategy.md`: usage fixtures, read boundaries, toolset replay,
   eval command, manual smoke.
 - `docs/tui.md`: usage detail/cost display if added; no protocol bump.
-- `docs/model-discovery-build.md`: catalog cache version bump for cost.
-- `docs/agent-tooling-build.md`: status and implementation deviations.
-- `docs/agent-tooling-research.md`: update only if evidence changes; it is a
+- `docs/plans/model-discovery-build.md`: catalog cache version bump for cost.
+- `docs/plans/agent-tooling-build.md`: status and implementation deviations.
+- `docs/research/agent-tooling-research.md`: update only if evidence changes; it is a
   dated research record.
 
 ## 11. Open questions and prerequisites

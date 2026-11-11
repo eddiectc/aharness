@@ -3,13 +3,16 @@
 The Go coding standard is [docs/coding-standard.md](docs/coding-standard.md).
 Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
 are defined there, and it wins over other docs on Go practice. Product scope
-and milestones live in [docs/v1-build.md](docs/v1-build.md) (v0 history is in
-[docs/v0-build.md](docs/v0-build.md)); system structure,
-tool behavior, and CLI/config contracts live in
+and milestones live in [docs/plans/v1-build.md](docs/plans/v1-build.md) (v0
+history is in [docs/plans/v0-build.md](docs/plans/v0-build.md)); system
+structure, tool behavior, and CLI/config contracts live in
 [docs/architecture.md](docs/architecture.md); the testing strategy lives in
-[docs/testing-strategy.md](docs/testing-strategy.md); current completion
-criteria live in [docs/v1-build.md §1.4](docs/v1-build.md#14-definition-of-done)
-(the historical v0 checklist is in [docs/definition-of-done.md](docs/definition-of-done.md)).
+[docs/testing-strategy.md](docs/testing-strategy.md). Every implementation and
+build plan verifies against the project-wide
+[docs/definition-of-done.md](docs/definition-of-done.md); feature-specific
+criteria are in the plan's §1.4. The
+[documentation map](docs/README.md) explains where current reference, plans,
+and research live.
 
 Non-negotiables:
 
@@ -29,9 +32,9 @@ Non-negotiables:
   it reaches the transcript or log.
 - Tests use fakes, `t.TempDir`, and `testing/synctest`; no real network or
   `time.Sleep`-based waiting.
-- Before finishing, run the gates in the standard's §8 and fix failures:
-  `goimports`, `go vet`, `golangci-lint`, `go test -race -count=1`, `go build`,
-  `govulncheck`.
+- Before finishing, run `make dod` and fix failures. It runs the standard's
+  §8 gates (`goimports`, `go vet`, `golangci-lint`, `go test -race -count=1`,
+  `go build`, `govulncheck`) plus `docs-check`.
 
 When in doubt, prefer the smaller stdlib solution. If other docs conflict, the
 coding standard wins on Go practice; note the conflict in the change.

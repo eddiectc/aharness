@@ -3,7 +3,7 @@
 - **Date:** 2026-11-09
 - **Status:** normative for all Go code in this repository
 - **Toolchain:** Go 1.27.3; stdlib-first, with the approved TUI exception
-- **Related:** [system architecture](architecture.md), [bare-minimum harness research](agent-harness-minimum.md)
+- **Related:** [system architecture](architecture.md), [bare-minimum harness research](research/agent-harness-minimum.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 This document defines how the Go code is written. It does not define
@@ -79,7 +79,7 @@ repository's package structure. The rules below apply to every package.
   The TUI also directly imports their support packages
   (`colorprofile`, `ultraviolet`, `x/ansi`) and `golang.org/x/term`. The
   justification, alternatives, and risk are in
-  [tui-build.md §2.8](tui-build.md#28-package-layout-and-wiring); the
+  [tui-build.md §2.8](plans/tui-build.md#28-package-layout-and-wiring); the
   shipped caps and protocol are in [tui.md](tui.md). Do not add a second
   application framework, a theme system, or another markdown/chart library.
   Binary impact is measured and recorded: a `-trimpath` build grew from

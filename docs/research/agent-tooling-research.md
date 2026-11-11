@@ -2,14 +2,14 @@
 
 - **Date:** 2026-11-11
 - **Status:** research complete; no code changed. Input to
-  [agent tooling and measurement build plan](agent-tooling-build.md).
+  [agent tooling and measurement build plan](../plans/agent-tooling-build.md).
 - **Snapshot:** repository `450dec3`; live catalog queried 2026-11-11.
   `deepseek-v4.1-flash` is 1,000,000 context / 384,000 advertised output,
   Chat Completions, efforts `low,high,max`.
 - **Scope:** the builtin tool set, tool caps and paging, token accounting, and
   how to measure changes.
-- **Related:** [architecture](architecture.md), [limits](limits.md),
-  [testing strategy](testing-strategy.md), and
+- **Related:** [architecture](../architecture.md), [limits](../limits.md),
+  [testing strategy](../testing-strategy.md), and
   [bare-minimum harness research](agent-harness-minimum.md).
 
 ## 1. Summary
@@ -33,7 +33,7 @@ Three conclusions drive the build plan:
 
 The recommended order is: measurement first, then the read contract, then a
 30-task A/B, then search/command polish. The
-[build plan](agent-tooling-build.md) implements that order.
+[build plan](../plans/agent-tooling-build.md) implements that order.
 
 ## 2. Method
 

@@ -6,26 +6,21 @@ log, and exits with a final answer or a typed stop reason. The loop is bounded
 by the model context window, termination policies, and errors; run budgets are
 opt-in and unlimited by default.
 
-- **Status:** v1 implementation complete (M0–M3), the post-v1 TUI
-  (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented,
-  provider/model discovery (the [model discovery build
-  plan](docs/model-discovery-build.md)) is implemented, and per-model thinking
-  effort (the [thinking effort build
-  plan](docs/thinking-effort-build.md)) is implemented. The TUI is the default
-  in a terminal; `-batch` keeps the one-shot CLI and `-ui-json` is the headless
-  automation surface. The mock-provider, integration, fuzz, race, and §8 gate
-  checks are run for each implementation change. The real-provider TUI smoke
-  and the real-provider thinking-effort smoke remain pending provider
-  credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
-  environment); they are explicit release prerequisites.
+- **Status:** v1 implementation complete (M0–M3); the default TUI,
+  provider/model discovery, and per-model thinking effort are implemented. The
+  TUI is the default in a terminal; `-batch` keeps the one-shot CLI and
+  `-ui-json` is the headless automation surface. Mock-provider, integration,
+  fuzz, race, and §8 gate checks pass. The real-provider TUI smoke and the
+  real-provider thinking-effort smoke remain pending provider credentials
+  (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation environment); they
+  are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** the Go standard library by default. The approved TUI
   exception is Bubble Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2,
   and `x/vt`; the justification and measured binary impact are recorded in the
-  [coding standard](docs/coding-standard.md#3-dependencies) and the
-  [TUI build plan](docs/tui-build.md#28-package-layout-and-wiring).
+  [coding standard](docs/coding-standard.md#3-dependencies).
 
-## What v1 includes
+## What aharness includes
 
 - One provider (`opencode-go`, selected by `-provider` or
   `AHARNESS_PROVIDER`) behind a canonical model, with OpenAI Chat Completions
@@ -36,12 +31,17 @@ opt-in and unlimited by default.
 - `-list-models` prints the usable catalog without creating a session;
   `-refresh-models`, and `Ctrl-R` in the TUI model picker, force an
   unconditional catalog refresh. There is no hardcoded model list or default.
+  The catalog is cached for 24 hours: a fresh cache avoids network access, a
+  stale cache is refreshed conditionally, and a failed implicit refresh falls
+  back to stale data with a warning; an explicit refresh never falls back.
+  Resume and fork resolve from the recorded session values and work offline.
 - Per-model thinking effort: `-thinking-effort` / `AHARNESS_THINKING_EFFORT`
   sends top-level `reasoning_effort` on Chat Completions or
   `reasoning.effort` on Responses, with values discovered per model from the
   catalog. Unset omits the field and uses the provider/model default; `default`
-  clears an inherited value. `-list-models` ends with an `EFFORT` column, and
-  the TUI offers a next-run picker on `F2`.
+  clears an inherited value. The effective value is recorded and inherited on
+  resume/fork unless explicitly changed. `-list-models` ends with an `EFFORT`
+  column, and the TUI offers a next-run picker on `F2`.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
@@ -53,13 +53,15 @@ opt-in and unlimited by default.
   The TUI and `-ui-json` always stream. The canonical response is the only
   transcript record; deltas are display-only.
 - The default interactive TUI: a full-screen transcript, streaming text, tool
-  activity, steering, interrupt/cancel, markdown, tables, file/model pickers,
-  and workspace-contained images. One process owns one session and may execute
-  one run per submitted message. Composer slash commands mirror the actions
-  (`/help`, `/model`, `/effort`, `/provider`, `/details`, `/files`, `/table`,
-  `/image`, `/rich`/`/raw`, `/repaint`, `/refresh`, `/interrupt`, `/cancel`,
-  `/quit`); typing `/` opens a filtered completion menu (`Tab` completes,
-  `Enter` runs), and unrecognized `/text` is sent as a normal message. See the
+  activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
+  a workspace file picker, catalog-backed next-run model and thinking-effort
+  pickers, details and help overlays, and workspace-contained images. One
+  process owns one session and may execute one run per submitted message.
+  Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
+  `/provider`, `/details`, `/files`, `/table`, `/image`, `/rich`/`/raw`,
+  `/repaint`, `/refresh`, `/interrupt`, `/cancel`, `/quit`); typing `/` opens
+  a filtered completion menu (`Tab` completes, `Enter` runs), and unrecognized
+  `/text` is sent as a normal message. See the
   [slash-command reference](docs/commands.md).
 - `-batch` forces the one-shot stdout contract. Non-TTY invocations batch
   automatically. `-ui-json` runs the same Bubble Tea program headlessly over a
@@ -74,12 +76,11 @@ opt-in and unlimited by default.
 - One binary configured by flags and environment; no daemon, config file, or
   provider matrix.
 
-Not in v1: hooks, model-based summarization, subagents, RAG/embeddings,
+Out of scope: hooks, model-based summarization, subagents, RAG/embeddings,
 MCP/plugins, additional provider dialects, built-in evals, price tracking,
 workspace snapshots, built-in isolation/approval, session rotation, or v0 log
-migration. See [v1 scope](docs/v1-build.md#1-scope). The TUI adds no durable
-event type, schema version, tool, prompt input, or security boundary. Its
-contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
+migration. The TUI adds no durable event type, schema version, tool, prompt
+input, or security boundary.
 
 ## Documentation
 
@@ -88,19 +89,11 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [architecture.md](docs/architecture.md) | System structure, packages, loop and tool contracts, CLI and configuration |
 | [limits.md](docs/limits.md) | Caps, limits, and timeouts |
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
-| [v1-build.md](docs/v1-build.md) | v1 scope, contract deltas, milestones, decisions, and costly-to-reverse assumptions |
-| [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
-| [model-discovery-build.md](docs/model-discovery-build.md) | Implemented `-provider` and opencode-go model/limit/dialect discovery from models.dev; catalog cache, revalidation, refresh, and listing |
-| [limits-removal-build.md](docs/limits-removal-build.md) | Implemented removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
-| [thinking-effort-build.md](docs/thinking-effort-build.md) | Implemented per-model thinking/reasoning effort control: catalog discovery, Chat/Responses mapping, CLI/env precedence and clearing, session persistence and inheritance, `-list-models` column, and TUI/`-ui-json` surface |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [commands.md](docs/commands.md) | Slash-command reference: syntax, autocomplete, arguments, key equivalents, idle/run behavior, `-ui-json` mapping, and caps |
-| [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
-| [definition-of-done.md](docs/definition-of-done.md) | The v0 completion checklist |
-| [agent-harness-minimum.md](docs/agent-harness-minimum.md) | Research rationale and primary sources behind the design |
-| [agent-tooling-research.md](docs/agent-tooling-research.md) | Research on the builtin tool set, tool caps, provider-reported usage, and harness evaluation methodology |
-| [agent-tooling-build.md](docs/agent-tooling-build.md) | Proposed measurement, read-continuation/limit, eval-driver, and search/command build plan |
+| [definition-of-done.md](docs/definition-of-done.md) | Completion checklist for every change |
+| [docs/README.md](docs/README.md) | Documentation map and placement rules |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents working in this repository |
 
 ## Build and run
@@ -176,5 +169,6 @@ tool contract; the TUI adds no approval step or sandbox.
 
 ## Contributing
 
-Follow [AGENTS.md](AGENTS.md) and the [coding standard](docs/coding-standard.md);
-every change must pass the §8 gates before review.
+Follow [AGENTS.md](AGENTS.md), the [coding standard](docs/coding-standard.md),
+and the [definition of done](docs/definition-of-done.md); every change must pass
+`make dod` (the automated definition-of-done checks) before review.

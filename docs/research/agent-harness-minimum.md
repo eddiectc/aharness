@@ -118,7 +118,7 @@ For a coding harness:
 
 That is enough to do real work. Add `ask_user` or `finish` only if you need structured clarification or a structured stop. Then write 10–20 realistic eval tasks and read the raw traces; the traces will tell you which tool descriptions and context policies to fix. Do not add a second agent until the first one is reliable.
 
-The concrete build plan is in [`v0-build.md`](v0-build.md).
+The concrete build plan is in [`v0-build.md`](../plans/v0-build.md).
 
 ## Sources
 

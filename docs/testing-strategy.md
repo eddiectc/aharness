@@ -3,7 +3,7 @@
 - **Date:** 2026-11-11
 - **Status:** normative testing strategy for v1, the shipped TUI, model
   discovery, and thinking effort
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md), [model discovery build plan](model-discovery-build.md), [thinking effort build plan](thinking-effort-build.md)
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and

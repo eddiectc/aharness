@@ -1,21 +1,22 @@
 # aharness v0 build plan
 
 - **Date:** 2026-11-09
-- **Source:** [Bare-Minimum Agent Harness](agent-harness-minimum.md)
-- **Target:** Go 1.27.3, module `aharness` (see [`go.mod`](../go.mod))
+- **Source:** [Bare-Minimum Agent Harness](../research/agent-harness-minimum.md)
+- **Target:** Go 1.27.3, module `aharness` (see [`go.mod`](../../go.mod))
 - **Status:** v0 complete; both dialect smoke runs passed (2026-11-09 and
   2026-11-10).
-- **Architecture:** [System architecture and contracts](architecture.md)
-- **Testing strategy:** [v0 testing strategy](testing-strategy.md)
-- **Definition of done:** [v0 definition of done](definition-of-done.md)
-- **Coding standard:** [Go coding standard](coding-standard.md)
+- **Architecture:** [System architecture and contracts](../architecture.md)
+- **Testing strategy:** [v0 testing strategy](../testing-strategy.md)
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  v0 completion record in §6.
+- **Coding standard:** [Go coding standard](../coding-standard.md)
 
 v0 is a single-process, single-agent coding harness. It accepts one task, runs a
 bounded model/tool loop against a workspace, appends every event to a JSONL
 session log, and exits with a final answer or a typed stop reason.
 
 The source document defines the feature floor. System structure and contracts
-are in [`architecture.md`](architecture.md). This document defines the v0 slice,
+are in [`architecture.md`](../architecture.md). This document defines the v0 slice,
 milestones, acceptance tests, decisions, and risks. If this plan and the
 architecture document conflict on scope, this plan wins; on structure or runtime
 contracts, the architecture document wins.
@@ -55,8 +56,9 @@ part of v0; and dollar-cost tracking is deferred.
 
 ### 1.4 Definition of done
 
-v0 is complete when every item in the [v0 definition of
-done](definition-of-done.md) is satisfied.
+v0 was complete when the project [definition of
+done](../definition-of-done.md) held and every item in the
+[v0 completion record](#6-v0-completion-record) was checked.
 
 ## 2. Milestones
 
@@ -76,7 +78,7 @@ cannot pass, fix the interface instead of adding features.
 
 ## 3. Testing strategy
 
-The v0 testing strategy is in [testing-strategy.md](testing-strategy.md). It
+The v0 testing strategy is in [testing-strategy.md](../testing-strategy.md). It
 covers unit, integration, and manual smoke checks.
 
 ## 4. Decisions and risks
@@ -189,3 +191,48 @@ with evidence that the single loop is the bottleneck. External evaluation and
 benchmarking are separate from the harness. Further provider dialects are
 adapters over the canonical model; they add mapping code and fixtures, not loop
 branches.
+
+## 6. v0 completion record
+
+This is the historical v0 verification record, moved from the former v0-only
+checklist. The project-wide [definition of done](../definition-of-done.md) now
+applies to every change.
+
+- [x] **End-to-end task.** A task ran end to end against a real provider model,
+      changed files only under the workspace, and returned a final answer. The
+      `deepseek-v4.1-flash` Chat Completions smoke completed on 2026-11-09; the
+      `muse-spark-1.3-contributor` Responses smoke completed on 2026-11-10.
+- [x] **Tool protocol.** Every well-formed model tool call received exactly one
+      tool result before the next model call; unknown tools, invalid arguments,
+      timeouts, and panics became error results. A recovered panic was paired
+      and then stopped the run with `internal_error`.
+- [x] **Session log.** The session log was valid JSONL encoded with
+      `encoding/json/v2` and `jsontext`, contained the complete event history
+      for the run (payloads capped), and was written outside the workspace by
+      default.
+- [x] **Runtime cleanup.** A terminated run removed `<state>/work/<session-id>`;
+      cleanup was attempted on normal, error, and signal paths, and a failure
+      left the directory with its path reported.
+- [x] **Limits.** Max turns, total tokens, and wall-clock limits stopped the run
+      with a typed status and a final summary event. The later
+      [limits-removal plan](limits-removal-build.md) made these opt-in and
+      unlimited by default.
+- [x] **Compaction.** A long synthetic history compacted below the context
+      limit while preserving the task, the last turns, and tool-call/tool-result
+      pairing.
+- [x] **Models and credentials.** Each implemented dialect completed the smoke
+      task through at least one assigned model; every accepted model completed
+      a mock tool-call round trip through its assigned dialect; provider
+      credentials never appeared in logs or child environments.
+- [x] **Testing strategy.** The unit, integration, and manual smoke checks in
+      the [testing strategy](../testing-strategy.md) passed.
+- [x] **Tooling gates.** The [coding standard](../coding-standard.md) §8 gates
+      passed: `goimports`, `go vet`, `golangci-lint`,
+      `go test -race -count=1`, `go build -trimpath`, and `govulncheck`.
+
+Provider note: OpenCode documented `crouton-alpha-free` as a free-tier model
+restricted to OpenCode clients; other clients received `403` even with an API
+key. The Responses smoke therefore used `muse-spark-1.3-contributor`, which
+requires a Go subscription and the workspace privacy setting that allows paid
+endpoints to train on request data. Both implemented dialects were verified; the
+restricted free model remained registered but was not the smoke model.

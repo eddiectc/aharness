@@ -1,11 +1,11 @@
 # aharness thinking effort build plan
 
 - **Date:** 2026-11-11
-- **Status:** implemented 2026-11-11. This document remains the contract
-  record and decision log; the shipped behavior is documented in
-  [architecture.md](architecture.md), [tui.md](tui.md),
-  [testing-strategy.md](testing-strategy.md), [limits.md](limits.md), and the
-  README. The real-provider smoke in §1.4 and §4.3 was **not** run because
+- **Status:** implemented 2026-11-11. This document is the decision and
+  verification record; the shipped behavior is documented in
+  [architecture.md](../architecture.md), [tui.md](../tui.md),
+  [testing-strategy.md](../testing-strategy.md), [limits.md](../limits.md), and
+  the README. The real-provider smoke in §1.4 and §4.3 was **not** run because
   provider credentials are unavailable; it remains an explicit release
   prerequisite (§9).
 - **Source:** [model discovery build plan](model-discovery-build.md), the live
@@ -15,12 +15,13 @@
   [OpenCode models and variants](https://opencode.ai/docs/models/), and the
   [models.dev catalog](https://models.dev).
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [architecture.md](architecture.md) §2.1–2.3 (provider,
+- **Architecture:** [architecture.md](../architecture.md) §2.1–2.3 (provider,
   canonical model, streaming), §9 (CLI and configuration), and §10 (defaults).
-- **Testing:** [testing-strategy.md](testing-strategy.md) plus §5 here.
-- **Limits:** [limits.md](limits.md). This plan adds catalog-bounded values and
+- **Testing:** [testing-strategy.md](../testing-strategy.md) plus §5 here.
+- **Limits:** [limits.md](../limits.md). This plan adds catalog-bounded values and
   no run budget.
-- **Definition of done:** §1.4.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4.
 
 ## Decision summary
 
@@ -111,6 +112,9 @@
 - Price/cost accounting for additional reasoning tokens.
 
 ### 1.4 Definition of done
+
+In addition to the [project definition of done](../definition-of-done.md), the
+feature is complete when every item below holds.
 
 - [x] The catalog parses `reasoning` and `reasoning_options`, retains only
       `effort` values, deduplicates and orders them deterministically, and
@@ -542,9 +546,9 @@ When implemented, update:
 ## 9. Implementation status and verification
 
 **Status:** implemented 2026-11-11. The shipped behavior is documented in
-[architecture.md](architecture.md) §2.2 and §7–§9, [tui.md](tui.md),
-[testing-strategy.md](testing-strategy.md), [limits.md](limits.md), and the
-[README](../README.md).
+[architecture.md](../architecture.md) §2.2 and §7–§9, [tui.md](../tui.md),
+[testing-strategy.md](../testing-strategy.md), [limits.md](../limits.md), and the
+[README](../../README.md).
 
 Deviations and clarifications against the contract above:
 
@@ -562,7 +566,7 @@ Verification:
 - Automated coverage: catalog normalization/cache, adapter request bodies,
   config resolution, session reconstruction, and agent request construction
   cases are present in the working tree (see
-  [testing-strategy.md](testing-strategy.md) §1–§2). The TUI/headless `f2`
+  [testing-strategy.md](../testing-strategy.md) §1–§2). The TUI/headless `f2`
   cases are listed there; `internal/tui` tests cover the picker ordering,
   disabled/no-effort notices, details row, model-switch clearing, and the
   `thinking_effort` notice kind.

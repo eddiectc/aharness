@@ -1,18 +1,20 @@
 # aharness model discovery build plan (opencode-go)
 
 - **Date:** 2026-11-10; implemented 2026-11-11.
-- **Status:** implemented as of 2026-11-11. This document remains the normative
-  record of the provider/model-discovery contract; the shipped docs describe
-  the implementation, and §11 records deviations from the original sketch.
+- **Status:** implemented as of 2026-11-11. The shipped contract is in
+  [architecture.md](../architecture.md), [limits.md](../limits.md),
+  [tui.md](../tui.md), and [testing-strategy.md](../testing-strategy.md); this
+  document records the plan, decisions, and deviations (§11).
 - **Source:** [v1 build plan](v1-build.md), the shipped provider/model registry,
   and the opencode-go catalog.
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [architecture.md](architecture.md) describes the shipped
+- **Architecture:** [architecture.md](../architecture.md) describes the shipped
   provider/model behavior after discovery replaced the fixed registry.
-- **Testing:** [testing-strategy.md](testing-strategy.md) plus §6 here.
-- **Limits:** [limits.md](limits.md); §7 records the new caps and changed
+- **Testing:** [testing-strategy.md](../testing-strategy.md) plus §6 here.
+- **Limits:** [limits.md](../limits.md); §7 records the new caps and changed
   values.
-- **Definition of done:** §1.4.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4.
 
 ## Decision summary
 
@@ -92,6 +94,9 @@
 - Model-based summarization or any new compaction behavior.
 
 ### 1.4 Definition of done
+
+In addition to the [project definition of done](../definition-of-done.md), the
+plan is complete when every item below holds.
 
 - [x] `-provider` and `AHARNESS_PROVIDER` work; an unknown provider fails with
       exit 2 and a message listing `opencode-go`.
@@ -751,7 +756,7 @@ budget and one provider length/context-overflow outcome.
 
 ## 7. Limits updates
 
-Add or change these rows in [limits.md](limits.md):
+Add or change these rows in [limits.md](../limits.md):
 
 | Limit | New value/behavior |
 |---|---|
@@ -849,8 +854,8 @@ only seam. That endpoint is the fallback if npm inference proves unreliable.
 
 ## 10. Documentation updates
 
-- `README.md`: add this plan to the documentation table; replace the
-  three-model/provider-fixed bullets and examples.
+- `README.md`: describe the user-facing discovery behavior; the plan itself is
+  indexed in `docs/README.md`, not the README documentation table.
 - `docs/architecture.md`: §2 provider/model call behavior (the output field is
   omitted by default; `length` and context-overflow handling), §2.1 wire
   format/base URL, §3.1 package tree and `config.go` comment, §3.2 `cmd`
@@ -866,7 +871,7 @@ only seam. That endpoint is the fallback if npm inference proves unreliable.
   explicit-budget pass-through, update the manual smoke models.
 - `docs/tui.md`: picker metadata, advertised-vs-effective output display,
   `Ctrl-R` refresh, model switching, and offline-resume fallback.
-- `docs/model-discovery-build.md`: status changes to implemented with the
+- `docs/plans/model-discovery-build.md`: status changes to implemented with the
   milestone/date and any deviations.
 
 `limits.md` owns cap values and formulas; `architecture.md` §9 owns the CLI

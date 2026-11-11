@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-10
 - **Status:** implemented (M0–M5) on 2026-11-10. The shipped surface, protocol,
-  keys, and caps are recorded in [tui.md](tui.md). Automated fake-provider and
+  keys, and caps are recorded in [tui.md](../tui.md). Automated fake-provider and
   headless checks pass; the real-provider TUI smoke and the real-terminal Kitty/
   tmux image matrix remain pending environment/credentials. This is a post-v1
   feature. v1 M0–M3 remain implemented; the real-provider streamed v1 smoke is
@@ -18,14 +18,15 @@
 - **Source:** [v1 build plan](v1-build.md). The TUI wraps the v1 runner, tools,
   and v2 session log; it does not reopen v1 scope.
 - **Target:** Go 1.27.3, module `aharness`.
-- **Architecture:** [architecture.md](architecture.md) currently describes the
-  v1 contract. This document is normative for the TUI contract until the
-  implementation updates the architecture and testing strategy.
-- **Testing:** [testing-strategy.md](testing-strategy.md) plus §4 here.
-- **Limits:** [limits.md](limits.md); the TUI caps proposed in §2.9 land in
+- **Architecture:** [architecture.md](../architecture.md) defines the runtime
+  contracts. [tui.md](../tui.md) is authoritative for the shipped TUI surface,
+  keys, protocol, and caps; this plan records the rationale, milestones, and
+  decisions.
+- **Testing:** [testing-strategy.md](../testing-strategy.md) plus §4 here.
+- **Limits:** [limits.md](../limits.md); the TUI caps proposed in §2.9 land in
   `limits.md` with the milestone that implements them.
-- **Definition of done:** §1.4 for the first usable TUI; §1.4.1 and §1.4.2
-  for the rich-content and image/chart milestones.
+- **Definition of done:** [project definition of done](../definition-of-done.md);
+  feature criteria in §1.4, §1.4.1, and §1.4.2.
 
 ## Decision summary
 
@@ -135,7 +136,8 @@ schema.
 
 ### 1.4 Definition of done
 
-The TUI is complete when every item below holds.
+The TUI is complete when the [project definition of
+done](../definition-of-done.md) holds and every item below holds.
 
 - [ ] **Default startup.** `aharness -model <id>` in a terminal starts the TUI
       with no task, creates a v2 session, shows the session header, and waits

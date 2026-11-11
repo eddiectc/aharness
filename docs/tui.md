@@ -2,9 +2,9 @@
 
 - **Date:** 2026-11-11
 - **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
-  picker from [model discovery](model-discovery-build.md) and the thinking
-  effort controls from [thinking effort](thinking-effort-build.md). The full
-  contract and milestone rationale are in [tui-build.md](tui-build.md); this
+  picker from [model discovery](plans/model-discovery-build.md) and the thinking
+  effort controls from [thinking effort](plans/thinking-effort-build.md). The full
+  contract and milestone rationale are in [tui-build.md](plans/tui-build.md); this
   document records the shipped surface and verification status.
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
   steering, interrupts, resume, fork, signals), headless `x/vt` frames and SVG
@@ -197,7 +197,7 @@ Output lines:
   contain no ANSI and no raw image bytes.
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
   `model_changed`, `notice`, `error`, with the fields documented in
-  [tui-build.md §2.7](tui-build.md#27-machine-readable-ui-mode---ui-json).
+  [tui-build.md §2.7](plans/tui-build.md#27-machine-readable-ui-mode---ui-json).
   `run_started` and `model_changed` carry an optional `thinking_effort` field
   for the effective value; an omitted field means the provider default.
   Selecting an effort with `F2` emits a `notice` with
