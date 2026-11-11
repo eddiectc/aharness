@@ -875,10 +875,9 @@ it on every turn. Compaction never mutates the log.
 ## 7. Session log
 
 - **Location:** `-state-dir` or `AHARNESS_STATE_DIR`, defaulting to
-  `$XDG_STATE_HOME/aharness` (fallback `~/.local/state/aharness`). The log is
-  `<state>/sessions/<session-id>.jsonl`; session IDs are UUIDv7 and are
-  validated before a path is built. `run_command` gets harness-owned `HOME` and
-  `TMPDIR` at `<state>/work/<session-id>/home` and
+  `~/.aharness`. The log is `<state>/sessions/<session-id>.jsonl`; session IDs
+  are UUIDv7 and are validated before a path is built. `run_command` gets
+  harness-owned `HOME` and `TMPDIR` at `<state>/work/<session-id>/home` and
   `<state>/work/<session-id>/tmp`, created with mode 0700 at the start of every
   run. The whole `<state>/work/<session-id>` subtree is removed at run start and
   best-effort at run end; `sessions/` is the only durable record.
@@ -1104,12 +1103,10 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   a new session. On resume/fork, an omitted `-workspace` inherits the recorded
   workspace; an explicitly different workspace is a config error. Resolve it to
   an absolute path, require an existing directory, and open the root once.
-- `-state-dir` defaults to `AHARNESS_STATE_DIR`, then
-  `$XDG_STATE_HOME/aharness`, then `~/.local/state/aharness`. Reject a relative
-  `XDG_STATE_HOME`. The harness creates the directory with mode 0700 if needed;
-  it must be writable, or start-up fails with exit 2. The token and state
-  directory are read from the current invocation and are not inherited from the
-  log.
+- `-state-dir` defaults to `AHARNESS_STATE_DIR`, then `~/.aharness`. The
+  harness creates the directory with mode 0700 if needed; it must be writable,
+  or start-up fails with exit 2. The token and state directory are read from
+  the current invocation and are not inherited from the log.
 - `-provider-base-url` defaults to `AHARNESS_PROVIDER_BASE_URL`, then the
   catalog model/provider base URL for a new session. On resume/fork, an omitted
   flag/env inherits the last run's URL. A discovered URL must be HTTPS with host

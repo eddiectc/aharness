@@ -215,7 +215,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.StringVar(&task, "task", "", "task text; seeds the first message in TUI modes")
 	fs.StringVar(&taskFile, "task-file", "", "file containing the task; seeds the first message in TUI modes")
 	fs.StringVar(&workspace, "workspace", env.workspace, "workspace directory (default: AHARNESS_WORKSPACE, then the current directory; inherited on resume/fork)")
-	fs.StringVar(&stateDir, "state-dir", env.stateDir, "state directory (default: AHARNESS_STATE_DIR, then XDG_STATE_HOME/aharness, then ~/.local/state/aharness)")
+	fs.StringVar(&stateDir, "state-dir", env.stateDir, "state directory (default: AHARNESS_STATE_DIR, then ~/.aharness)")
 	fs.StringVar(&modelName, "model", env.model, "model ID from the provider catalog (required for a new session)")
 	providerDefault := env.provider
 	if providerDefault == "" {
@@ -588,12 +588,6 @@ func resolveStateDir(raw string, getenv func(string) string) (string, error) {
 		}
 		return filepath.Clean(dir), nil
 	}
-	if xdg := getenv("XDG_STATE_HOME"); xdg != "" {
-		if !filepath.IsAbs(xdg) {
-			return "", fmt.Errorf("environment variable XDG_STATE_HOME must be an absolute path, got %q", xdg)
-		}
-		return filepath.Join(filepath.Clean(xdg), "aharness"), nil
-	}
 	home := getenv("HOME")
 	if home == "" {
 		var err error
@@ -605,7 +599,7 @@ func resolveStateDir(raw string, getenv func(string) string) (string, error) {
 	if home == "" {
 		return "", errors.New("resolve home directory: empty path")
 	}
-	return filepath.Join(home, ".local", "state", "aharness"), nil
+	return filepath.Join(home, ".aharness"), nil
 }
 
 func validateBaseURL(raw string) error {

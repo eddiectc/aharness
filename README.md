@@ -173,9 +173,8 @@ or `-task-file`, `-fork` requires a task, and `-resume` requires a task only
 after a completed run. `-model` (or `AHARNESS_MODEL`) is required for a new
 session and must name a usable model in the discovered catalog. `-interactive`
 was removed in the TUI cutover; passing it is an unknown-flag error. Session
-logs default to `$XDG_STATE_HOME/aharness` (or `~/.local/state/aharness`),
-outside the workspace; `-state-dir` overrides it. Session IDs resolve only under
-`<state>/sessions/<id>.jsonl`.
+logs default to `~/.aharness`, outside the workspace; `-state-dir` overrides
+it. Session IDs resolve only under `<state>/sessions/<id>.jsonl`.
 
 A new session resolves the model's dialect, base URL, context window, and input
 cap from models.dev, with the normalized catalog cached at

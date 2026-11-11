@@ -66,7 +66,6 @@ func cfgTestClearEnv(t *testing.T) {
 		"AHARNESS_LOG_REQUESTS",
 		"AHARNESS_PROVIDER_BASE_URL",
 		"AHARNESS_MODELS_DEV_URL",
-		"XDG_STATE_HOME",
 	} {
 		t.Setenv(key, "")
 	}
@@ -710,35 +709,27 @@ func TestConfigStateDirResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("xdg absolute", func(t *testing.T) {
-		dir := t.TempDir()
-		cfg := cfgTestParseOK(t, common, map[string]string{"XDG_STATE_HOME": dir})
-		want := filepath.Join(dir, "aharness")
+	t.Run("xdg ignored", func(t *testing.T) {
+		home := t.TempDir()
+		cfg := cfgTestParseOK(t, common, map[string]string{"HOME": home, "XDG_STATE_HOME": t.TempDir()})
+		want := filepath.Join(home, ".aharness")
 		if cfg.StateDir != want {
 			t.Errorf("StateDir = %q, want %q", cfg.StateDir, want)
-		}
-	})
-
-	t.Run("xdg relative rejected", func(t *testing.T) {
-		err := cfgTestParseErr(t, common, map[string]string{"XDG_STATE_HOME": "relative/state"})
-		if !strings.Contains(err.Error(), "XDG_STATE_HOME") {
-			t.Errorf("error = %q, want XDG_STATE_HOME error", err)
 		}
 	})
 
 	t.Run("home fallback", func(t *testing.T) {
 		home := t.TempDir()
 		cfg := cfgTestParseOK(t, common, map[string]string{"HOME": home})
-		want := filepath.Join(home, ".local", "state", "aharness")
+		want := filepath.Join(home, ".aharness")
 		if cfg.StateDir != want {
 			t.Errorf("StateDir = %q, want %q", cfg.StateDir, want)
 		}
 	})
 
-	t.Run("explicit overrides relative xdg", func(t *testing.T) {
+	t.Run("explicit overrides home", func(t *testing.T) {
 		dir := t.TempDir()
-		env := map[string]string{"XDG_STATE_HOME": "relative/state"}
-		cfg := cfgTestParseOK(t, append(append([]string{}, common...), "-state-dir", dir), env)
+		cfg := cfgTestParseOK(t, append(append([]string{}, common...), "-state-dir", dir), map[string]string{"HOME": t.TempDir()})
 		if cfg.StateDir != dir {
 			t.Errorf("StateDir = %q, want explicit %q", cfg.StateDir, dir)
 		}
