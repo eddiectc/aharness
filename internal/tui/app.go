@@ -448,14 +448,7 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.overlay.kind == OverlayModel {
 			return m.refreshModelCatalog()
 		}
-		m.rich = !m.rich
-		m.invalidateRenders()
-		m.ensureContent()
-		if m.rich {
-			m.notice = "rich rendering"
-		} else {
-			m.notice = "raw rendering"
-		}
+		m.setRich(!m.rich)
 		return nil
 	case "ctrl+t":
 		return m.openTableOverlay()
@@ -582,6 +575,18 @@ func (m *App) handleCtrlC() tea.Cmd {
 	m.run.ctrlArmed = true
 	m.interruptOperation()
 	return nil
+}
+
+// setRich selects the assistant rendering mode used by the transcript.
+func (m *App) setRich(rich bool) {
+	m.rich = rich
+	m.invalidateRenders()
+	m.ensureContent()
+	if rich {
+		m.notice = "rich rendering"
+	} else {
+		m.notice = "raw rendering"
+	}
 }
 
 func (m *App) interruptOperation() {

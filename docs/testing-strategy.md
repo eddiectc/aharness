@@ -101,6 +101,10 @@ real timeouts for subprocess and signal tests.
   for unlimited budgets and `N/M` only for explicit positive budgets, never
   `0/0`; the details overlay renders `unlimited`/`none`; old `max_turns`/
   `time_limit` terminal states still render.
+- TUI slash commands: parser case/aliases/arguments, `/help` lists the
+  registry, known commands execute without starting a run, unknown `/text` and
+  seeded tasks fall through as messages, `/model`/`/effort` arguments and
+  active-run notices, and `/interrupt`/`/cancel`/`/quit` run control.
 - TUI thinking effort: `F2` opens and closes the next-run picker; it is
   disabled with a notice during a run; entries are `provider default` then the
   model's values in canonical order; a model with no effort values shows a

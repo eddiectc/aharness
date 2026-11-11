@@ -362,6 +362,15 @@ func (m *App) submit(text, source string) tea.Cmd {
 		m.appendNotice(agent.NoticeWarning, m.notice)
 		return nil
 	}
+	// Slash commands are composer input only. A seeded task or file keeps its
+	// literal text, and an unrecognized slash word is a normal message.
+	if source == "tui" {
+		if cmd, ok := m.handleSlashCommand(text); ok {
+			m.pushHistory(text)
+			m.historyIndex = len(m.inputHistory)
+			return cmd
+		}
+	}
 	if m.run.active {
 		return m.submitSteering(text)
 	}

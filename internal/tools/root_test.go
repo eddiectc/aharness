@@ -195,6 +195,22 @@ func TestWorkspaceResolveDir(t *testing.T) {
 	}
 }
 
+func TestWorkspaceListDisplayDirEmpty(t *testing.T) {
+	ws, err := OpenWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ws.Close() })
+
+	entries, err := ws.ListDisplayDir(".", 100)
+	if err != nil {
+		t.Fatalf("ListDisplayDir on an empty workspace: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %+v, want none", entries)
+	}
+}
+
 func TestCloseThenUseFails(t *testing.T) {
 	ws, _ := newTestWorkspace(t)
 	mustWriteFile(t, ws.Dir(), "f.txt", []byte("x"))

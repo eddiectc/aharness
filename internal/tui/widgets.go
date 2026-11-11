@@ -223,7 +223,10 @@ func renderScroll(lines []string, width, height, offset int) string {
 
 func (m *App) openHelpOverlay() tea.Cmd {
 	t := newTheme(m.noColor)
-	lines := []string{
+	lines := []string{t.label.Render("commands")}
+	lines = append(lines, slashCommandHelpLines()...)
+	lines = append(lines,
+		"",
 		t.label.Render("keys"),
 		"",
 		"Enter            submit the composer (steering while a run is active)",
@@ -244,8 +247,9 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"F1               help; Ctrl-X details",
 		"F2               thinking effort picker (idle)",
 		"",
+		t.dim.Render("Type a command in the composer; unknown /text is sent as a message."),
 		t.dim.Render("Mouse reporting is disabled. Terminal output is sanitized."),
-	}
+	)
 	m.overlay.help = lines
 	m.overlay.push(OverlayHelp)
 	m.overlay.resize(m, m.width, m.height)

@@ -202,7 +202,7 @@ func (w *Workspace) ListDisplayDir(rel string, limit int) ([]DisplayEntry, error
 	}
 	defer f.Close() //nolint:errcheck
 	entries, err := f.ReadDir(limit)
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read directory %s: %w", rel, err)
 	}
 	out := make([]DisplayEntry, 0, len(entries))
