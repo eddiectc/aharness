@@ -99,6 +99,8 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |
 | [definition-of-done.md](docs/definition-of-done.md) | The v0 completion checklist |
 | [agent-harness-minimum.md](docs/agent-harness-minimum.md) | Research rationale and primary sources behind the design |
+| [agent-tooling-research.md](docs/agent-tooling-research.md) | Research on the builtin tool set, tool caps, provider-reported usage, and harness evaluation methodology |
+| [agent-tooling-build.md](docs/agent-tooling-build.md) | Proposed measurement, read-continuation/limit, eval-driver, and search/command build plan |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents working in this repository |
 
 ## Build and run
