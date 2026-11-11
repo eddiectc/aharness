@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"aharness/internal/model"
 )
 
 func TestParseModeSelection(t *testing.T) {
@@ -128,5 +130,91 @@ func TestSelectModeMatrix(t *testing.T) {
 	cfg = cfgTestParseOK(t, missingTask, nil)
 	if err := selectMode(&cfg, strings.NewReader(""), io.Discard); err == nil {
 		t.Fatal("non-TTY new session without a task accepted")
+	}
+}
+
+func TestParseTUIDefersCatalogResolution(t *testing.T) {
+	// The TUI host resolves the catalog after parseConfig; an unknown model is
+	// not rejected until the host loads the catalog.
+	cfg := cfgTestParseOK(t, []string{
+		"-ui-json",
+		"-model", "model-not-in-catalog",
+		"-state-dir", t.TempDir(),
+		"-workspace", t.TempDir(),
+	}, nil)
+	if cfg.Mode != ModeUIJSON || !cfg.Stream {
+		t.Fatalf("mode/stream = %v/%t", cfg.Mode, cfg.Stream)
+	}
+	if cfg.Dialect != "" || cfg.BaseURL != "" || cfg.MaxContextTokens != 0 || cfg.MaxOutputTokens != 0 {
+		t.Fatalf("TUI parse resolved catalog values early: %+v", cfg)
+	}
+	if !cfg.modelSet {
+		t.Fatal("modelSet = false, want true")
+	}
+}
+
+func TestParseCatalogTerminalActionsIgnoreTTYRules(t *testing.T) {
+	for _, action := range []string{"-list-models", "-refresh-models"} {
+		t.Run(action, func(t *testing.T) {
+			orig := terminalCheck
+			t.Cleanup(func() { terminalCheck = orig })
+			terminalCheck = func(any) bool { return false }
+			t.Setenv("TERM", "")
+			cfg := cfgTestParseOK(t, []string{
+				action,
+				"-ui-json",
+				"-task", "ignored",
+				"-state-dir", t.TempDir(),
+			}, nil)
+			if !cfg.ListModels && !cfg.RefreshModels {
+				t.Fatalf("terminal action not recorded: %+v", cfg)
+			}
+			if cfg.TaskSet || cfg.Task != "" {
+				t.Fatalf("terminal action retained the task: %+v", cfg)
+			}
+			if cfg.Mode != 0 || cfg.UIJSON {
+				t.Fatalf("terminal action retained mode flags: %+v", cfg)
+			}
+		})
+	}
+}
+
+func TestTUISelectModelReportsContextClamp(t *testing.T) {
+	host := &tuiHost{
+		cfg: config{
+			Provider:         providerName,
+			Model:            "large",
+			Dialect:          model.DialectChat,
+			BaseURL:          testCatalogBaseURL,
+			MaxContextTokens: 1_000_000,
+			MaxTurns:         defaultMaxTurns,
+			MaxTotalTokens:   defaultMaxTotalTokens,
+			SessionTimeout:   defaultSessionTimeout,
+			ModelTimeout:     defaultModelTimeout,
+			maxContextSet:    true,
+			maxContextValue:  500_000,
+		},
+		catalog: map[string]model.CatalogModel{
+			"small": {
+				ID:            "small",
+				Dialect:       model.DialectChat,
+				BaseURL:       testCatalogBaseURL,
+				ContextWindow: 262_144,
+				ToolCall:      true,
+			},
+		},
+	}
+	if _, err := host.SelectModel("small"); err != nil {
+		t.Fatalf("SelectModel: %v", err)
+	}
+	if host.cfg.MaxContextTokens != 262_144 {
+		t.Fatalf("MaxContextTokens = %d, want the model clamp", host.cfg.MaxContextTokens)
+	}
+	warning := host.TakeModelWarning()
+	if !strings.Contains(warning, "clamped") {
+		t.Fatalf("warning = %q, want the context clamp", warning)
+	}
+	if got := host.TakeModelWarning(); got != "" {
+		t.Fatalf("warning was not consumed: %q", got)
 	}
 }

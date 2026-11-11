@@ -61,6 +61,7 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		Provider:         cfg.Provider,
 		Dialect:          cfg.Dialect,
 		Model:            cfg.Model,
+		BaseURL:          cfg.BaseURL,
 		Limits:           cfg.Limits,
 		MaxTurns:         cfg.MaxTurns,
 		MaxTotalTokens:   cfg.MaxTotalTokens,
@@ -277,6 +278,7 @@ func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
 	data := runStartData{
 		RunID:            session.NewID(),
 		ResumedFromSeq:   resumedFromSeq,
+		Provider:         r.cfg.Provider,
 		Model:            r.cfg.Model,
 		Dialect:          r.cfg.Dialect,
 		BaseURL:          r.cfg.BaseURL,

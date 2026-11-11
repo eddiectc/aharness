@@ -81,6 +81,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.InitialDialect = data.Dialect
 			state.Model = data.Model
 			state.Dialect = data.Dialect
+			state.BaseURL = data.BaseURL
 			state.Limits = data.Limits
 			state.MaxTurns = data.MaxTurns
 			state.MaxTotalTokens = data.MaxTotalTokens

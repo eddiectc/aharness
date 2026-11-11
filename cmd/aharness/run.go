@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -54,14 +55,14 @@ func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		printVersion(stdout)
 		return 0
 	}
-	if cfg.ProvisionalContext {
-		_, _ = fmt.Fprintf(stderr, "aharness: warning: max context tokens not set; using provisional default %d; set -max-context-tokens to the confirmed model window\n", cfg.MaxContextTokens)
+	cfg.HarnessVersion = buildVersion()
+	if cfg.RefreshModels || cfg.ListModels {
+		return runCatalogAction(cfg, stdout, stderr)
 	}
 	if err := selectMode(&cfg, stdin, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 		return exitConfig
 	}
-	cfg.HarnessVersion = buildVersion()
 	return execute(cfg, stdin, stdout, stderr)
 }
 
@@ -121,6 +122,15 @@ func execute(cfg config, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func executeNew(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) int {
+	source, err := newCatalogSource(cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		return exitConfig
+	}
+	if err := resolveNewModel(context.Background(), &cfg, source, stderr); err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		return catalogExitCode(err)
+	}
 	ws, code := openWorkspace(cfg, stderr)
 	if ws == nil {
 		return code
@@ -177,9 +187,14 @@ func executeResume(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger
 		_, _ = fmt.Fprintf(stderr, "aharness: read session %s: %v\n", cfg.ResumeID, sanitizeText(err.Error()))
 		return exitSetup
 	}
-	if err := applySessionDefaults(&cfg, state); err != nil {
+	source, err := sessionCatalogSource(cfg)
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
+	}
+	if err := applySessionDefaults(context.Background(), &cfg, state, source, stderr); err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		return catalogExitCode(err)
 	}
 	ws, code := openSessionWorkspace(cfg, state, stderr)
 	if ws == nil {
@@ -221,9 +236,14 @@ func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *
 		_, _ = fmt.Fprintf(stderr, "aharness: read parent session %s: %v\n", cfg.ForkID, sanitizeText(err.Error()))
 		return exitSetup
 	}
-	if err := applySessionDefaults(&cfg, state); err != nil {
+	catSource, err := sessionCatalogSource(cfg)
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
+	}
+	if err := applySessionDefaults(context.Background(), &cfg, state, catSource, stderr); err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		return catalogExitCode(err)
 	}
 	ws, code := openSessionWorkspace(cfg, state, stderr)
 	if ws == nil {
@@ -296,7 +316,7 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		"max_context_tokens", cfg.MaxContextTokens,
 		"max_total_tokens", cfg.MaxTotalTokens,
 	)
-	if cfg.Token == "" && cfg.BaseURL == model.DefaultBaseURL {
+	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
 		logger.Warn("provider token is unset; hosted OpenCode Go requires AHARNESS_PROVIDER_TOKEN")
 	}
 

@@ -44,12 +44,17 @@ it adds no durable event type.
 
 ## 2. Provider and model
 
-v1 supports one provider, `opencode-go`, through two OpenAI wire dialects:
-Chat Completions and Responses. The initial models are `crouton-alpha-free`,
-`deepseek-v4.1-flash`, and `muse-spark-1.3-contributor`; the model registry
-assigns each to one dialect. `-model`
-(or `AHARNESS_MODEL`) is required; there is no automatic fallback, routing, or
-provider matrix.
+aharness supports one provider, `opencode-go`, through two OpenAI wire
+dialects: Chat Completions and Responses. `-provider` (or
+`AHARNESS_PROVIDER`) defaults to `opencode-go`; an unknown provider is a config
+error. The usable model set, display names, context/input limits, advertised
+output ceilings, status, dialect, and base URL are discovered from the
+[models.dev](https://models.dev) catalog and normalized in `internal/model`.
+Deprecated models are selectable and labeled. Models without tool calls, text
+output, a positive context window, or a supported SDK are retained in the
+catalog with an `Unavailable` reason and omitted from the usable set. A new
+session requires `-model` (or `AHARNESS_MODEL`) naming a usable model; there is
+no hardcoded default model, fallback, routing, or provider matrix.
 
 The harness opens network connections only through the dialect adapters; tools
 may use whatever network the host allows. Provider-specific request and
@@ -65,25 +70,37 @@ configuration or discover credentials implicitly.
 
 ### 2.1 Wire format and SDKs
 
-v1 ships two dialect adapters over plain HTTP against the same `opencode-go`
-base URL, `https://opencode.ai/inference/go/v1`:
+The two dialect adapters use plain HTTP against the resolved catalog base URL.
+For `opencode-go`, a discovered base URL must be HTTPS with host `opencode.ai`
+and no userinfo, query, or fragment; the documented new-session OpenAI base is
+`https://opencode.ai/inference/go/openai/v1`. An explicit
+`-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` wins over discovery and may
+use any valid HTTP(S) host, including loopback test servers. Existing sessions
+keep their recorded base URL.
 
 - **Chat Completions:** `POST <base>/chat/completions`.
 - **Responses:** `POST <base>/responses`.
 
-The model registry maps each initial model to its documented OpenAI dialect:
+The dialect comes from the model's AI SDK package (`model.provider.npm`,
+falling back to `provider.npm`):
 
-| Model | Dialect |
-|---|---|
-| `deepseek-v4.1-flash` | `openai-chat` |
-| `crouton-alpha-free` | `openai-responses` |
-| `muse-spark-1.3-contributor` | `openai-responses` |
+| SDK package | Native protocol | Effective dialect |
+|---|---|---|
+| `@ai-sdk/openai-compatible` | `chat-completions` | `openai-chat` |
+| `@ai-sdk/openai` | `responses` | `openai-responses` |
+| `@ai-sdk/anthropic` | `messages` | `openai-chat` (translated) |
+| `@ai-sdk/google` | `generate-content` | `openai-chat` (translated) |
+| anything else | unknown | unavailable |
 
-It is a small table in `cmd`, not user-configurable in v1. Anthropic and Gemini
-are deferred. If a model misbehaves through a dialect, fix that adapter or add
-its native dialect behind the same canonical model; do not change the loop. The
-wire dialect is not the internal schema; both adapters map into the canonical
-model (Section 2.2).
+Anthropic- and Google-native models use the OpenAI Chat base URL and adapter;
+OpenCode documents that every text model also works through the other APIs, so
+the harness translates through Chat rather than adding native adapters. Unknown
+SDKs fail closed: the model is unavailable and an explicit selection reports
+the SDK. The native protocol and SDK are retained on the catalog record for
+display and diagnostics. If a model misbehaves through a dialect, fix that
+adapter or add its native dialect behind the same canonical model; do not change
+the loop. The wire dialect is not the internal schema; both adapters map into
+the canonical model (Section 2.2).
 
 Do not use an OpenCode SDK at this boundary. The published Go SDKs
 (`opencode-sdk-go` and its community forks) are generated clients for the
@@ -103,17 +120,18 @@ self-identifying `User-Agent: aharness/<version>`. An empty token omits the
 `Authorization` header, supporting local no-auth endpoints and tests. OpenCode
 Go requires the session header; the value is the run's UUIDv7 session ID. The
 base URL is a constructor argument so tests and local deployments can point the
-adapters at another OpenAI-compatible server. The CLI defaults to the hosted
-URL and exposes `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` for
-integration tests and local endpoints; this is the resolution of
-[v0-build.md §4.3 item 4](v0-build.md#43-prerequisites-and-resolutions). Production runs
-leave it at the default.
+adapters at another OpenAI-compatible server. The CLI resolves the base URL from
+an explicit `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL`, then the
+catalog entry; the flag also supports integration tests and local endpoints.
+This is the resolution of
+[v0-build.md §4.3 item 4](v0-build.md#43-prerequisites-and-resolutions).
+Production runs use the catalog URL.
 
 Both adapters send the full projected input on every call and keep no
 server-side conversation state. The Responses adapter sets `store: false` and
 never uses `previous_response_id`. If a future Responses model requires
 reasoning items or encrypted content across tool rounds, that continuation is
-adapter-owned; the v0 `muse-spark-1.3-contributor` smoke did not require one
+adapter-owned; the v0 Responses smoke did not require one
 ([v0-build.md §4.3](v0-build.md#43-prerequisites-and-resolutions)). The
 canonical model never carries raw provider shapes.
 
@@ -250,7 +268,7 @@ adapter fell back to non-streaming, the response text is printed once. Without
 | `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. |
 | `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
 | `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
-| `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors. |
+| `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors; models.dev catalog discovery, cache, and SDK-to-dialect mapping. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
@@ -259,7 +277,8 @@ go.mod
 cmd/aharness/
   main.go        # os.Exit(run())
   run.go         # mode selection, batch wiring, exit codes, work directories
-  config.go      # parsing, validation, inheritance, model-to-dialect registry
+  models.go      # catalog wiring, model resolution, list/refresh terminal actions
+  config.go      # parsing, validation, inheritance, discovery resolution
   control.go     # operation controller and batch signal delivery
   tui.go         # TUI host, session shell, -ui-json wiring, summary
   textsink.go    # streamed stdout newline handling
@@ -286,6 +305,8 @@ internal/tui/
   sanitize.go    # terminal-safe text sanitizer
 internal/model/
   types.go            # canonical types, StreamCompleter
+  catalog.go          # catalog types, lookup/usable filtering, cache path, source contract
+  catalog_source.go   # models.dev decode/normalize/eligibility, HTTP load/revalidate/refresh, cache
   openai_chat.go      # Chat Completions buffered + SSE adapter
   openai_responses.go # Responses buffered + SSE adapter
   http.go             # shared request, body cap, SSE decoder, errors
@@ -329,18 +350,31 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
 
 ### 3.2 Core contracts
 
+- `model.CatalogSource` — the discovery seam. `Load(ctx, provider)` honors the
+  24-hour cache TTL and performs a conditional GET when stale;
+  `Revalidate(ctx, provider)` bypasses the TTL but still falls back to a stale
+  valid cache; `Refresh(ctx, provider)` performs an unconditional GET with no
+  stale fallback. `Load` backs implicit resolution, `Revalidate` backs
+  `-list-models`, and `Refresh` backs `-refresh-models` and the TUI picker's
+  `Ctrl-R`. A returned `model.Catalog` carries normalized entries, the source
+  URL, `FetchedAt`, the ETag, and non-fatal `Warnings`; `Lookup` returns
+  `ErrModelNotFound`, and `Usable` filters unavailable entries and sorts by ID.
+  `cmd` constructs the models.dev implementation with the HTTP client, state
+  directory, clock, and TTL; tests inject a fake `CatalogSource` or an
+  `httptest` server.
 - `model.OpenAIChat` and `model.OpenAIResponses` — concrete dialect adapters
   with `Complete(ctx, model.Request) (model.Response, error)`. `model.Request`
   carries the projected messages with the versioned system prompt first, tool
-  schemas, `max_output_tokens`, and model name. `model.Response` carries
-  assistant text, zero or more tool calls (canonical call ID, name, raw JSON
-  arguments), a normalized finish reason (`stop`, `length`, `tool_calls`,
-  `content_filter`, or `other`), usage, and a display-only `Streamed` flag.
-  Adapters guarantee a non-empty call ID; for a dialect that supplies IDs, a
-  missing or duplicate ID is `protocol_error` and is not repaired. Typed errors
-  (`HTTPError`, `TransportError`, `ProtocolError`, `PartialError`, and context
-  overflow) keep retry policy in `agent`. `cmd` maps the configured model to its
-  dialect and wires the corresponding adapter.
+  schemas, an optional `max_output_tokens` (zero omits the wire field), and
+  model name. `model.Response` carries assistant text, zero or more tool calls
+  (canonical call ID, name, raw JSON arguments), a normalized finish reason
+  (`stop`, `length`, `tool_calls`, `content_filter`, or `other`), usage, and a
+  display-only `Streamed` flag. Adapters guarantee a non-empty call ID; for a
+  dialect that supplies IDs, a missing or duplicate ID is `protocol_error` and
+  is not repaired. Typed errors (`HTTPError`, `TransportError`,
+  `ProtocolError`, `PartialError`, and context overflow) keep retry policy in
+  `agent`. `cmd` resolves the catalog entry to its dialect, base URL, and
+  limits and wires the corresponding adapter.
 - `model.StreamCompleter` — optional `CompleteStream(ctx, req, emit)` contract.
   `emit` receives display-only text deltas; the returned `Response` is
   authoritative. The agent falls back to `Complete` when an adapter does not
@@ -372,7 +406,7 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   once-per-session `session_start` event for a new or forked session.
 - `agent.Project(events []session.Event, limits Limits) (Projection, error)` —
   pure function of events plus limits; no hidden state. `Limits` carries the
-  per-call input budget, the next-output reserve, and the compaction target; the
+  per-call input budget and the compaction target; the
   prompt and tool schemas are selected from the versions recorded in
   `session_start` using immutable package constants. Run/control events
   (`run_start`, `run_end`, `interrupt`, `session_repair`, `final`, `limit`,
@@ -430,12 +464,16 @@ schema version.
 ### 4.1 Turn sequence
 
 1. Validate configuration before creating new session state. A new session
-   requires exactly one task source and a model. A resume or fork resolves the
-   session under `<state>/sessions`, validates the v2 log, inherits the recorded
-   workspace/model/base URL/limits unless explicitly overridden, requires the
-   workspace to match, and enforces the task matrix and inherited cumulative
-   limits. Config failures exit 2; a corrupt or unreadable existing log is a
-   state failure (1) and writes no new session events.
+   requires exactly one task source and a model listed in the discovered
+   catalog. A resume or fork resolves the session under `<state>/sessions`,
+   validates the v2 log, inherits the recorded provider/model/dialect/base
+   URL/limits unless explicitly overridden, requires the workspace to match,
+   and enforces the task matrix and inherited cumulative limits. Resume/fork
+   without an explicit model uses the recorded values and skips the catalog; an
+   explicit model is resolved through the catalog, and an explicit provider
+   that differs from the record is a config error. Config failures exit 2; a
+   corrupt or unreadable existing log is a state failure (1) and writes no new
+   session events.
 2. Prepare durable state. A new session creates the store and appends
    `session_start`. A resume takes an exclusive `flock`, validates the log,
    repairs only a torn final line (recording `session_repair`), and pairs every
@@ -664,8 +702,8 @@ it on every turn. Compaction never mutates the log.
    IDs are never dropped, and a result is never emitted without its call.
 5. Older tool-result bodies may be replaced by a one-line stub; the call ID,
    tool name, and original byte count remain.
-6. The projection fits the configured input budget with room reserved for the
-   next output.
+6. The projection fits the configured input budget; the input cap does not
+   reserve or subtract an output budget.
 7. If the projection cannot fit after compaction, the run stops with
    `token_limit` before the model call.
 
@@ -676,9 +714,19 @@ it on every turn. Compaction never mutates the log.
   and 16 tokens per tool schema; treat provider-reported usage as authoritative
   for totals after each response. These constants are part of the projection
   contract and are covered by tests.
-- The per-call limit is `max_context_tokens - max_output_tokens - safety_margin`,
-  where `safety_margin` defaults to 5% of `max_context_tokens` (minimum 1,000
-  tokens) to absorb estimator error.
+- The per-call limit is `min(model.limit.input, context - safety_margin)` when
+  the catalog supplies an input ceiling, otherwise `context - safety_margin`,
+  where `safety_margin` defaults to 5% of the context window (minimum 1,000
+  tokens) to absorb estimator error. The output budget is not subtracted.
+- There is no harness-imposed per-call output budget by default. The request
+  omits `max_tokens` / `max_output_tokens`, leaving the ceiling to the
+  provider/model; an explicit `-max-output-tokens` is sent unchanged. The
+  catalog's advertised output limit is display metadata, not a request budget.
+- A `length` finish reason uses the continuation hint; two consecutive
+  `length` responses without a tool round stop with `token_limit`. A provider
+  context-overflow error rebuilds against 90% of the failed per-call input limit
+  and retries once; if that retry fails or nothing can be elided, the run stops
+  with `token_limit`.
 - Tool results are truncated at capture, then elided from old turns in the
   projection. The initial task, system prompt, and recent turns are never
   elided.
@@ -689,7 +737,8 @@ it on every turn. Compaction never mutates the log.
   source's Tier 1 requirement and is easier to reason about.
 - Cumulative totals include every model response's input and output tokens,
   including retries. The session logs token usage; dollar-cost tracking is out
-  of scope in v1.
+  of scope. A 1,000,000-token context can consume the 2,000,000-token cumulative
+  budget in roughly two full-context calls.
 
 ## 7. Session log
 
@@ -758,8 +807,8 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, limits, max turns/total tokens, timeouts, harness version, plus optional `parent_session`/`parent_seq`. |
-| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective model, dialect, base URL, limits, prompt/toolset/harness versions, `interactive`, `stream`. |
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, limits, max turns/total tokens, timeouts, harness version, plus optional `parent_session`/`parent_seq`. |
+| `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, limits, prompt/toolset/harness versions, `interactive`, `stream`. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage, latency, attempt, `streamed`; 1 MiB total canonical content. |
@@ -826,9 +875,11 @@ strings. Error strings are lowercase and have no trailing punctuation.
 ## 9. CLI and configuration
 
 ```
+aharness -list-models
+aharness -refresh-models
 aharness -model deepseek-v4.1-flash
 aharness -model deepseek-v4.1-flash -task "..."
-aharness -task-file task.md -model crouton-alpha-free -workspace /tmp/repo
+aharness -task-file task.md -model deepseek-v4.1-flash -workspace /tmp/repo
 aharness -batch -task "..." -model deepseek-v4.1-flash
 aharness -resume <session-id>
 aharness -batch -resume <session-id> -task "Now run the tests"
@@ -843,12 +894,47 @@ empty token for local no-auth endpoints and tests (Section 2.1).
 - Use the standard `flag` package; no CLI framework.
 - Precedence: defaults, then environment, then flags. Parse environment errors
   as config errors; validate the effective config once before the run.
+- `-provider` or `AHARNESS_PROVIDER` selects the provider and defaults to
+  `opencode-go`; there is no provider matrix. An unknown provider is a config
+  error (exit 2) listing `opencode-go`. `-model` or `AHARNESS_MODEL` is
+  required for a new session and must name a usable catalog entry; a missing,
+  ineligible, or unknown model is a config error naming the provider and model.
+  Discovery supplies the model's dialect, base URL, context window, and input
+  limit. Deprecated models are selectable with a warning.
 - Mode flags: `-batch`, `-ui-json`, and `-ui-size WxH` (only with `-ui-json`,
   default 100x30, valid 20x5–500x200). A task is optional in TUI/`-ui-json`
   modes. `-interactive` was removed; passing it is an unknown-flag error.
 - Session flags: `-resume <id>`, `-fork <id>`, `-task`, `-task-file`, `-stream`.
   They have no environment equivalents. A session ID is validated as a UUID
   before a path is built.
+- `-version`, `-refresh-models`, and `-list-models` are terminal actions that
+  run before mode selection and session creation and require no task, session,
+  or provider token. Their precedence is `-version`, then `-refresh-models`,
+  then `-list-models`; `-refresh-models -list-models` refreshes first and then
+  prints the list. Task and session-selection flags are ignored, while
+  `-provider`, `-state-dir`, and the catalog URL apply.
+- `-refresh-models` performs an unconditional catalog GET, atomically replaces
+  the cache, prints `refreshed <n> usable models for <provider> from <source>
+  at <RFC3339>` on stdout, and exits 0. With `-list-models` the summary goes to
+  stderr so stdout remains the list. A transport/timeout/5xx failure exits 3; an
+  invalid catalog or unexpected `304` exits 4; the existing cache is unchanged.
+  A CLI cache write failure exits 2 because the refresh was not persisted.
+- `-list-models` prints a tab-separated header and one row per usable model:
+  `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`. `OUTPUT` is the
+  advertised per-request ceiling, not an effective budget; a missing ceiling
+  prints as `-`. It revalidates the cache without forcing a full download and
+  keeps stale-cache fallback.
+- Catalog source: `AHARNESS_MODELS_DEV_URL` overrides the default
+  `https://models.dev/api.json` for tests and mirrors; the override must be
+  HTTPS except for loopback HTTP. A request times out after 15 seconds and caps
+  the response body at 16 MiB. The normalized cache is
+  `<state>/cache/models.dev/<provider>.json` with file mode 0600 and directory
+  mode 0700, and cache version 1. A fresh entry is used for 24 hours without a
+  network request; a stale entry triggers a conditional GET. An implicit or
+  `-list-models` refresh failure falls back to a stale valid cache with a
+  warning; no valid cache is a provider (3) or protocol (4) error naming the
+  source URL and cache path. A corrupt or version-mismatched cache is treated as
+  absent.
 - Mode selection happens after flag parsing and before task validation or
   session creation: `-version` first, then explicit `-ui-json`, explicit
   `-batch`, otherwise TUI when stdin and stdout are terminals, otherwise batch.
@@ -875,18 +961,12 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   it must be writable, or start-up fails with exit 2. The token and state
   directory are read from the current invocation and are not inherited from the
   log.
-- `-model` or `AHARNESS_MODEL` is required for a new session. Accepted values:
-  `crouton-alpha-free`, `deepseek-v4.1-flash`, `muse-spark-1.3-contributor`.
-  The provider is fixed to `opencode-go`. The model registry is fixed:
-  `crouton-alpha-free` and `muse-spark-1.3-contributor` use
-  `openai-responses`; `deepseek-v4.1-flash` uses `openai-chat`. An explicit
-  model may change between runs; `run_start` records the effective value.
 - `-provider-base-url` defaults to `AHARNESS_PROVIDER_BASE_URL`, then the
-  hosted base URL (`https://opencode.ai/inference/go/v1`) for a new session. On
-  resume/fork, an omitted flag/env inherits the last run's URL. The URL must be
-  http(s) with a host and must not contain userinfo or a query/fragment, so the
-  log cannot capture credentials. Do not intercept the hosted URL with a proxy
-  or a hosts-file override.
+  catalog model/provider base URL for a new session. On resume/fork, an omitted
+  flag/env inherits the last run's URL. A discovered URL must be HTTPS with host
+  `opencode.ai` and no userinfo, query, or fragment; an explicit override may use
+  any valid HTTP(S) host, including loopback test servers. Do not intercept the
+  hosted URL with a proxy or a hosts-file override.
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
   optional. When set, the selected adapter sends it as a Bearer token; when
   unset or empty, it omits `Authorization`, supporting local no-auth endpoints
@@ -895,36 +975,44 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   adapter sends the session ID in the required `x-opencode-session` header and
   identifies itself as `aharness/<version>` in `User-Agent` (Section 2.1).
   OpenCode documents free-tier chat models as restricted to OpenCode clients;
-  other clients receive `403`. Use the Go Responses model
-  `muse-spark-1.3-contributor` for the Responses smoke; the workspace must
-  allow paid endpoints that train on request data.
+  other clients receive `403`. Use a discovered Responses model (`-list-models`
+  shows the dialect) for the Responses smoke; the workspace must allow paid
+  endpoints that train on request data.
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
 - `-max-turns`, `-max-total-tokens`, `-max-context-tokens`, `-session-timeout`,
   and `-max-output-tokens` override defaults or inherited values. Validate
-  positive values and
-  `max-output-tokens + safety_margin < max-context-tokens`.
-  `AHARNESS_MAX_CONTEXT_TOKENS` sets the per-call context window; it must match
-  the model. The 200,000 default is provisional until the model context window
-  is confirmed; acceptance runs MUST set the flag explicitly to the confirmed
-  window. The harness logs a warning when the provisional default is used for a
-  new session. Planned model discovery (not implemented; see
-  [model-discovery-build.md](model-discovery-build.md) §3.4) removes the fixed
-  8,192 output default: `-max-output-tokens` will default to 0/unset and the
-  request will omit the field, with 0 clearing an inherited budget on
-  resume/fork. The input cap will no longer subtract an output budget. The v1
-  rules above apply until that plan is implemented.
+  positive values where a zero is not the documented sentinel.
+  `AHARNESS_MAX_CONTEXT_TOKENS` sets the context window explicitly. For a new
+  session, context defaults to the catalog `limit.context`;
+  `-max-context-tokens` defaults to 0 (unset), an explicit positive value is
+  clamped down to the model ceiling with a warning, and an explicit zero or
+  negative value is a config error. The input cap is
+  `min(model.limit.input, context - safety_margin)` when the catalog supplies an
+  input limit, otherwise `context - safety_margin`. `-max-output-tokens`
+  defaults to 0 (unset): the request omits `max_tokens` / `max_output_tokens`.
+  An explicit positive value is sent unchanged and is not clamped by the
+  catalog; `0` clears an inherited budget on resume/fork; a negative value is a
+  config error. The catalog's advertised output ceiling is informational only.
+  A provider rejection of an explicit output budget is a provider error naming
+  the requested value.
 - Prompt and toolset versions are selected from `session_start` and must be
   supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
-- Effective limits are inherited from the last run unless overridden. A resume
-  or fork already at an inherited turn/token limit fails at config validation
-  unless that limit is raised.
+- Effective limits are inherited from the last run unless overridden. On
+  resume/fork, the recorded model/dialect/base URL/limits are used without a
+  catalog fetch unless the model is explicit. An explicit provider different
+  from the recorded provider is a config error. A resume or fork already at an
+  inherited turn/token limit fails at config validation unless that limit is
+  raised.
 - Exit codes: `completed` 0, limits 2, provider 3, protocol/stuck 4,
   interrupted 130, internal 1. A missing/invalid/locked session, a workspace
-  mismatch, an unsupported prompt/toolset version, or a task-rule violation is a
-  config error (2). A corrupt or unreadable existing log is a state failure (1)
-  and writes no new session events. A v0 or unknown schema log is a config error
-  (2) with a clear message.
+  mismatch, an unsupported prompt/toolset version, a task-rule violation, an
+  unknown provider, a missing/ineligible model, or an invalid explicit limit is
+  a config error (2). A corrupt or unreadable existing log is a state failure
+  (1) and writes no new session events. A v0 or unknown schema log is a config
+  error (2) with a clear message. Catalog transport failure with no valid cache
+  is 3; invalid catalog JSON/schema is 4; an explicit refresh failure uses the
+  same mapping and leaves the cache unchanged.
 - Output contract: batch without `-stream` prints the final assistant text for
   this run only; batch with `-stream` prints assistant text from every turn as
   it arrives, and a response's final text is not reprinted after its deltas.
@@ -947,9 +1035,14 @@ Defaults are deliberately conservative and easy to change:
 
 | Setting | Default |
 |---|---|
+| Provider | `opencode-go` (`-provider` / `AHARNESS_PROVIDER`) |
+| Catalog | `https://models.dev/api.json` (`AHARNESS_MODELS_DEV_URL` override) |
+| Catalog cache TTL | 24 hours |
+| Catalog request timeout | 15 seconds |
+| Catalog response body | 16 MiB |
 | Max turns | 30 |
-| Max context tokens | 200,000 provisional; set explicitly to the confirmed model window for acceptance runs |
-| Max output tokens per call | 8,192 |
+| Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
+| Max output tokens per call | 0 (unset; the request field is omitted) |
 | Max total tokens | 2,000,000 |
 | Max run wall clock | 60 minutes |
 | Model call timeout | 300 seconds |
@@ -964,11 +1057,13 @@ The complete reference for caps, limits, and timeouts is [limits.md](limits.md).
 Limits are part of the runtime contract; changing one requires updating that
 reference and the code constant.
 
-The main values are the defaults in §9 plus: a 5% (minimum 1,000-token) context
-safety margin; 4 retained turns; 5 transport attempts with 1s base, 30s max,
-and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool results; 64 KiB
-command output; a 1 MiB non-streaming provider response; a 4 MiB SSE event; a
-1 MiB assembled response; an 8 MiB total stream; 64 KiB partial text; a 1 MiB
-debug request; a 64 KiB model-response event-text cap except for the fully
-recorded `model_response`; a 64 KiB steering line; and a 4 MiB session line.
+The main values are the defaults in §9 plus: a 15-second catalog request
+timeout and 16 MiB catalog body cap, a 24-hour catalog cache TTL, a 5% (minimum
+1,000-token) context safety margin; 4 retained turns; 5 transport attempts with
+1s base, 30s max, and 25% jitter; a 60s `Retry-After` cap; 32 KiB file-tool
+results; 64 KiB command output; a 1 MiB non-streaming provider response; a
+4 MiB SSE event; a 1 MiB assembled response; an 8 MiB total stream; 64 KiB
+partial text; a 1 MiB debug request; a 64 KiB model-response event-text cap
+except for the fully recorded `model_response`; a 64 KiB steering line; and a
+4 MiB session line.
 

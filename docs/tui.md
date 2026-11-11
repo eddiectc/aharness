@@ -1,9 +1,10 @@
 # aharness TUI (shipped)
 
-- **Date:** 2026-11-10
-- **Status:** implemented (TUI build plan M0–M5). The full contract and milestone
-  rationale are in [tui-build.md](tui-build.md); this document records the
-  shipped surface and verification status.
+- **Date:** 2026-11-11
+- **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
+  picker from [model discovery](model-discovery-build.md). The full contract and
+  milestone rationale are in [tui-build.md](tui-build.md); this document records
+  the shipped surface and verification status.
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
   steering, interrupts, resume, fork, signals), headless `x/vt` frames and SVG
   snapshots, race tests, and a manual PTY smoke under `script(1)` at 80x24.
@@ -54,10 +55,10 @@ submitted message while idle starts one run.
 | `Ctrl-W`/`Ctrl-K` | delete previous word / to end | delete previous word / to end |
 | `Up`/`Down` | input history | input history |
 | `PgUp`/`PgDn` | scroll the transcript | scroll the transcript |
-| `Ctrl-R` | toggle rich/raw assistant rendering | toggle rich/raw |
+| `Ctrl-R` | toggle rich/raw assistant rendering; in the model picker, refresh the catalog | toggle rich/raw |
 | `Ctrl-T` | most recent markdown table overlay | table overlay |
 | `Ctrl-G` | image viewer for the most recent image block | image viewer |
-| `Ctrl-P` | model picker for the next run | disabled with a notice |
+| `Ctrl-P` | catalog-backed model picker for the next run | disabled with a notice |
 | `Ctrl-O` | workspace file picker (Bubbles list; see note) | disabled with a notice |
 | `F1` | help overlay | help overlay |
 | `Ctrl-X` | details overlay | details overlay |
@@ -68,6 +69,40 @@ submitted message while idle starts one run.
 A bare `Esc` is recognized only after the 50 ms escape timeout. Option/Alt
 sequences, including Option-`[` and Option-`]`, are decoded as modified keys
 and never interrupt; `Ctrl-C` remains the authoritative global interrupt.
+
+## Model picker
+
+`Ctrl-P` opens the catalog-backed model picker while idle; a run disables it
+with a notice. Entries are the usable models from models.dev, sorted by ID. Each
+row shows the display name, ID, dialect, context and input limits, advertised
+output ceiling, and a `deprecated` / `alpha` / `beta` marker and a `translated`
+marker when applicable. Deprecated models remain selectable and are never chosen
+automatically. The advertised output ceiling is catalog metadata, not the
+effective request budget: unless `-max-output-tokens` is explicit, output is
+unset and the request omits the field.
+
+Selecting a model changes only the next run's dialect, base URL, and limits;
+the current run and existing log are untouched. An explicit context limit is
+clamped to the new model's window; an explicit output budget is sent unchanged.
+The details overlay (`Ctrl-X`) shows the effective values for the current or
+next run and displays `max output: unset` when no explicit budget applies.
+
+`Ctrl-R` in the picker performs the same unconditional refresh as
+`-refresh-models`: the footer shows `refreshing models…`, a second `Ctrl-R`
+while the request is in flight is ignored, and closing the picker cancels the
+request without changing the loaded entries. On success the entries are
+replaced in place, preserving the highlighted model and filter when they still
+exist; otherwise the first usable model is highlighted. On failure the loaded
+entries remain and a notice reports the error. Outside the picker, `Ctrl-R`
+keeps its rich/raw meaning. With the picker open, `-ui-json` `ctrl-r` also means
+refresh; the protocol version does not change.
+
+On resume without an explicit model, the picker may skip the network. If the
+catalog is unavailable, it contains only the recorded current model with a
+notice that switching is disabled; resume still works. `Ctrl-R` retries the
+fetch and, on success, expands the picker to the usable catalog and enables
+switching. A recorded model absent from the catalog is still shown and usable
+from the session record; switching to another model requires catalog metadata.
 
 ## `-ui-json` protocol v1
 

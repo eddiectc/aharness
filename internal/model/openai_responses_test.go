@@ -382,3 +382,24 @@ func TestOpenAIResponsesFinishNormalization(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIResponsesOmitsUnsetOutputBudget(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = readRequestBody(t, r)
+		serveJSON(t, w, http.StatusOK, `{"id":"resp","object":"response","status":"completed","output":[],"usage":{}}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	if _, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"}); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := jsonv2.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if value, present := raw["max_output_tokens"]; present {
+		t.Errorf("max_output_tokens = %s, want absent for an unset budget", value)
+	}
+}

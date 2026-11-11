@@ -21,6 +21,7 @@ type sessionStartData struct {
 	Provider         string `json:"provider"`
 	Dialect          string `json:"dialect"`
 	Model            string `json:"model"`
+	BaseURL          string `json:"base_url,omitempty"`
 	Limits           Limits `json:"limits"`
 	MaxTurns         int    `json:"max_turns"`
 	MaxTotalTokens   int    `json:"max_total_tokens"`
@@ -34,6 +35,7 @@ type sessionStartData struct {
 type runStartData struct {
 	RunID            string `json:"run_id"`
 	ResumedFromSeq   uint64 `json:"resumed_from_seq"`
+	Provider         string `json:"provider"`
 	Model            string `json:"model"`
 	Dialect          string `json:"dialect"`
 	BaseURL          string `json:"base_url"`

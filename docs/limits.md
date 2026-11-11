@@ -1,9 +1,10 @@
 # aharness limits and timeouts
 
-- **Date:** 2026-11-10
-- **Status:** current for v1 and the shipped TUI.
+- **Date:** 2026-11-11
+- **Status:** current for v1, the shipped TUI, and model discovery.
 - **Related:** [architecture](architecture.md), [v1 build plan](v1-build.md),
   [TUI build plan](tui-build.md), [shipped TUI](tui.md),
+  [model discovery build plan](model-discovery-build.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
@@ -17,12 +18,23 @@ own constant.
 | Limit | v1 value | Behavior |
 |---|---|---|
 | Max turns | 30 | Checked before each model call; counts successful model responses. Resume reconstructs it from the log; cumulative across runs. |
-| Max total tokens | 2,000,000 | Cumulative over the session; resume reconstructs it from the log. A retry that succeeds counts once. |
-| Max context tokens | 200,000 provisional | Per call. Acceptance runs set this explicitly to the confirmed model window. |
-| Max output tokens | 8,192 | Per call. |
+| Max total tokens | 2,000,000 | Cumulative over the session; resume reconstructs it from the log. A retry that succeeds counts once. A 1,000,000-token context can consume this budget in roughly two full-context calls. |
+| Max context tokens | Catalog `limit.context` | Per call. `-max-context-tokens` defaults to 0 (unset); an explicit positive value is clamped down to the model ceiling with a warning. |
+| Max output tokens | Unset (0) | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is invalid. |
+| Advertised output ceiling | Catalog `limit.output` | Display/validation metadata only; never a request budget and never an eligibility gate. |
 | Safety margin | `max(5% of context, 1,000)` | Reserved from the context window for estimator error. |
-| Max input tokens | `context - output - margin` | Per call. |
+| Max input tokens | `min(model limit.input, context - safety_margin)` | Per call. When the catalog has no positive input limit, `context - safety_margin`. No output budget is subtracted. |
 | Compaction target | max input tokens | Older tool-result bodies are elided to this target. |
+| Catalog URL | `https://models.dev/api.json` | `AHARNESS_MODELS_DEV_URL` overrides for tests and mirrors; HTTPS except loopback HTTP. |
+| Catalog request timeout | 15 seconds total | Includes body reads; no automatic retry. |
+| Catalog response body | 16 MiB | Larger is a protocol error, not a partial parse. |
+| Catalog cache TTL | 24 hours | A fresh cache is used without a network request; a stale cache triggers a conditional GET. |
+| Catalog stale fallback | implicit and `-list-models` only | On failure, a valid stale cache is used with a warning. Explicit refresh never falls back. |
+| Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R` | Unconditional GET, reusing the 15-second timeout, 16 MiB body cap, and 0600 cache policy. Failure exits 3/4 (CLI) or notifies (TUI); no stale fallback. |
+| Catalog cache file | `<state>/cache/models.dev/<provider>.json` | File 0600, directory 0700; atomic replacement. |
+| Catalog cache version | 1 | A version mismatch or corrupt entry is ignored and treated as absent. |
+| Model ID | at most 256 bytes | Valid UTF-8 with no control characters; used only as a JSON value/map key, never a path. |
+| Discovered base URL | HTTPS `opencode.ai` | Host must be `opencode.ai` with no userinfo, query, or fragment; an explicit `-provider-base-url` wins. |
 | Session wall clock | 60 minutes | Per run; checked before each turn. Resume starts a fresh clock. |
 | Model call timeout | 300 seconds | Per call; fixed, not a CLI flag. |
 | HTTP client timeout | 5 minutes | Outer bound on a provider request, including body reads. |
@@ -37,13 +49,10 @@ own constant.
 | Retained verbatim turns | 4 | Most recent model-response turns in the projection. |
 | Token estimate | `ceil(bytes/4) + 8/message + 16/tool schema` | Conservative; provider usage is authoritative for totals. |
 
-**Planned change (model discovery, not implemented):** the fixed 8,192 output
-budget is removed. `-max-output-tokens` will default to unset (0), the request
-will omit `max_tokens` / `max_output_tokens`, and the input cap will become
-`min(model limit.input, context - safety margin)` with no output term.
-`model.limit.output` is informational and does not gate eligibility. Until the
-change ships, the v1 values above apply. See
-[model-discovery-build.md](model-discovery-build.md) §3.4.
+Existing sessions keep their recorded context, output, and base URL values;
+new sessions use the catalog. The cumulative turn/token and wall-clock budgets
+are unchanged, so a 1,000,000-token context can consume the 2,000,000-token
+budget quickly.
 
 ## 2. Provider transport and streaming
 
@@ -127,17 +136,21 @@ Other event payloads:
 
 | Limit | v1 value | Behavior |
 |---|---|---|
+| `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
+| `-list-models` | off | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS` and exits; no session, task, or token. No separate output cap; bounded by the catalog size. |
+| `-refresh-models` | off | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |
 | `-max-turns` | 30 | Must be positive; cumulative. |
 | `-max-total-tokens` | 2,000,000 | Must be positive; cumulative. |
-| `-max-context-tokens` | 200,000 provisional | Must be positive; explicit value required for acceptance. |
-| `-max-output-tokens` | 8,192 | Must be positive; output plus safety margin must be less than context. |
+| `-max-context-tokens` | 0 (unset) | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
+| `-max-output-tokens` | 0 (unset) | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
 | `-session-timeout` | 60 minutes | Must be positive; per run. |
 | Model call timeout | 300 seconds | Fixed; no CLI flag. |
 | `-task` / `-task-file` | no read cap | Effective transcript text is 64 KiB. |
 | Steering message | 64 KiB | TUI composer submission while a run is active. |
 | Session selection | UUIDv7 ID | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
 | Provider token | no length cap | In memory only; never logged or passed to tools. |
-| Provider base URL | no length cap | Must be http(s) with a host; userinfo and query/fragment are rejected. |
+| Provider base URL | no length cap | Explicit override must be http(s) with a host; userinfo and query/fragment are rejected. Discovered URLs are HTTPS `opencode.ai`. |
+| Catalog URL | no length cap | Default `https://models.dev/api.json`; `AHARNESS_MODELS_DEV_URL` must be HTTPS except loopback HTTP. |
 | State directory path | OS path limit | No explicit application cap. |
 | Session log retention | none | No rotation or automatic deletion. |
 
@@ -169,6 +182,7 @@ contract. See [tui.md](tui.md) for the shipped behavior.
 | Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
 | Escape timeout | 50 ms | A lone Esc is delivered; modified sequences never interrupt. |
 | Display queue | 256 events | Backpressure; text deltas are not durable. |
+| TUI catalog refresh | `Ctrl-R` in the model picker | Idle only; reuses the catalog timeout/body/cache caps; no `-ui-json` protocol version change. |
 | `-ui-json` command line | 1 MiB | Longer lines are a protocol error (exit 2). |
 | `-ui-json` text/paste | 64 KiB per command | Longer text is rejected with a protocol error. |
 | `-ui-json` frame size | 20×5–500×200 | `-ui-size`/`resize` outside the range is a config/protocol error. |

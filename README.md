@@ -4,12 +4,14 @@ aharness is a small coding-agent harness written in Go. It takes one task, runs
 a bounded model/tool loop against a workspace, appends every event to a JSONL
 session log, and exits with a final answer or a typed stop reason.
 
-- **Status:** v1 implementation complete (M0–M3), and the post-v1 TUI
-  (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented. The TUI is
-  the default in a terminal; `-batch` keeps the one-shot CLI and `-ui-json` is
-  the headless automation surface. Mock-provider, integration, fuzz, race, and
-  §8 gate checks pass. The real-provider TUI smoke remains pending provider
-  credentials; it is the one unverified release gate.
+- **Status:** v1 implementation complete (M0–M3), the post-v1 TUI
+  (M0–M5 in the [TUI build plan](docs/tui-build.md)) is implemented, and
+  provider/model discovery (the [model discovery build
+  plan](docs/model-discovery-build.md)) is implemented. The TUI is the default
+  in a terminal; `-batch` keeps the one-shot CLI and `-ui-json` is the headless
+  automation surface. Mock-provider, integration, fuzz, race, and §8 gate checks
+  pass. The real-provider TUI smoke remains pending provider credentials; it is
+  the one unverified release gate.
 - **Toolchain:** Go 1.27.3, module `aharness`.
 - **Dependencies:** the Go standard library by default. The approved TUI
   exception is Bubble Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2,
@@ -19,10 +21,15 @@ session log, and exits with a final answer or a typed stop reason.
 
 ## What v1 includes
 
-- One provider (`opencode-go`) behind a canonical model, with OpenAI Chat
-  Completions and Responses adapters, and the `crouton-alpha-free`,
-  `deepseek-v4.1-flash`, and `muse-spark-1.3-contributor` models mapped to
-  their dialects.
+- One provider (`opencode-go`, selected by `-provider` or
+  `AHARNESS_PROVIDER`) behind a canonical model, with OpenAI Chat Completions
+  and Responses adapters. The usable model set, display names, context/input
+  limits, dialect, and base URL are discovered from the
+  [models.dev](https://models.dev) catalog and cached for 24 hours under the
+  state directory.
+- `-list-models` prints the usable catalog without creating a session;
+  `-refresh-models`, and `Ctrl-R` in the TUI model picker, force an
+  unconditional catalog refresh. There is no hardcoded model list or default.
 - Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
   validated registry with `os.Root` workspace containment.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
@@ -65,7 +72,7 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [v1-build.md](docs/v1-build.md) | v1 scope, contract deltas, milestones, decisions, and costly-to-reverse assumptions |
 | [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
-| [model-discovery-build.md](docs/model-discovery-build.md) | Planned provider flag and opencode-go model/limit/dialect discovery from models.dev; removes the hardcoded model registry |
+| [model-discovery-build.md](docs/model-discovery-build.md) | Implemented `-provider` and opencode-go model/limit/dialect discovery from models.dev; catalog cache, revalidation, refresh, and listing |
 | [limits-removal-build.md](docs/limits-removal-build.md) | Planned removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
@@ -82,6 +89,12 @@ The CLI is specified in [architecture.md §9](docs/architecture.md#9-cli-and-con
 go build -trimpath -o bin/aharness ./cmd/aharness
 
 export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
+
+# Discover the usable opencode-go models, then exit.
+./bin/aharness -list-models
+
+# Force an unconditional catalog refresh and replace the 24-hour cache.
+./bin/aharness -refresh-models
 
 # Default in a terminal: interactive TUI, waiting for the first message.
 ./bin/aharness -model deepseek-v4.1-flash -workspace /path/to/repo
@@ -108,14 +121,21 @@ eagerly, the header shows its ID, and the first submitted message supplies the
 task. `-batch` keeps the v1 matrix: a new session needs exactly one of `-task`
 or `-task-file`, `-fork` requires a task, and `-resume` requires a task only
 after a completed run. `-model` (or `AHARNESS_MODEL`) is required for a new
-session. `-interactive` was removed in the TUI cutover; passing it is an
-unknown-flag error. Session logs default to `$XDG_STATE_HOME/aharness` (or
-`~/.local/state/aharness`), outside the workspace; `-state-dir` overrides it.
-Session IDs resolve only under `<state>/sessions/<id>.jsonl`.
-`-provider-base-url` (or `AHARNESS_PROVIDER_BASE_URL`) points the adapters at a
-fake or local OpenAI-compatible server; normal runs leave it at the hosted
-default. On resume/fork the recorded base URL is inherited unless explicitly
-overridden.
+session and must name a usable model in the discovered catalog. `-interactive`
+was removed in the TUI cutover; passing it is an unknown-flag error. Session
+logs default to `$XDG_STATE_HOME/aharness` (or `~/.local/state/aharness`),
+outside the workspace; `-state-dir` overrides it. Session IDs resolve only under
+`<state>/sessions/<id>.jsonl`.
+
+A new session resolves the model's dialect, base URL, context window, and input
+cap from models.dev, with the normalized catalog cached at
+`<state>/cache/models.dev/<provider>.json`. `-provider` (or
+`AHARNESS_PROVIDER`) defaults to `opencode-go`. `-provider-base-url` (or
+`AHARNESS_PROVIDER_BASE_URL`) overrides the discovered base URL and can point
+the adapters at a fake or local OpenAI-compatible server; normal runs use the
+catalog URL. Resume/fork inherit the recorded provider, model, dialect, base
+URL, and limits without a catalog fetch; an explicit model change re-resolves
+through the catalog.
 
 ## Isolation
 

@@ -1,8 +1,8 @@
 # aharness v1 testing strategy
 
-- **Date:** 2026-11-10
-- **Status:** normative testing strategy for v1 and the shipped TUI
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md)
+- **Date:** 2026-11-11
+- **Status:** normative testing strategy for v1, the shipped TUI, and model discovery
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](v1-build.md), [TUI build plan](tui-build.md), [shipped TUI](tui.md), [model discovery build plan](model-discovery-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and
@@ -19,6 +19,17 @@ real timeouts for subprocess and signal tests.
 - Provider adapters: Chat Completions and Responses canonical mapping, tool-call
   round trips, finish/usage/error normalization, strict JSON decoding, and
   Responses `store:false` replay.
+- Catalog: models.dev fixture decoding and normalization; SDK-to-dialect mapping
+  for supported, translated, and unknown packages; eligibility (tools, text
+  output, missing/invalid context, missing output ceiling, deprecated/alpha/beta,
+  unknown type); base-URL allowlist and rejection of userinfo/query/fragment;
+  context clamp, input cap without output subtraction, unset output, explicit
+  output pass-through without a catalog clamp, explicit `0` clearing an
+  inherited budget, and negative-output rejection; cache fresh hit without HTTP,
+  stale conditional `304`, replacement on `200`, stale fallback, corrupt cache,
+  version mismatch, atomic write and modes; explicit refresh without
+  `If-None-Match`, unexpected `304` rejection, and preservation of the previous
+  cache on every failure.
 - Streaming adapters: SSE text and tool-call assembly for both dialects;
   `[DONE]`; comments, CRLF, and multi-line data; malformed JSON, duplicate
   names, invalid UTF-8; 4 MiB event, 1 MiB assembled-response, and 8 MiB
@@ -65,7 +76,9 @@ real timeouts for subprocess and signal tests.
 - Projection: prompt/toolset selection by version; run/control events ignored;
   resumed and forked histories; repaired calls paired; retained turns.
 - Config: new flags; mutual exclusion; task rules; inheritance; explicit
-  overrides; base-URL credential/query/fragment rejection; exit-code mapping.
+  overrides; provider validation and precedence; list/refresh terminal actions;
+  model resolution and provider mismatch; base-URL credential/query/fragment
+  rejection; exit-code mapping.
 
 Tests follow the coding standard: table-driven where cases share logic; no
 assert or mock frameworks; fakes at consumer interfaces; `httptest` for the
@@ -79,22 +92,45 @@ diagnostic, not a gate.
 
 ## 2. Integration tests
 
-- Build the binary and run it against a fake `opencode-go` server in a temp
-  workspace and temp state directory. Point the binary at the fake server with
-  `-provider-base-url` or `AHARNESS_PROVIDER_BASE_URL`; the default remains the
-  hosted URL.
+- Run a fake models.dev catalog server and a fake `opencode-go` server with a
+  temp workspace and temp state directory. Point the binary at the fake catalog
+  with `AHARNESS_MODELS_DEV_URL` (loopback HTTP is allowed) and at the fake
+  provider with `-provider-base-url` or `AHARNESS_PROVIDER_BASE_URL`. Use a
+  fixture catalog with a Chat model, a Responses model, a translated
+  Anthropic/Google-native model, a deprecated model, and ineligible entries.
 - Assert the persisted log, stdout final/streamed text, stderr progress, exit
   code, file modes, and that the run removed `<state>/work/<session-id>`.
-- Exercise every accepted model ID through its assigned dialect path and verify
-  the adapter sends the selected model, `x-opencode-session`, and a
-  self-identifying `User-Agent`; include a tool-call round trip for each
-  dialect.
+- Exercise a discovered Chat model and a discovered Responses model through
+  their catalog dialect paths and verify the adapter sends the selected model,
+  `x-opencode-session`, and a self-identifying `User-Agent`; include a tool-call
+  round trip for each dialect and for one translated model through Chat. Assert
+  `session_start` and `run_start` record the effective provider/model/dialect/
+  base URL/limits.
+- Output budget: default request bodies contain no `max_tokens` /
+  `max_output_tokens`; an explicit `-max-output-tokens` value appears unchanged;
+  resuming a log with a recorded budget and `-max-output-tokens 0` omits the
+  field; a provider `length` or context-overflow response follows the existing
+  continuation and compaction-retry paths.
 - Streaming: for both dialects, a delta is visible on stdout while the fake
   provider is still blocked; the log has one `model_response` with
   `streamed=true`; no delta events are written.
 - Resume: a limit-stopped run resumes under the same session ID with inherited
   model/workspace/base URL/limits; a torn final line is repaired and recorded;
-  the same session log gains a second `run_start` and `final`.
+  the same session log gains a second `run_start` and `final`. Resume/fork with
+  the catalog server down and no explicit model still starts from the recorded
+  values; an explicit model change resolves through the catalog; an explicit
+  provider mismatch exits 2.
+- `-list-models`: assert the tab-separated header and rows, exit 0, no session
+  file, no task/token requirement, and stale-cache fallback.
+- `-refresh-models`: the fake catalog server observes an unconditional request
+  with no `If-None-Match` and no provider token; the summary is printed and no
+  session file is created. Server-down and invalid-catalog cases exit 3/4 and
+  preserve a seeded cache. `-refresh-models -list-models` refreshes before
+  listing and writes the summary to stderr.
+- Cache/offline: a fresh cache makes no catalog HTTP request; a stale cache
+  sends a conditional `304`; a failed implicit refresh uses stale data with a
+  warning; a corrupt or version-mismatched cache is refetched; the cache file
+  mode is 0600 and the directory mode 0700.
 - Fork: a completed session forks into a new self-contained log with parent
   metadata; the parent hash is unchanged; the child contains the parent prefix
   with a new session ID and renumbered `seq` plus the new task.
@@ -105,7 +141,10 @@ diagnostic, not a gate.
   same log, steering queued/acknowledged and reaching the next request,
   resume/fork, first/second interrupt, `Ctrl-D` active 130, `SIGTERM` 130 with
   `final`/`run_end`, clean EOF/quit 0, protocol errors 2, and no ANSI in
-  frames.
+  frames. Include catalog-backed picker contents, model-switch effects on the
+  next run, `Ctrl-R` refresh success/selection preservation/failure notice and
+  in-flight cancellation on close, and the offline-resume one-entry fallback
+  that `Ctrl-R` expands.
 - Batch: preserve the v1 stdout/stderr, streaming, resume/fork, and exit codes;
   non-TTY invocations batch automatically; `-interactive` is an unknown flag.
 - TUI terminal safety: resize mid-stream, model/tool text containing OSC 52,
@@ -128,28 +167,47 @@ diagnostic, not a gate.
 
 Fuzz targets cover the SSE decoder, the v2 JSONL reader/repair path, the TUI
 terminal sanitizer, markdown input, file-path/image containment, the
-`-ui-json` command decoder and frame/event/snapshot encoders, and
-`agent.History`. Seeds live under `internal/model/testdata/fuzz` and
-`internal/session/testdata/fuzz`; the TUI/history targets use built-in seeds. The unit test run executes the seeds; a
+`-ui-json` command decoder and frame/event/snapshot encoders, `agent.History`,
+and the models.dev catalog decoder at the trust boundary. Seeds live under
+`internal/model/testdata/fuzz` and `internal/session/testdata/fuzz`; the
+TUI/history targets use built-in seeds. The unit test run executes the seeds; a
 scheduled job MAY run longer fuzzing. The fuzz targets must not make real
 network calls or require writable state.
 
 ## 4. Manual smoke
 
-Run the built binary against the real `opencode-go` provider with each
-implemented dialect on a small temporary repository; set
-`AHARNESS_PROVIDER_TOKEN` if the endpoint requires auth, and set
-`-max-context-tokens` to the confirmed window. OpenCode currently restricts
-`crouton-alpha-free` to OpenCode clients; use `muse-spark-1.3-contributor` for
-the Responses smoke. It requires a Go subscription and the workspace privacy
-setting that allows paid endpoints to train on request data.
+Run the built binary against the real models.dev catalog and `opencode-go`
+provider on a small temporary repository; set `AHARNESS_PROVIDER_TOKEN` if the
+endpoint requires auth. Use a current Chat model (for example
+`deepseek-v4.1-flash`) and a current Responses model from `-list-models` (for
+example `muse-spark-1.3-contributor`). If credentials and workspace policy
+allow, run one Anthropic- or Google-native model through Chat translation (for
+example `qwen3.7-plus`) and record the result. The Responses smoke requires a Go
+subscription and the workspace privacy setting that allows paid endpoints to
+train on request data.
+
+Verify discovery itself before the per-dialect runs: `-list-models` prints the
+usable catalog without creating a session; `-refresh-models` performs an
+unconditional fetch, replaces the cache, and exits without a session; a second
+run reuses the cache without a catalog request; a forced implicit refresh with
+the catalog server unreachable falls back to the stale cache with a warning; and
+resume without an explicit model works with the catalog server down. Confirm
+`session_start`/`run_start` record the catalog's provider/model/dialect/base
+URL/limits and that new sessions use the documented
+`https://opencode.ai/inference/go/openai/v1` base.
 
 For each dialect: run a non-streamed batch task and a streamed batch task,
 then run the TUI through new, stream, tool round, steer, `Esc`/first `Ctrl-C`,
-second `Ctrl-C`, a second message, quit, resume, and fork. Drive `-ui-json` as
+second `Ctrl-C`, a second message, quit, resume, and fork. In the TUI, open the
+model picker, confirm the name/ID/dialect/context/input/advertised-output/
+status/translated metadata, switch models and confirm the next run's values,
+and use `Ctrl-R` to refresh in place. Drive `-ui-json` as
 a coding agent would: pipe a command script, parse frames/events/styles/images,
 request `snapshot`, inspect the SVG, and confirm the session log is the durable
-record. Record the real terminal, `TERM`, exit code, and `stty -a` before/after.
+record. Use `AHARNESS_LOG_REQUESTS=1` to confirm a default request body has no
+`max_tokens` / `max_output_tokens` field; exercise one explicit output budget
+and one provider `length`/context-overflow outcome. Record the real terminal,
+`TERM`, exit code, and `stty -a` before/after.
 
 For the TUI manual matrix, use at least one local emulator and tmux at 80x24 and
 200x60 (tmux is not available in every CI environment; this is manual). Exercise

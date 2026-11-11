@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -12,7 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"aharness/internal/agent"
+	"aharness/internal/model"
 	"aharness/internal/tools"
 )
 
@@ -53,6 +55,9 @@ func (o *overlayState) pop() {
 }
 
 func (m *App) closeOverlay() {
+	if m.overlay.kind == OverlayModel {
+		m.cancelModelRefresh()
+	}
 	m.overlay.pop()
 	m.layout()
 }
@@ -262,6 +267,10 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 	}
 	if provider, ok := m.host.(DetailsProvider); ok {
 		d := provider.Details()
+		maxOutput := fmt.Sprintf("%d", d.MaxOutputTokens)
+		if d.MaxOutputUnset {
+			maxOutput = "unset"
+		}
 		lines = append(lines,
 			"",
 			t.label.Render("configuration"),
@@ -272,7 +281,7 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 			"harness:    "+SanitizeLine(d.HarnessVersion),
 			"state dir:  "+SanitizeLine(d.StateDir),
 			"max ctx:    "+fmt.Sprintf("%d", d.MaxContextTokens),
-			"max output: "+fmt.Sprintf("%d", d.MaxOutputTokens),
+			"max output: "+maxOutput,
 			"timeouts:   "+fmt.Sprintf("run %s, model %s", d.SessionTimeout, d.ModelTimeout),
 		)
 	}
@@ -542,12 +551,15 @@ func (f *fileOverlay) confirm(rel string) error {
 	return fmt.Errorf("%s is not a selectable workspace file", rel)
 }
 
-// modelOverlay is the accepted-model registry picker.
+// modelOverlay is the catalog-backed model picker.
 type modelOverlay struct {
-	list   list.Model
-	width  int
-	height int
+	list       list.Model
+	refreshing bool
+	width      int
+	height     int
 }
+
+const offlineSwitchNotice = "model switching is unavailable until the catalog loads; Ctrl-R retries"
 
 type modelItem struct {
 	choice  ModelChoice
@@ -555,19 +567,62 @@ type modelItem struct {
 }
 
 func (mi modelItem) Title() string {
-	title := mi.choice.ID
+	title := mi.name()
 	if mi.current {
 		title += " (current)"
-	}
-	if mi.choice.Default {
-		title += " (default)"
 	}
 	return title
 }
 
-func (mi modelItem) Description() string { return string(mi.choice.Dialect) }
+func (mi modelItem) name() string {
+	if name := SanitizeLine(mi.choice.Name); name != "" {
+		return name
+	}
+	return SanitizeLine(mi.choice.ID)
+}
 
-func (mi modelItem) FilterValue() string { return mi.choice.ID }
+func (mi modelItem) Description() string {
+	parts := []string{
+		SanitizeLine(mi.choice.ID),
+		SanitizeLine(string(mi.choice.Dialect)),
+		fmt.Sprintf("ctx %d", max(0, mi.choice.ContextWindow)),
+		fmt.Sprintf("in %d", max(0, mi.choice.InputLimit)),
+		"out " + modelOutputLimit(mi.choice.OutputLimit),
+	}
+	if status := SanitizeLine(mi.choice.Status); status != "" {
+		parts = append(parts, status)
+	}
+	if mi.choice.Translated {
+		parts = append(parts, "translated")
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (mi modelItem) FilterValue() string {
+	return SanitizeLine(mi.choice.ID + " " + mi.choice.Name)
+}
+
+func modelOutputLimit(limit int) string {
+	if limit <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d", limit)
+}
+
+func modelItems(choices []ModelChoice, currentID string) []list.Item {
+	items := make([]list.Item, len(choices))
+	for i, choice := range choices {
+		items[i] = modelItem{choice: choice, current: choice.ID == currentID}
+	}
+	return items
+}
+
+func (m *App) currentModelID() string {
+	if m.nextModel != "" {
+		return m.nextModel
+	}
+	return m.info.Model
+}
 
 func (m *App) openModelOverlay() tea.Cmd {
 	if m.run.active {
@@ -575,17 +630,24 @@ func (m *App) openModelOverlay() tea.Cmd {
 		return nil
 	}
 	if len(m.models) == 0 {
-		m.notice = "no accepted models available"
+		m.notice = "no models available"
 		return nil
 	}
-	items := make([]list.Item, len(m.models))
-	for i, choice := range m.models {
-		items[i] = modelItem{choice: choice, current: choice.ID == m.info.Model}
+	switchable := false
+	for _, choice := range m.models {
+		if choice.Switchable {
+			switchable = true
+			break
+		}
 	}
+	if !switchable {
+		m.notice = offlineSwitchNotice
+	}
+	items := modelItems(m.models, m.currentModelID())
 	ml := list.New(items, list.NewDefaultDelegate(), 40, 8)
 	current := 0
 	for i, choice := range m.models {
-		if choice.ID == m.info.Model {
+		if choice.ID == m.currentModelID() {
 			current = i
 			break
 		}
@@ -610,11 +672,16 @@ func (mo *modelOverlay) insertFilter(text string) {
 
 func (mo *modelOverlay) resize(width, height int) {
 	mo.width, mo.height = width, height
-	mo.list.SetSize(width, max(3, height-2))
+	// Reserve the last line for the refresh/selection footer.
+	mo.list.SetSize(width, max(1, height-1))
 }
 
 func (mo *modelOverlay) view() string {
-	return mo.list.View()
+	footer := "Ctrl-R refresh · Enter select · Esc close"
+	if mo.refreshing {
+		footer = "refreshing models…"
+	}
+	return strings.Join([]string{mo.list.View(), footer}, "\n")
 }
 
 func (mo *modelOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
@@ -623,16 +690,154 @@ func (mo *modelOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		m.nextModel = item.choice.ID
-		m.nextDialect = item.choice.Dialect
-		m.notice = "model for the next run: " + item.choice.ID
-		m.emit(EventModelChanged{Model: item.choice.ID, Dialect: string(item.choice.Dialect)})
-		m.closeOverlay()
-		return nil
+		return m.chooseModel(item.choice)
 	}
 	updated, cmd := mo.list.Update(msg)
 	mo.list = updated
 	return cmd
 }
 
-var _ = agent.NoticeWarning
+// chooseModel applies a picker selection for the next run. A choice that the
+// host marked unswitchable is the offline recorded-model fallback: it stays
+// visible but can never replace the current model.
+func (m *App) chooseModel(choice ModelChoice) tea.Cmd {
+	if !choice.Switchable {
+		m.notice = offlineSwitchNotice
+		return nil
+	}
+	selected := choice
+	warning := ""
+	if selector, ok := m.host.(ModelSelector); ok {
+		resolved, err := selector.SelectModel(choice.ID)
+		if err != nil {
+			m.notice = "select model: " + CapText(SanitizeLine(err.Error()), 512)
+			return nil
+		}
+		selected = resolved
+		if provider, ok := m.host.(ModelWarningProvider); ok {
+			warning = provider.TakeModelWarning()
+		}
+	}
+	m.nextModel = selected.ID
+	m.nextDialect = selected.Dialect
+	m.notice = "model for the next run: " + SanitizeLine(selected.ID)
+	if selected.Status == "deprecated" {
+		m.notice += " (deprecated)"
+	}
+	if warning != "" {
+		m.notice += "; " + CapText(SanitizeLine(warning), 512)
+	}
+	m.emit(EventModelChanged{Model: selected.ID, Dialect: string(selected.Dialect)})
+	m.closeOverlay()
+	return nil
+}
+
+// refreshModelCatalog starts one explicit catalog refresh through the optional
+// host capability. The request is canceled when the picker closes, and a
+// result whose sequence no longer matches is discarded.
+func (m *App) refreshModelCatalog() tea.Cmd {
+	mo := m.overlay.model
+	if mo == nil || mo.refreshing {
+		return nil
+	}
+	refresher, ok := m.host.(ModelRefresher)
+	if !ok {
+		m.notice = "model refresh is unavailable"
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.refreshSeq++
+	seq := m.refreshSeq
+	m.refreshCancel = cancel
+	mo.refreshing = true
+	return func() tea.Msg {
+		choices, err := refresher.RefreshModels(ctx)
+		return modelRefreshMsg{seq: seq, choices: choices, err: err}
+	}
+}
+
+// cancelModelRefresh invalidates any in-flight refresh and releases its
+// context. Results that arrive later fail the sequence check in
+// handleModelRefresh.
+func (m *App) cancelModelRefresh() {
+	m.refreshSeq++
+	if m.refreshCancel != nil {
+		m.refreshCancel()
+		m.refreshCancel = nil
+	}
+	if m.overlay.model != nil {
+		m.overlay.model.refreshing = false
+	}
+}
+
+func (m *App) handleModelRefresh(msg modelRefreshMsg) {
+	mo := m.overlay.model
+	if mo == nil || msg.seq != m.refreshSeq {
+		return
+	}
+	m.refreshSeq++
+	if m.refreshCancel != nil {
+		m.refreshCancel()
+		m.refreshCancel = nil
+	}
+	mo.refreshing = false
+	if msg.err != nil {
+		if len(msg.choices) > 0 && errors.Is(msg.err, model.ErrCatalogCache) {
+			// The fetch succeeded but persisting the cache failed. Use the
+			// refreshed in-memory catalog and report the failure.
+			m.models = msg.choices
+			mo.replaceItems(m, msg.choices)
+		}
+		m.notice = "refresh models: " + CapText(SanitizeLine(msg.err.Error()), 512)
+		return
+	}
+	m.models = msg.choices
+	mo.replaceItems(m, msg.choices)
+	m.notice = fmt.Sprintf("refreshed %d models", len(msg.choices))
+}
+
+// replaceItems swaps the picker entries in place, preserving the filter text
+// and the highlighted model ID when the refreshed catalog still has it.
+func (mo *modelOverlay) replaceItems(m *App, choices []ModelChoice) {
+	filter := mo.list.FilterInput.Value()
+	state := mo.list.FilterState()
+	selectedID := ""
+	if item, ok := mo.list.SelectedItem().(modelItem); ok {
+		selectedID = item.choice.ID
+	}
+	// SetItems only returns an async filter command; an active filter is
+	// recomputed synchronously by SetFilterText below, and an unfiltered list
+	// needs no filtered slice.
+	_ = mo.list.SetItems(modelItems(choices, m.currentModelID()))
+	if state != list.Unfiltered {
+		mo.list.SetFilterText(filter)
+	}
+	mo.selectModel(selectedID)
+}
+
+// selectModel highlights the retained model ID, or the first switchable entry
+// in the current filter when it disappeared. It falls back to the first
+// visible entry when no visible entry is switchable.
+func (mo *modelOverlay) selectModel(id string) {
+	visible := mo.list.VisibleItems()
+	firstUsable := -1
+	for i, item := range visible {
+		entry, ok := item.(modelItem)
+		if !ok {
+			continue
+		}
+		if entry.choice.ID == id {
+			mo.list.Select(i)
+			return
+		}
+		if firstUsable < 0 && entry.choice.Switchable {
+			firstUsable = i
+		}
+	}
+	if firstUsable < 0 && len(visible) > 0 {
+		firstUsable = 0
+	}
+	if firstUsable >= 0 {
+		mo.list.Select(firstUsable)
+	}
+}

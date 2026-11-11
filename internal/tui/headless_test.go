@@ -41,8 +41,16 @@ func (r *fakeRun) Done() <-chan agent.Result { return r.done }
 func (h *fakeHost) Info() Info { return h.info }
 func (h *fakeHost) Models() []ModelChoice {
 	return []ModelChoice{
-		{ID: "deepseek-v4.1-flash", Dialect: model.DialectChat, Default: true},
-		{ID: "crouton-alpha-free", Dialect: model.DialectResponses},
+		{
+			ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash",
+			Dialect: model.DialectChat, ContextWindow: 200_000, InputLimit: 160_000,
+			OutputLimit: 8_192, Switchable: true,
+		},
+		{
+			ID: "crouton-alpha-free", Name: "Crouton Alpha Free",
+			Dialect: model.DialectResponses, ContextWindow: 1_000_000, InputLimit: 900_000,
+			Status: "alpha", Translated: true, Switchable: true,
+		},
 	}
 }
 func (h *fakeHost) History() ([]agent.HistoryItem, error) { return h.history, nil }

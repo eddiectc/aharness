@@ -29,7 +29,7 @@ type responsesRequest struct {
 	Instructions    string          `json:"instructions,omitempty"`
 	Input           []any           `json:"input"`
 	Tools           []responsesTool `json:"tools,omitempty"`
-	MaxOutputTokens int             `json:"max_output_tokens,omitempty"`
+	MaxOutputTokens int             `json:"max_output_tokens,omitzero"`
 	Store           bool            `json:"store"`
 	Stream          bool            `json:"stream,omitempty"`
 }

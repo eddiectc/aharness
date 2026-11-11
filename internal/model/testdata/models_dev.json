@@ -1,0 +1,240 @@
+{
+  "opencode-go": {
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://opencode.ai/inference/go/openai/v1",
+    "models": {
+      "chat-model": {
+        "name": "Chat Model",
+        "type": "chat",
+        "tool_call": true,
+        "status": "alpha",
+        "limit": {
+          "context": 1000000,
+          "output": 384000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "responses-model": {
+        "name": "Responses Model",
+        "tool_call": true,
+        "limit": {
+          "context": 1050000,
+          "input": 922000,
+          "output": 128000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "npm": "@ai-sdk/openai"
+        }
+      },
+      "anthropic-model": {
+        "name": "Anthropic Model",
+        "tool_call": true,
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "npm": "@ai-sdk/anthropic",
+          "api": "https://evil.example/anthropic/v1"
+        }
+      },
+      "google-model": {
+        "name": "Google Model",
+        "tool_call": true,
+        "limit": {
+          "context": 1000000
+        },
+        "modalities": {
+          "output": ["text", "image"]
+        },
+        "provider": {
+          "npm": "@ai-sdk/google",
+          "api": "https://evil.example/google/v1"
+        }
+      },
+      "deprecated-model": {
+        "name": "Deprecated Model",
+        "tool_call": true,
+        "status": "deprecated",
+        "limit": {
+          "context": 262144,
+          "output": 262144
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "input-limited": {
+        "name": "Input Limited",
+        "tool_call": true,
+        "limit": {
+          "context": 100000,
+          "input": 90000,
+          "output": 10000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "missing-context": {
+        "name": "Missing Context",
+        "tool_call": true,
+        "limit": {
+          "output": 1000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "missing-output": {
+        "name": "Missing Output",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "negative-output": {
+        "name": "Negative Output",
+        "tool_call": true,
+        "limit": {
+          "context": 200000,
+          "output": -1
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "no-tool": {
+        "name": "No Tool",
+        "tool_call": false,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "non-text": {
+        "name": "Non Text",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["image"]
+        }
+      },
+      "non-chat": {
+        "name": "Non Chat",
+        "type": "embedding",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "input-over-context": {
+        "name": "Input Over Context",
+        "tool_call": true,
+        "limit": {
+          "context": 200000,
+          "input": 300000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "unknown-sdk": {
+        "name": "Unknown SDK",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "npm": "@ai-sdk/cohere"
+        }
+      },
+      "model-level-api": {
+        "name": "Model Level API",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "api": "https://opencode.ai/inference/go/openai/v2"
+        }
+      },
+      "inherited-npm": {
+        "id": "inherited-npm",
+        "name": "Inherited NPM",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      },
+      "wrong-host": {
+        "name": "Wrong Host",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "api": "https://evil.example/v1"
+        }
+      },
+      "http-base": {
+        "name": "HTTP Base",
+        "tool_call": true,
+        "limit": {
+          "context": 200000
+        },
+        "modalities": {
+          "output": ["text"]
+        },
+        "provider": {
+          "api": "http://opencode.ai/inference/go/openai/v1"
+        }
+      }
+    }
+  },
+  "no-api-provider": {
+    "npm": "@ai-sdk/openai-compatible",
+    "models": {
+      "bare": {
+        "name": "Bare",
+        "tool_call": true,
+        "limit": {
+          "context": 1000
+        },
+        "modalities": {
+          "output": ["text"]
+        }
+      }
+    }
+  }
+}

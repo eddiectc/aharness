@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -48,14 +49,17 @@ type tuiHost struct {
 	store     *session.Store
 	ws        *tools.Workspace
 	sessionID string
+	source    model.CatalogSource
+	catalog   map[string]model.CatalogModel
 	models    []tui.ModelChoice
 
-	mu         sync.Mutex
-	info       tui.Info
-	active     *hostRun
-	closed     bool
-	lastStatus agent.StopReason
-	lastReason string
+	mu             sync.Mutex
+	info           tui.Info
+	active         *hostRun
+	closed         bool
+	lastStatus     agent.StopReason
+	lastReason     string
+	pendingWarning string
 }
 
 func (h *tuiHost) Info() tui.Info {
@@ -64,15 +68,149 @@ func (h *tuiHost) Info() tui.Info {
 	return h.info
 }
 
-func (h *tuiHost) Models() []tui.ModelChoice { return h.models }
+func (h *tuiHost) Models() []tui.ModelChoice {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]tui.ModelChoice(nil), h.models...)
+}
 
 func (h *tuiHost) History() ([]agent.HistoryItem, error) {
 	return agent.History(h.store.Events())
 }
 
+// modelChoice converts a normalized catalog model into picker metadata.
+func modelChoice(m model.CatalogModel) tui.ModelChoice {
+	name := m.Name
+	if name == "" {
+		name = m.ID
+	}
+	return tui.ModelChoice{
+		ID:            m.ID,
+		Name:          name,
+		Dialect:       m.Dialect,
+		ContextWindow: m.ContextWindow,
+		InputLimit:    m.InputLimit,
+		OutputLimit:   m.OutputLimit,
+		Status:        m.Status,
+		Translated:    m.Translated,
+		Switchable:    true,
+	}
+}
+
+// recordedChoiceLocked describes the session's current model from recorded
+// values. It is the offline picker fallback and is never switchable then.
+func (h *tuiHost) recordedChoiceLocked(switchable bool) tui.ModelChoice {
+	name := h.cfg.Model
+	if name == "" {
+		name = h.info.Model
+	}
+	return tui.ModelChoice{
+		ID:            name,
+		Name:          name,
+		Dialect:       h.cfg.Dialect,
+		ContextWindow: h.cfg.MaxContextTokens,
+		InputLimit:    h.cfg.InputLimit,
+		Switchable:    switchable,
+	}
+}
+
+// setCatalogLocked replaces the picker entries. A current recorded model that
+// is absent from the catalog stays visible as the current entry.
+func (h *tuiHost) setCatalogLocked(cat model.Catalog) {
+	choices := make([]tui.ModelChoice, 0, len(cat.Models)+1)
+	for _, m := range cat.Usable() {
+		choices = append(choices, modelChoice(m))
+	}
+	if _, ok := cat.Models[h.cfg.Model]; !ok {
+		choices = append(choices, h.recordedChoiceLocked(true))
+	}
+	sort.Slice(choices, func(i, j int) bool { return choices[i].ID < choices[j].ID })
+	h.catalog = cat.Models
+	h.models = choices
+}
+
+// RefreshModels performs the explicit picker refresh (Ctrl-R). A failure
+// leaves the loaded entries untouched.
+func (h *tuiHost) RefreshModels(ctx context.Context) ([]tui.ModelChoice, error) {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil, errors.New("session host is closed")
+	}
+	cfg := h.cfg
+	source := h.source
+	h.mu.Unlock()
+
+	if source == nil {
+		var err error
+		source, err = newCatalogSource(cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+	cat, err := source.Refresh(ctx, cfg.Provider)
+	if err != nil {
+		if !errors.Is(err, model.ErrCatalogCache) || len(cat.Models) == 0 {
+			return nil, err
+		}
+		// The fetch succeeded but the cache write did not. Use the refreshed
+		// in-memory catalog and report the persistence failure as a notice.
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.source = source
+		h.setCatalogLocked(cat)
+		return append([]tui.ModelChoice(nil), h.models...), err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.source = source
+	h.setCatalogLocked(cat)
+	return append([]tui.ModelChoice(nil), h.models...), nil
+}
+
+// SelectModel resolves a picker selection and applies its dialect, base URL,
+// context window, and input ceiling to the next run.
+func (h *tuiHost) SelectModel(id string) (tui.ModelChoice, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return tui.ModelChoice{}, errors.New("session host is closed")
+	}
+	h.pendingWarning = ""
+	if id == h.cfg.Model {
+		return h.recordedChoiceLocked(true), nil
+	}
+	m, ok := h.catalog[id]
+	if !ok {
+		return tui.ModelChoice{}, fmt.Errorf("model %q is not in the loaded catalog", id)
+	}
+	if m.Unavailable != "" {
+		return tui.ModelChoice{}, fmt.Errorf("model %q is not usable: %s", id, m.Unavailable)
+	}
+	if err := applyCatalogModel(&h.cfg, m, func(text string) { h.pendingWarning = text }); err != nil {
+		return tui.ModelChoice{}, err
+	}
+	if err := validateEffective(&h.cfg); err != nil {
+		return tui.ModelChoice{}, err
+	}
+	return modelChoice(m), nil
+}
+
+// TakeModelWarning returns and clears the warning from the last successful
+// picker selection. It implements tui.ModelWarningProvider.
+func (h *tuiHost) TakeModelWarning() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	warning := h.pendingWarning
+	h.pendingWarning = ""
+	return warning
+}
+
 func (h *tuiHost) Workspace() *tools.Workspace { return h.ws }
 
 func (h *tuiHost) Details() tui.Details {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return tui.Details{
 		TracePath:        h.store.Path(),
 		StateDir:         h.cfg.StateDir,
@@ -83,6 +221,7 @@ func (h *tuiHost) Details() tui.Details {
 		HarnessVersion:   h.cfg.HarnessVersion,
 		MaxContextTokens: h.cfg.MaxContextTokens,
 		MaxOutputTokens:  h.cfg.MaxOutputTokens,
+		MaxOutputUnset:   h.cfg.MaxOutputTokens == 0,
 		SessionTimeout:   h.cfg.SessionTimeout,
 		ModelTimeout:     h.cfg.ModelTimeout,
 	}
@@ -100,6 +239,8 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 		h.mu.Unlock()
 		return nil, errors.New("a run is already active")
 	}
+	var warnings []string
+	warn := func(text string) { warnings = append(warnings, text) }
 	modelName := opts.Model
 	if modelName == "" {
 		modelName = h.info.Model
@@ -107,11 +248,25 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 	if modelName == "" {
 		modelName = h.cfg.Model
 	}
-	dialect, err := dialectForModel(modelName)
-	if err != nil {
-		h.mu.Unlock()
-		return nil, err
+	if modelName != h.cfg.Model {
+		m, ok := h.catalog[modelName]
+		if !ok {
+			h.mu.Unlock()
+			return nil, fmt.Errorf("model %q is not in the loaded catalog", modelName)
+		}
+		if err := applyCatalogModel(&h.cfg, m, warn); err != nil {
+			h.mu.Unlock()
+			return nil, err
+		}
+		if m.Deprecated {
+			warn("model " + m.ID + " is deprecated")
+		}
+		if err := validateEffective(&h.cfg); err != nil {
+			h.mu.Unlock()
+			return nil, err
+		}
 	}
+	dialect := h.cfg.Dialect
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	control := newRunController(cancel)
@@ -154,6 +309,11 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 	resumedFrom := lastSeq(h.store.Events())
 	h.mu.Unlock()
 
+	if display != nil {
+		for _, text := range warnings {
+			_ = display(agent.Notice{Kind: agent.NoticeWarning, Text: text})
+		}
+	}
 	go h.run(run, runner, agent.RunOptions{
 		Task:           sub.Text,
 		TaskSet:        true,
@@ -235,10 +395,11 @@ func (h *tuiHost) summary() (tui.Info, agent.StopReason, string) {
 // validates resume/fork state before the terminal is touched.
 func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 	var (
-		store *session.Store
-		ws    *tools.Workspace
-		state agent.State
-		code  int
+		store         *session.Store
+		ws            *tools.Workspace
+		state         agent.State
+		catalogSource model.CatalogSource
+		code          int
 	)
 
 	fail := func(code int) (*tuiHost, int) {
@@ -267,10 +428,16 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			_, _ = fmt.Fprintf(stderr, "aharness: read session %s: %v\n", cfg.ResumeID, tui.SanitizeLine(err.Error()))
 			return fail(exitSetup)
 		}
-		if err := applySessionDefaults(&cfg, state); err != nil {
+		source, err := sessionCatalogSource(cfg)
+		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return fail(exitConfig)
 		}
+		if err := applySessionDefaults(context.Background(), &cfg, state, source, stderr); err != nil {
+			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
+			return fail(catalogExitCode(err))
+		}
+		catalogSource = source
 		ws, code = openSessionWorkspace(cfg, state, stderr)
 		if ws == nil {
 			return fail(code)
@@ -298,11 +465,18 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			_, _ = fmt.Fprintf(stderr, "aharness: read parent session %s: %v\n", cfg.ForkID, tui.SanitizeLine(err.Error()))
 			return nil, exitSetup
 		}
-		if err := applySessionDefaults(&cfg, state); err != nil {
+		catSource, err := sessionCatalogSource(cfg)
+		if err != nil {
 			_ = source.Close()
 			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
 			return nil, exitConfig
 		}
+		if err := applySessionDefaults(context.Background(), &cfg, state, catSource, stderr); err != nil {
+			_ = source.Close()
+			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
+			return nil, catalogExitCode(err)
+		}
+		catalogSource = catSource
 		ws, code = openSessionWorkspace(cfg, state, stderr)
 		if ws == nil {
 			_ = source.Close()
@@ -342,6 +516,16 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			_, _ = fmt.Fprintf(stderr, "aharness: close parent session log: %v\n", tui.SanitizeLine(err.Error()))
 		}
 	default:
+		var err error
+		catalogSource, err = newCatalogSource(cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
+			return nil, exitConfig
+		}
+		if err := resolveNewModel(context.Background(), &cfg, catalogSource, stderr); err != nil {
+			_, _ = fmt.Fprintf(stderr, "aharness: %v\n", tui.SanitizeLine(err.Error()))
+			return nil, catalogExitCode(err)
+		}
 		ws, code = openWorkspace(cfg, stderr)
 		if ws == nil {
 			return nil, code
@@ -352,7 +536,6 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 			return fail(exitConfig)
 		}
 		sessionID := session.NewID()
-		var err error
 		store, err = session.Create(cfg.StateDir, sessionID)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "aharness: create session log: %v\n", tui.SanitizeLine(err.Error()))
@@ -381,21 +564,31 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		Turns:          state.Turns,
 		Usage:          state.Usage,
 	}
-	models := make([]tui.ModelChoice, 0, len(acceptedModelIDs))
-	for _, id := range acceptedModelIDs {
-		dialect, err := dialectForModel(id)
-		if err != nil {
-			continue
+	ctx := context.Background()
+	if catalogSource == nil {
+		if src, err := newCatalogSource(cfg); err == nil {
+			catalogSource = src
 		}
-		models = append(models, tui.ModelChoice{ID: id, Dialect: dialect, Default: id == defaultModelID})
+	}
+	var loaded *model.Catalog
+	if catalogSource != nil {
+		if cat, err := catalogSource.Load(ctx, cfg.Provider); err == nil {
+			loaded = &cat
+		}
 	}
 	host := &tuiHost{
 		cfg:       cfg,
 		store:     store,
 		ws:        ws,
 		sessionID: store.ID(),
-		models:    models,
+		source:    catalogSource,
 		info:      info,
+	}
+	if loaded != nil {
+		warnCatalog(stderr, *loaded)
+		host.setCatalogLocked(*loaded)
+	} else {
+		host.models = []tui.ModelChoice{host.recordedChoiceLocked(false)}
 	}
 	return host, 0
 }

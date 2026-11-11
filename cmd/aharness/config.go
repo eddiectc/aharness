@@ -21,14 +21,10 @@ import (
 const (
 	providerName = "opencode-go"
 
-	acceptedModels = "crouton-alpha-free, deepseek-v4.1-flash, muse-spark-1.3-contributor"
-
-	defaultMaxTurns         = 30
-	defaultMaxTotalTokens   = 2_000_000
-	defaultMaxContextTokens = 200_000
-	defaultMaxOutputTokens  = 8_192
-	defaultSessionTimeout   = 60 * time.Minute
-	defaultModelTimeout     = 300 * time.Second
+	defaultMaxTurns       = 30
+	defaultMaxTotalTokens = 2_000_000
+	defaultSessionTimeout = 60 * time.Minute
+	defaultModelTimeout   = 300 * time.Second
 
 	defaultUISizeWidth  = 100
 	defaultUISizeHeight = 30
@@ -37,17 +33,6 @@ const (
 	maxUISizeWidth      = 500
 	maxUISizeHeight     = 200
 )
-
-// acceptedModelIDs is the model registry shared by the CLI validator and the
-// TUI model picker.
-var acceptedModelIDs = [...]string{
-	"crouton-alpha-free",
-	"deepseek-v4.1-flash",
-	"muse-spark-1.3-contributor",
-}
-
-// defaultModelID is marked as the registry default in the model picker.
-const defaultModelID = "deepseek-v4.1-flash"
 
 // Mode selects the front end for one process invocation.
 type Mode int
@@ -80,10 +65,13 @@ type config struct {
 	MaxTotalTokens   int
 	MaxContextTokens int
 	MaxOutputTokens  int
-	Limits           agent.Limits
-	SessionTimeout   time.Duration
-	ModelTimeout     time.Duration
-	LogRequests      bool
+	// InputLimit is the catalog's optional input ceiling for the selected
+	// model. Zero means the context window minus the safety margin applies.
+	InputLimit     int
+	Limits         agent.Limits
+	SessionTimeout time.Duration
+	ModelTimeout   time.Duration
+	LogRequests    bool
 
 	ResumeID string
 	ForkID   string
@@ -97,18 +85,22 @@ type config struct {
 	Stream    bool
 	StreamSet bool
 
-	ShowVersion        bool
-	ProvisionalContext bool
-	HarnessVersion     string
-	PromptVersion      string
-	ToolsetVersion     string
+	ShowVersion    bool
+	ListModels     bool
+	RefreshModels  bool
+	ModelsDevURL   string
+	HarnessVersion string
+	PromptVersion  string
+	ToolsetVersion string
 
 	modelSet          bool
+	providerSet       bool
 	workspaceSet      bool
 	baseURLSet        bool
 	maxTurnsSet       bool
 	maxTotalTokensSet bool
 	maxContextSet     bool
+	maxContextValue   int
 	maxOutputSet      bool
 	sessionTimeoutSet bool
 }
@@ -117,10 +109,12 @@ type config struct {
 // before flags so defaults are env-aware and env errors remain config errors.
 type envSettings struct {
 	model         string
+	provider      string
 	workspace     string
 	stateDir      string
 	token         string
 	baseURL       string
+	modelsDevURL  string
 	maxContext    int
 	maxContextSet bool
 	logRequests   bool
@@ -131,12 +125,13 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		getenv = os.Getenv
 	}
 	env := envSettings{
-		model:      getenv("AHARNESS_MODEL"),
-		workspace:  getenv("AHARNESS_WORKSPACE"),
-		stateDir:   getenv("AHARNESS_STATE_DIR"),
-		token:      getenv("AHARNESS_PROVIDER_TOKEN"),
-		baseURL:    getenv("AHARNESS_PROVIDER_BASE_URL"),
-		maxContext: defaultMaxContextTokens,
+		model:        getenv("AHARNESS_MODEL"),
+		provider:     getenv("AHARNESS_PROVIDER"),
+		workspace:    getenv("AHARNESS_WORKSPACE"),
+		stateDir:     getenv("AHARNESS_STATE_DIR"),
+		token:        getenv("AHARNESS_PROVIDER_TOKEN"),
+		baseURL:      getenv("AHARNESS_PROVIDER_BASE_URL"),
+		modelsDevURL: getenv("AHARNESS_MODELS_DEV_URL"),
 	}
 	if raw := getenv("AHARNESS_MAX_CONTEXT_TOKENS"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -184,6 +179,9 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		workspace        string
 		stateDir         string
 		modelName        string
+		providerNameFlag string
+		listModels       bool
+		refreshModels    bool
 		resumeID         string
 		forkID           string
 		batch            bool
@@ -202,7 +200,14 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.StringVar(&taskFile, "task-file", "", "file containing the task; seeds the first message in TUI modes")
 	fs.StringVar(&workspace, "workspace", env.workspace, "workspace directory (default: AHARNESS_WORKSPACE, then the current directory; inherited on resume/fork)")
 	fs.StringVar(&stateDir, "state-dir", env.stateDir, "state directory (default: AHARNESS_STATE_DIR, then XDG_STATE_HOME/aharness, then ~/.local/state/aharness)")
-	fs.StringVar(&modelName, "model", env.model, "model ID (required for a new session; "+acceptedModels+")")
+	fs.StringVar(&modelName, "model", env.model, "model ID from the provider catalog (required for a new session)")
+	providerDefault := env.provider
+	if providerDefault == "" {
+		providerDefault = providerName
+	}
+	fs.StringVar(&providerNameFlag, "provider", providerDefault, "provider catalog key (supported: "+providerName+")")
+	fs.BoolVar(&listModels, "list-models", false, "print the usable provider catalog and exit")
+	fs.BoolVar(&refreshModels, "refresh-models", false, "unconditionally refresh the model catalog cache and exit")
 	fs.StringVar(&resumeID, "resume", "", "continue an existing v2 session under the state directory")
 	fs.StringVar(&forkID, "fork", "", "create a new v2 session from an existing v2 session")
 	fs.BoolVar(&batch, "batch", false, "force the one-shot CLI instead of the interactive TUI")
@@ -211,14 +216,10 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.BoolVar(&stream, "stream", false, "stream assistant text in batch mode (implied in TUI modes)")
 	fs.IntVar(&maxTurns, "max-turns", defaultMaxTurns, "maximum cumulative model turns")
 	fs.IntVar(&maxTotalTokens, "max-total-tokens", defaultMaxTotalTokens, "cumulative token budget")
-	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window")
+	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window (0: use the model catalog)")
 	fs.DurationVar(&sessionTimeout, "session-timeout", defaultSessionTimeout, "per-run wall-clock timeout")
-	fs.IntVar(&maxOutputTokens, "max-output-tokens", defaultMaxOutputTokens, "maximum output tokens per model call")
-	baseDefault := env.baseURL
-	if baseDefault == "" {
-		baseDefault = model.DefaultBaseURL
-	}
-	fs.StringVar(&providerBaseURL, "provider-base-url", baseDefault, "provider OpenAI-compatible base URL")
+	fs.IntVar(&maxOutputTokens, "max-output-tokens", 0, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
+	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -232,6 +233,32 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 
 	if showVersion {
 		return config{ShowVersion: true}, nil
+	}
+
+	providerSet := env.provider != "" || visited["provider"]
+	provider := providerNameFlag
+	if provider == "" && !providerSet {
+		provider = providerName
+	}
+	if err := validateProvider(provider); err != nil {
+		return config{}, err
+	}
+
+	// Terminal catalog actions ignore task, session, and mode flags. They
+	// still honor the provider, state directory, and catalog URL.
+	if listModels || refreshModels {
+		state, err := resolveStateDir(stateDir, getenv)
+		if err != nil {
+			return config{}, err
+		}
+		return config{
+			Provider:      provider,
+			providerSet:   providerSet,
+			StateDir:      state,
+			ModelsDevURL:  env.modelsDevURL,
+			ListModels:    listModels,
+			RefreshModels: refreshModels,
+		}, nil
 	}
 
 	taskText, taskSource, taskSet, err := resolveTask(task, taskFile)
@@ -285,12 +312,13 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		TaskSet:           taskSet,
 		StateDir:          state,
 		Model:             modelName,
-		Provider:          providerName,
+		Provider:          provider,
 		Token:             env.token,
 		MaxTurns:          maxTurns,
 		MaxTotalTokens:    maxTotalTokens,
 		MaxContextTokens:  maxContextTokens,
 		MaxOutputTokens:   maxOutputTokens,
+		ModelsDevURL:      env.modelsDevURL,
 		SessionTimeout:    sessionTimeout,
 		ModelTimeout:      defaultModelTimeout,
 		LogRequests:       env.logRequests,
@@ -306,6 +334,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		PromptVersion:     agent.PromptVersion,
 		ToolsetVersion:    tools.Version,
 		modelSet:          env.model != "" || visited["model"],
+		providerSet:       providerSet,
 		workspaceSet:      env.workspace != "" || visited["workspace"],
 		baseURLSet:        env.baseURL != "" || visited["provider-base-url"],
 		maxTurnsSet:       visited["max-turns"],
@@ -314,21 +343,16 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		maxOutputSet:      visited["max-output-tokens"],
 		sessionTimeoutSet: visited["session-timeout"],
 	}
-	if providerBaseURL == "" {
-		providerBaseURL = model.DefaultBaseURL
+	if cfg.maxContextSet {
+		cfg.maxContextValue = maxContextTokens
 	}
-	cfg.BaseURL = providerBaseURL
+	if providerBaseURL != "" {
+		cfg.BaseURL = providerBaseURL
+	}
 	if cfg.baseURLSet {
 		if err := validateBaseURL(cfg.BaseURL); err != nil {
 			return config{}, err
 		}
-	}
-	if cfg.modelSet {
-		dialect, err := dialectForModel(cfg.Model)
-		if err != nil {
-			return config{}, err
-		}
-		cfg.Dialect = dialect
 	}
 	if cfg.workspaceSet {
 		dir, err := resolveWorkspace(workspace)
@@ -349,13 +373,12 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 			}
 			cfg.Workspace = dir
 		}
-		cfg.ProvisionalContext = !cfg.maxContextSet
 	}
 	if err := validateExplicitValues(&cfg); err != nil {
 		return config{}, err
 	}
 	if cfg.ResumeID == "" && cfg.ForkID == "" {
-		if err := validateEffective(&cfg); err != nil {
+		if err := validateCumulative(&cfg); err != nil {
 			return config{}, err
 		}
 	}
@@ -417,6 +440,8 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w, "       aharness -batch (-task text | -task-file path) -model model-id [flags]")
 	_, _ = fmt.Fprintln(w, "       aharness -batch -resume session-id [options]")
 	_, _ = fmt.Fprintln(w, "       aharness -ui-json -model model-id [-ui-size WxH] [options]")
+	_, _ = fmt.Fprintln(w, "       aharness -list-models [-provider opencode-go]")
+	_, _ = fmt.Fprintln(w, "       aharness -refresh-models [-list-models]")
 	_, _ = fmt.Fprintln(w)
 	fs.VisitAll(func(f *flag.Flag) {
 		name, usage := flag.UnquoteUsage(f)
@@ -428,9 +453,9 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 		_, _ = fmt.Fprintf(w, "        %s (default %s)\n", usage, f.DefValue)
 	})
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "environment: AHARNESS_MODEL, AHARNESS_WORKSPACE, AHARNESS_STATE_DIR,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_PROVIDER_TOKEN, AHARNESS_MAX_CONTEXT_TOKENS, AHARNESS_LOG_REQUESTS,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_PROVIDER_BASE_URL")
+	_, _ = fmt.Fprintln(w, "environment: AHARNESS_MODEL, AHARNESS_PROVIDER, AHARNESS_WORKSPACE,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_STATE_DIR, AHARNESS_PROVIDER_TOKEN, AHARNESS_MAX_CONTEXT_TOKENS,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_PROVIDER_BASE_URL, AHARNESS_MODELS_DEV_URL")
 }
 
 // versionRequested reports whether args select -version, including the
@@ -486,19 +511,12 @@ func resolveTask(task, taskFile string) (string, string, bool, error) {
 	}
 }
 
-func dialectForModel(name string) (model.Dialect, error) {
-	switch name {
-	case "":
-		return "", errors.New("model is required; set -model or AHARNESS_MODEL")
-	case "crouton-alpha-free":
-		return model.DialectResponses, nil
-	case "deepseek-v4.1-flash":
-		return model.DialectChat, nil
-	case "muse-spark-1.3-contributor":
-		return model.DialectResponses, nil
-	default:
-		return "", fmt.Errorf("unsupported model %q; accepted models: %s", name, acceptedModels)
+// validateProvider rejects provider keys outside the supported catalog.
+func validateProvider(name string) error {
+	if name == providerName {
+		return nil
 	}
+	return fmt.Errorf("unsupported provider %q; supported providers: %s", name, providerName)
 }
 
 func resolveWorkspace(raw string) (string, error) {
@@ -589,8 +607,8 @@ func validateExplicitValues(cfg *config) error {
 	if cfg.maxContextSet && cfg.MaxContextTokens <= 0 {
 		return fmt.Errorf("max context tokens must be positive, got %d", cfg.MaxContextTokens)
 	}
-	if cfg.maxOutputSet && cfg.MaxOutputTokens <= 0 {
-		return fmt.Errorf("max output tokens must be positive, got %d", cfg.MaxOutputTokens)
+	if cfg.maxOutputSet && cfg.MaxOutputTokens < 0 {
+		return fmt.Errorf("max output tokens must not be negative, got %d", cfg.MaxOutputTokens)
 	}
 	if cfg.sessionTimeoutSet && cfg.SessionTimeout <= 0 {
 		return fmt.Errorf("session timeout must be positive, got %s", cfg.SessionTimeout)
@@ -598,20 +616,14 @@ func validateExplicitValues(cfg *config) error {
 	return nil
 }
 
-// validateEffective checks the resolved per-call and cumulative limits and
-// recomputes the derived projection limits.
-func validateEffective(cfg *config) error {
+// validateCumulative checks the values known before the catalog supplies the
+// per-call context window.
+func validateCumulative(cfg *config) error {
 	if cfg.MaxTurns <= 0 {
 		return fmt.Errorf("max turns must be positive, got %d", cfg.MaxTurns)
 	}
 	if cfg.MaxTotalTokens <= 0 {
 		return fmt.Errorf("max total tokens must be positive, got %d", cfg.MaxTotalTokens)
-	}
-	if cfg.MaxContextTokens <= 0 {
-		return fmt.Errorf("max context tokens must be positive, got %d", cfg.MaxContextTokens)
-	}
-	if cfg.MaxOutputTokens <= 0 {
-		return fmt.Errorf("max output tokens must be positive, got %d", cfg.MaxOutputTokens)
 	}
 	if cfg.SessionTimeout <= 0 {
 		return fmt.Errorf("session timeout must be positive, got %s", cfg.SessionTimeout)
@@ -619,12 +631,31 @@ func validateEffective(cfg *config) error {
 	if cfg.ModelTimeout <= 0 {
 		return fmt.Errorf("model timeout must be positive, got %s", cfg.ModelTimeout)
 	}
-	margin := agent.SafetyMargin(cfg.MaxContextTokens)
-	if cfg.MaxOutputTokens >= cfg.MaxContextTokens-margin {
-		return fmt.Errorf("max output tokens (%d) plus safety margin (%d) must be less than max context tokens (%d)",
-			cfg.MaxOutputTokens, margin, cfg.MaxContextTokens)
+	return nil
+}
+
+// validateEffective checks the resolved per-call and cumulative limits and
+// recomputes the derived projection limits. The output budget may be zero,
+// meaning the request omits the field and the provider/model ceiling applies.
+func validateEffective(cfg *config) error {
+	if err := validateCumulative(cfg); err != nil {
+		return err
 	}
-	input := cfg.MaxContextTokens - cfg.MaxOutputTokens - margin
+	if cfg.MaxContextTokens <= 0 {
+		return fmt.Errorf("max context tokens must be positive, got %d", cfg.MaxContextTokens)
+	}
+	if cfg.MaxOutputTokens < 0 {
+		return fmt.Errorf("max output tokens must not be negative, got %d", cfg.MaxOutputTokens)
+	}
+	margin := agent.SafetyMargin(cfg.MaxContextTokens)
+	input := cfg.MaxContextTokens - margin
+	if cfg.InputLimit > 0 && cfg.InputLimit < input {
+		input = cfg.InputLimit
+	}
+	if input <= 0 {
+		return fmt.Errorf("max input tokens must be positive, got %d (context %d, safety margin %d)",
+			input, cfg.MaxContextTokens, margin)
+	}
 	cfg.Limits = agent.Limits{
 		MaxContextTokens: cfg.MaxContextTokens,
 		MaxOutputTokens:  cfg.MaxOutputTokens,
@@ -633,71 +664,6 @@ func validateEffective(cfg *config) error {
 		CompactionTarget: input,
 	}
 	return nil
-}
-
-// applySessionDefaults inherits model, workspace, base URL, and limits from
-// the durable session for resume and fork. Explicit values win.
-func applySessionDefaults(cfg *config, state agent.State) error {
-	if state.Provider != providerName {
-		return fmt.Errorf("session provider %q is not supported; want %q", state.Provider, providerName)
-	}
-	if !agent.SupportsPrompt(state.PromptVersion) {
-		return fmt.Errorf("session prompt version %q is not supported by this binary", state.PromptVersion)
-	}
-	if !agent.SupportsToolset(state.ToolsetVersion) {
-		return fmt.Errorf("session toolset version %q is not supported by this binary", state.ToolsetVersion)
-	}
-	if !cfg.modelSet {
-		cfg.Model = state.Model
-		if cfg.Model == "" {
-			cfg.Model = state.InitialModel
-		}
-	}
-	if cfg.Model == "" {
-		return errors.New("session does not record a model; set -model")
-	}
-	dialect, err := dialectForModel(cfg.Model)
-	if err != nil {
-		return err
-	}
-	cfg.Dialect = dialect
-	if !cfg.workspaceSet {
-		cfg.Workspace = state.Workspace
-	}
-	if cfg.Workspace == "" {
-		return errors.New("session does not record a workspace; set -workspace")
-	}
-	if !cfg.baseURLSet {
-		cfg.BaseURL = state.BaseURL
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = model.DefaultBaseURL
-	}
-	if err := validateBaseURL(cfg.BaseURL); err != nil {
-		return err
-	}
-	if !cfg.maxTurnsSet && state.MaxTurns > 0 {
-		cfg.MaxTurns = state.MaxTurns
-	}
-	if !cfg.maxTotalTokensSet && state.MaxTotalTokens > 0 {
-		cfg.MaxTotalTokens = state.MaxTotalTokens
-	}
-	if !cfg.maxContextSet && state.Limits.MaxContextTokens > 0 {
-		cfg.MaxContextTokens = state.Limits.MaxContextTokens
-	}
-	if !cfg.maxOutputSet && state.Limits.MaxOutputTokens > 0 {
-		cfg.MaxOutputTokens = state.Limits.MaxOutputTokens
-	}
-	if !cfg.sessionTimeoutSet && state.SessionTimeout > 0 {
-		cfg.SessionTimeout = state.SessionTimeout
-	}
-	if state.ModelTimeout > 0 {
-		cfg.ModelTimeout = state.ModelTimeout
-	}
-	cfg.PromptVersion = state.PromptVersion
-	cfg.ToolsetVersion = state.ToolsetVersion
-	cfg.ProvisionalContext = false
-	return validateEffective(cfg)
 }
 
 // validateSessionRules enforces task rules and inherited cumulative limits

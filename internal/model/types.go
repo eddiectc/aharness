@@ -117,5 +117,7 @@ const (
 	DialectResponses Dialect = "openai-responses"
 )
 
-// DefaultBaseURL is the hosted opencode-go OpenAI-compatible base URL.
+// DefaultBaseURL is the legacy hosted opencode-go base URL. New sessions
+// receive the documented OpenAI base URL from the catalog; this constant is
+// only the fallback for an adapter call or a session with no recorded URL.
 const DefaultBaseURL = "https://opencode.ai/inference/go/v1"

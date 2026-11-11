@@ -77,20 +77,36 @@ func newManualHost() *manualHost {
 			Workspace: "/tmp/ws", MaxTurns: 30, MaxTotalTokens: 2_000_000,
 		},
 		models: []ModelChoice{
-			{ID: "deepseek-v4.1-flash", Dialect: model.DialectChat, Default: true},
-			{ID: "crouton-alpha-free", Dialect: model.DialectResponses},
+			{
+				ID: "deepseek-v4.1-flash", Name: "DeepSeek V4.1 Flash",
+				Dialect: model.DialectChat, ContextWindow: 200_000, InputLimit: 160_000,
+				OutputLimit: 8_192, Switchable: true,
+			},
+			{
+				ID: "crouton-alpha-free", Name: "Crouton Alpha Free",
+				Dialect: model.DialectResponses, ContextWindow: 1_000_000, InputLimit: 900_000,
+				Status: "alpha", Translated: true, Switchable: true,
+			},
 		},
 	}
 }
 
 func newTestApp(t *testing.T, host Host) *App {
 	t.Helper()
+	app, _ := newTestAppWithEvents(t, host)
+	return app
+}
+
+func newTestAppWithEvents(t *testing.T, host Host) (*App, chan any) {
+	t.Helper()
+	info := host.Info()
+	events := make(chan any, 64)
 	app := New(Options{
-		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
-		Headless: true, Events: make(chan any, 64), Acks: make(chan int, 4), ImageProtocol: "glyph",
+		Host: host, Models: host.Models(), Model: info.Model, Dialect: model.Dialect(info.Dialect),
+		Headless: true, Events: events, Acks: make(chan int, 4), ImageProtocol: "glyph",
 	})
 	app.setSize(80, 24)
-	return app
+	return app, events
 }
 
 func updateApp(t *testing.T, app *App, msg tea.Msg) tea.Cmd {

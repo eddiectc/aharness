@@ -287,3 +287,24 @@ func TestOpenAIChatEmptyChoices(t *testing.T) {
 	}
 	requireProtocolError(t, err)
 }
+
+func TestOpenAIChatOmitsUnsetOutputBudget(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = readRequestBody(t, r)
+		serveJSON(t, w, http.StatusOK, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	if _, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"}); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := jsonv2.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if value, present := raw["max_tokens"]; present {
+		t.Errorf("max_tokens = %s, want absent for an unset budget", value)
+	}
+}

@@ -629,3 +629,468 @@ func TestBinaryUIJSONModelPickerChangesNextRunOnly(t *testing.T) {
 		t.Fatalf("run_start = %q/%q", model, dialect)
 	}
 }
+
+// interactiveHarness drives -ui-json over pipes so a test can switch the fake
+// catalog between commands and wait for asynchronous refresh results.
+type interactiveHarness struct {
+	t      *testing.T
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout syncBuffer
+	stderr syncBuffer
+
+	once   sync.Once
+	copied chan struct{}
+	done   chan struct{}
+	err    error
+}
+
+func startInteractiveHarness(t *testing.T, bin, workspace, stateDir, baseURL string, extra []string, args ...string) *interactiveHarness {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	t.Cleanup(cancel)
+	h := &interactiveHarness{
+		t:      t,
+		copied: make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+	h.cmd = exec.CommandContext(ctx, bin, args...)
+	h.cmd.Dir = workspace
+	h.cmd.Env = integrationEnvWith(stateDir, baseURL, extra)
+	stdin, err := h.cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.stdin = stdin
+	stdout, err := h.cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cmd.Stderr = &h.stderr
+	if err := h.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = io.Copy(&h.stdout, stdout)
+		close(h.copied)
+	}()
+	go func() {
+		h.err = h.cmd.Wait()
+		close(h.done)
+	}()
+	t.Cleanup(h.shutdown)
+	return h
+}
+
+func (h *interactiveHarness) shutdown() {
+	h.once.Do(func() {
+		_ = h.stdin.Close()
+		select {
+		case <-h.done:
+		case <-time.After(15 * time.Second):
+			_ = h.cmd.Process.Kill()
+			<-h.done
+		}
+		<-h.copied
+	})
+}
+
+func (h *interactiveHarness) send(line string) {
+	h.t.Helper()
+	if _, err := io.WriteString(h.stdin, line+"\n"); err != nil {
+		h.t.Fatalf("write command %q: %v", line, err)
+	}
+}
+
+func (h *interactiveHarness) output() string { return h.stdout.String() }
+
+func (h *interactiveHarness) waitFor(substr string) {
+	h.t.Helper()
+	waitUntil(h.t, "stdout to contain "+substr, func() bool {
+		return strings.Contains(h.output(), substr)
+	})
+}
+
+// framesUntil sends frame commands until a frame containing marker appears.
+// Refresh completion is asynchronous, so a command reply is needed to render
+// the resulting notice.
+func (h *interactiveHarness) framesUntil(marker string) string {
+	h.t.Helper()
+	for attempt := 0; attempt < 200; attempt++ {
+		before := strings.Count(h.output(), `"type":"frame"`)
+		h.send(`{"v":1,"type":"frame"}`)
+		waitUntil(h.t, "another protocol frame", func() bool {
+			return strings.Count(h.output(), `"type":"frame"`) > before
+		})
+		if strings.Contains(h.output(), marker) {
+			return h.output()
+		}
+	}
+	h.t.Fatalf("no frame contained %q\nstdout:\n%s\nstderr:\n%s", marker, h.output(), h.stderr.String())
+	return ""
+}
+
+func (h *interactiveHarness) quit() {
+	h.t.Helper()
+	h.send(`{"v":1,"type":"quit"}`)
+	select {
+	case <-h.done:
+	case <-time.After(15 * time.Second):
+		h.t.Fatalf("harness did not exit after quit\nstdout:\n%s\nstderr:\n%s", h.output(), h.stderr.String())
+	}
+	<-h.copied
+	if h.err != nil {
+		h.t.Fatalf("interactive harness exit: %v\nstdout:\n%s\nstderr:\n%s", h.err, h.output(), h.stderr.String())
+	}
+}
+
+// frameText extracts the visible frame lines from -ui-json stdout.
+func frameText(t *testing.T, raw string) string {
+	t.Helper()
+	var b strings.Builder
+	for _, lines := range protocolFrames(t, raw) {
+		for _, text := range lines {
+			b.WriteString(text)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// lastFrameText returns the most recent rendered frame.
+func lastFrameText(t *testing.T, raw string) string {
+	t.Helper()
+	frames := protocolFrames(t, raw)
+	if len(frames) == 0 {
+		t.Fatalf("no frames in protocol output:\n%s", raw)
+	}
+	return strings.Join(frames[len(frames)-1], "\n")
+}
+
+func protocolFrames(t *testing.T, raw string) [][]string {
+	t.Helper()
+	var frames [][]string
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		var frame struct {
+			Type  string   `json:"type"`
+			Lines []string `json:"lines"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode protocol line: %v\n%s", err, line)
+		}
+		if frame.Type == "frame" {
+			frames = append(frames, frame.Lines)
+		}
+	}
+	return frames
+}
+
+func TestBinaryUIJSONModelPickerListsCatalog(t *testing.T) {
+	bin := buildHarness(t)
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), t.TempDir(), "", strings.NewReader(script),
+		"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstderr:\n%s", exit, stderr)
+	}
+	text := frameText(t, stdout)
+	for _, want := range []string{
+		"Crouton Alpha Free", "DeepSeek V4.1 Flash", "GPT-6 Luna", "Kimi K2.7 Code",
+		"Muse Spark 1.3 Contributor", "Old Deprecated", "Qwen3.7 Plus",
+		"ctx 1000000", "out 384000", "ctx 1050000", "in 922000",
+		"openai-responses", "openai-chat", "deprecated", "translated",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("picker frame missing %q:\n%s", want, text)
+		}
+	}
+	for _, omitted := range []string{"No Tools", "No Context", "Exotic SDK"} {
+		if strings.Contains(text, omitted) {
+			t.Errorf("ineligible model %q appears in the picker:\n%s", omitted, text)
+		}
+	}
+	order := []string{"Crouton Alpha Free", "DeepSeek V4.1 Flash", "GPT-6 Luna", "Kimi K2.7 Code", "Muse Spark 1.3 Contributor", "Old Deprecated", "Qwen3.7 Plus"}
+	last := -1
+	for _, name := range order {
+		index := strings.Index(text, name)
+		if index < 0 {
+			t.Fatalf("picker frame missing %q:\n%s", name, text)
+		}
+		if index <= last {
+			t.Fatalf("picker rows are not sorted by ID at %q:\n%s", name, text)
+		}
+		last = index
+	}
+}
+
+func TestBinaryUIJSONModelPickerSelectsAdapter(t *testing.T) {
+	bin := buildHarness(t)
+	cases := []struct {
+		name    string
+		model   string
+		dialect string
+		context int
+		path    string
+		answer  string
+	}{
+		{name: "chat", model: "kimi-k2.7-code", dialect: "openai-chat", context: 262_144, path: "/chat/completions", answer: "picked chat"},
+		{name: "responses", model: "gpt-6-luna", dialect: "openai-responses", context: 1_050_000, path: "/responses", answer: "picked responses"},
+		{name: "translated chat", model: "qwen3.7-plus", dialect: "openai-chat", context: 131_072, path: "/chat/completions", answer: "picked chat"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+				if r.URL.Path != tc.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tc.path)
+				}
+				if tc.path == "/responses" {
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.WriteHeader(http.StatusOK)
+					writeSSE(t, w, "response.output_text.delta", `{"type":"response.output_text.delta","delta":"`+tc.answer+`"}`)
+					writeSSE(t, w, "response.completed", `{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"`+tc.answer+`"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`)
+					return
+				}
+				sseFinal(t, w, tc.answer)
+			})
+			stateDir := t.TempDir()
+			script := strings.Join([]string{
+				`{"v":1,"type":"key","key":"ctrl-p"}`,
+				`{"v":1,"type":"text","text":"` + tc.model + `"}`,
+				`{"v":1,"type":"key","key":"enter"}`,
+				`{"v":1,"type":"text","text":"use the picked model"}`,
+				`{"v":1,"type":"key","key":"enter"}`,
+				`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+				`{"v":1,"type":"quit"}`,
+			}, "\n") + "\n"
+			stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+				"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash")
+			if exit != 0 {
+				t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+			}
+			if !strings.Contains(stdout, `"event":"model_changed"`) || !strings.Contains(stdout, `"model":"`+tc.model+`"`) {
+				t.Fatalf("stdout missing the model_changed event for %s:\n%s", tc.model, stdout)
+			}
+			files := sessionFiles(t, stateDir)
+			if len(files) != 1 {
+				t.Fatalf("session files = %v", files)
+			}
+			start, starts := recordedSession(t, files[0])
+			if start.Model != "deepseek-v4.1-flash" {
+				t.Fatalf("session_start model = %q, want the initial model", start.Model)
+			}
+			var last recordedRunStart
+			for _, rs := range starts {
+				if rs.Model == tc.model {
+					last = rs
+				}
+			}
+			if last.Model != tc.model || last.Dialect != tc.dialect || last.BaseURL != f.url {
+				t.Fatalf("run_start = %+v", last)
+			}
+			if last.Limits.MaxContextTokens != tc.context {
+				t.Fatalf("run_start context = %d, want %d", last.Limits.MaxContextTokens, tc.context)
+			}
+		})
+	}
+}
+
+func TestBinaryUIJSONModelPickerRefresh(t *testing.T) {
+	bin := buildHarness(t)
+	catalog := startFakeModelsDev(t)
+	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
+	h := startInteractiveHarness(t, bin, t.TempDir(), t.TempDir(), "", extra,
+		"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash")
+	h.waitFor(`"type":"frame"`)
+	h.send(`{"v":1,"type":"key","key":"ctrl-p"}`)
+	h.waitFor("Crouton Alpha Free")
+
+	models := defaultFakeCatalogModels()
+	models["zeta-extra"] = testCatalogModel("Zeta Extra", "@ai-sdk/openai-compatible", 99_999, 0, 4_096)
+	catalog.SetModels(models)
+	released := catalog.BlockNext()
+	h.send(`{"v":1,"type":"key","key":"ctrl-r"}`)
+	h.waitFor("refreshing models…")
+	close(released)
+	h.framesUntil("refreshed 8 models")
+	text := lastFrameText(t, h.output())
+	if !strings.Contains(text, "Zeta Extra") {
+		t.Fatalf("refreshed picker is missing the new model:\n%s", text)
+	}
+	if !strings.Contains(text, "DeepSeek V4.1 Flash (current)") {
+		t.Fatalf("refreshed picker lost the current selection:\n%s", text)
+	}
+	if !strings.Contains(text, "refreshed 8 models") {
+		t.Fatalf("refreshed frame missing the notice:\n%s", text)
+	}
+	h.quit()
+}
+
+func TestBinaryUIJSONModelPickerRefreshFailure(t *testing.T) {
+	bin := buildHarness(t)
+	catalog := startFakeModelsDev(t)
+	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
+	h := startInteractiveHarness(t, bin, t.TempDir(), t.TempDir(), "", extra,
+		"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash")
+	h.waitFor(`"type":"frame"`)
+	h.send(`{"v":1,"type":"key","key":"ctrl-p"}`)
+	h.waitFor("Crouton Alpha Free")
+
+	catalog.SetFailure(http.StatusInternalServerError, "catalog exploded")
+	h.send(`{"v":1,"type":"key","key":"ctrl-r"}`)
+	h.framesUntil("refresh models:")
+	text := lastFrameText(t, h.output())
+	if !strings.Contains(text, "model catalog unavailable") {
+		t.Fatalf("failure notice does not name the error:\n%s", text)
+	}
+	for _, want := range []string{"Crouton Alpha Free", "DeepSeek V4.1 Flash", "Qwen3.7 Plus"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("failure discarded the loaded picker entries; missing %q:\n%s", want, text)
+		}
+	}
+	h.quit()
+}
+
+func TestBinaryUIJSONOfflineResumeRefreshEnablesSwitching(t *testing.T) {
+	bin := buildHarness(t)
+	catalog := startFakeModelsDev(t)
+	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		writeJSON(w, 200, chatFinalResponse("first done"))
+	})
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
+	_, stderr, exit := runHarnessRawEnv(t, bin, workspace, stateDir, provider.url, extra, nil,
+		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash")
+	if exit != 0 {
+		t.Fatalf("first exit = %d\nstderr:\n%s", exit, stderr)
+	}
+	files := sessionFiles(t, stateDir)
+	if len(files) != 1 {
+		t.Fatalf("session files = %v", files)
+	}
+	id := strings.TrimSuffix(filepath.Base(files[0]), ".jsonl")
+	// Force the best-effort catalog load at resume to fail: no cache and a
+	// catalog server that is down.
+	if err := os.RemoveAll(filepath.Join(stateDir, "cache")); err != nil {
+		t.Fatal(err)
+	}
+	catalog.SetFailure(http.StatusServiceUnavailable, "catalog offline")
+
+	h := startInteractiveHarness(t, bin, workspace, stateDir, "", extra,
+		"-ui-json", "-ui-size", "120x40", "-resume", id)
+	h.waitFor(`"type":"frame"`)
+	h.send(`{"v":1,"type":"key","key":"ctrl-p"}`)
+	h.waitFor("model for the next run")
+	text := frameText(t, h.output())
+	if !strings.Contains(text, "deepseek-v4.1-flash") {
+		t.Fatalf("offline picker does not list the recorded model:\n%s", text)
+	}
+	if strings.Contains(text, "Crouton Alpha Free") || strings.Contains(text, "Qwen3.7 Plus") {
+		t.Fatalf("offline picker should contain only the recorded model:\n%s", text)
+	}
+	h.send(`{"v":1,"type":"key","key":"enter"}`)
+	h.waitFor("model switching is unavailable until the catalog loads")
+
+	catalog.SetFailure(0, "")
+	h.send(`{"v":1,"type":"key","key":"ctrl-r"}`)
+	h.framesUntil("refreshed 7 models")
+	text = frameText(t, h.output())
+	if !strings.Contains(text, "Crouton Alpha Free") {
+		t.Fatalf("refresh did not expand the picker:\n%s", text)
+	}
+	// The recorded model is retained and highlighted; move to the previous
+	// sorted entry and select it.
+	h.send(`{"v":1,"type":"key","key":"up"}`)
+	h.send(`{"v":1,"type":"key","key":"enter"}`)
+	h.waitFor(`"event":"model_changed"`)
+	if !strings.Contains(h.output(), `"model":"crouton-alpha-free"`) {
+		t.Fatalf("switching after refresh did not emit the picked model:\n%s", h.output())
+	}
+	h.quit()
+}
+
+func TestBinaryUIJSONDeprecatedModelSelectable(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		sseFinal(t, w, "old model answered")
+	})
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"key","key":"ctrl-p"}`,
+		`{"v":1,"type":"text","text":"old"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"use the old model"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+		"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"model":"old-deprecated"`) {
+		t.Fatalf("deprecated model was not selected:\n%s", stdout)
+	}
+	files := sessionFiles(t, stateDir)
+	if len(files) != 1 {
+		t.Fatalf("session files = %v", files)
+	}
+	_, starts := recordedSession(t, files[0])
+	found := false
+	for _, rs := range starts {
+		if rs.Model == "old-deprecated" {
+			found = true
+			if rs.Dialect != "openai-chat" || rs.Limits.MaxContextTokens != 100_000 {
+				t.Fatalf("deprecated run_start = %+v", rs)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no run_start used the deprecated model: %+v", starts)
+	}
+}
+
+func TestBinaryUIJSONDetailsShowsOutputBudget(t *testing.T) {
+	bin := buildHarness(t)
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unset", want: "max output: unset"},
+		{name: "explicit", args: []string{"-max-output-tokens", "1234"}, want: "max output: 1234"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"-ui-json", "-ui-size", "120x40", "-model", "deepseek-v4.1-flash"}
+			args = append(args, tc.args...)
+			script := strings.Join([]string{
+				`{"v":1,"type":"key","key":"ctrl-x"}`,
+				`{"v":1,"type":"frame"}`,
+				`{"v":1,"type":"quit"}`,
+			}, "\n") + "\n"
+			stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), t.TempDir(), "", strings.NewReader(script), args...)
+			if exit != 0 {
+				t.Fatalf("exit = %d\nstderr:\n%s", exit, stderr)
+			}
+			text := frameText(t, stdout)
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("details frame missing %q:\n%s", tc.want, text)
+			}
+			if !strings.Contains(text, "provider:   opencode-go") {
+				t.Fatalf("details frame missing the provider:\n%s", text)
+			}
+		})
+	}
+}

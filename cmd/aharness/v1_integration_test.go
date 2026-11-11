@@ -54,28 +54,47 @@ func waitUntil(t *testing.T, what string, fn func() bool) {
 }
 
 func integrationEnv(stateDir, baseURL string) []string {
-	env := make([]string, 0, len(os.Environ())+3)
+	return integrationEnvWith(stateDir, baseURL, nil)
+}
+
+func integrationEnvWith(stateDir, baseURL string, extra []string) []string {
+	env := make([]string, 0, len(os.Environ())+4+len(extra))
 	for _, entry := range os.Environ() {
 		if strings.HasPrefix(entry, "AHARNESS_") {
 			continue
 		}
 		env = append(env, entry)
 	}
-	env = append(env, "AHARNESS_STATE_DIR="+stateDir, "AHARNESS_PROVIDER_TOKEN=test-token")
-	if baseURL != "" {
+	if !envHasKey(extra, "AHARNESS_STATE_DIR") {
+		env = append(env, "AHARNESS_STATE_DIR="+stateDir)
+	}
+	if !envHasKey(extra, "AHARNESS_PROVIDER_TOKEN") {
+		env = append(env, "AHARNESS_PROVIDER_TOKEN=test-token")
+	}
+	if baseURL != "" && !envHasKey(extra, "AHARNESS_PROVIDER_BASE_URL") {
 		env = append(env, "AHARNESS_PROVIDER_BASE_URL="+baseURL)
 	}
+	if !envHasKey(extra, "AHARNESS_MODELS_DEV_URL") {
+		env = append(env, testCatalogEnv())
+	}
+	env = append(env, extra...)
 	return env
 }
 
 // runHarnessRaw runs the binary without assuming a single session log.
 func runHarnessRaw(t *testing.T, bin, workspace, stateDir, baseURL string, stdin io.Reader, args ...string) (stdout, stderr string, exit int) {
 	t.Helper()
+	return runHarnessRawEnv(t, bin, workspace, stateDir, baseURL, nil, stdin, args...)
+}
+
+// runHarnessRawEnv is runHarnessRaw with additional environment entries.
+func runHarnessRawEnv(t *testing.T, bin, workspace, stateDir, baseURL string, extra []string, stdin io.Reader, args ...string) (stdout, stderr string, exit int) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = workspace
-	cmd.Env = integrationEnv(stateDir, baseURL)
+	cmd.Env = integrationEnvWith(stateDir, baseURL, extra)
 	if stdin != nil {
 		cmd.Stdin = stdin
 	}

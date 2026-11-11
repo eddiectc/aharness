@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"time"
@@ -149,6 +150,9 @@ type App struct {
 	nextDialect model.Dialect
 	models      []ModelChoice
 	acks        chan<- int
+
+	refreshCancel context.CancelFunc
+	refreshSeq    int
 
 	inputHistory []string
 	historyIndex int

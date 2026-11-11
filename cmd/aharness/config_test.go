@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -56,16 +57,51 @@ func cfgTestClearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"AHARNESS_MODEL",
+		"AHARNESS_PROVIDER",
 		"AHARNESS_WORKSPACE",
 		"AHARNESS_STATE_DIR",
 		"AHARNESS_PROVIDER_TOKEN",
 		"AHARNESS_MAX_CONTEXT_TOKENS",
 		"AHARNESS_LOG_REQUESTS",
 		"AHARNESS_PROVIDER_BASE_URL",
+		"AHARNESS_MODELS_DEV_URL",
 		"XDG_STATE_HOME",
 	} {
 		t.Setenv(key, "")
 	}
+}
+
+// cfgTestResolve runs the new-session catalog resolution for a parsed config.
+func cfgTestResolve(t *testing.T, cfg config, fake *fakeModelsDev) (config, string) {
+	t.Helper()
+	if cfg.ModelsDevURL == "" {
+		cfg.ModelsDevURL = fake.URL()
+	}
+	source, err := newCatalogSource(cfg)
+	if err != nil {
+		t.Fatalf("newCatalogSource: %v", err)
+	}
+	var stderr bytes.Buffer
+	if err := resolveNewModel(context.Background(), &cfg, source, &stderr); err != nil {
+		t.Fatalf("resolveNewModel: %v", err)
+	}
+	return cfg, stderr.String()
+}
+
+func cfgTestResolveErr(t *testing.T, cfg config, fake *fakeModelsDev) error {
+	t.Helper()
+	if cfg.ModelsDevURL == "" {
+		cfg.ModelsDevURL = fake.URL()
+	}
+	source, err := newCatalogSource(cfg)
+	if err != nil {
+		t.Fatalf("newCatalogSource: %v", err)
+	}
+	err = resolveNewModel(context.Background(), &cfg, source, io.Discard)
+	if err == nil {
+		t.Fatalf("resolveNewModel(%q) succeeded, want an error", cfg.Model)
+	}
+	return err
 }
 
 func TestConfigDefaults(t *testing.T) {
@@ -83,8 +119,31 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.Model != "deepseek-v4.1-flash" {
 		t.Errorf("Model = %q, want %q", cfg.Model, "deepseek-v4.1-flash")
 	}
-	if cfg.Dialect != model.DialectChat {
-		t.Errorf("Dialect = %q, want %q", cfg.Dialect, model.DialectChat)
+	// parseConfig only parses flags and environment. Dialect, base URL, and
+	// per-call limits are resolved from the catalog before session_start.
+	if cfg.Dialect != "" {
+		t.Errorf("Dialect = %q, want empty before resolution", cfg.Dialect)
+	}
+	if cfg.BaseURL != "" {
+		t.Errorf("BaseURL = %q, want empty before resolution", cfg.BaseURL)
+	}
+	if cfg.MaxContextTokens != 0 {
+		t.Errorf("MaxContextTokens = %d, want 0 (unset) before resolution", cfg.MaxContextTokens)
+	}
+	if cfg.MaxOutputTokens != 0 {
+		t.Errorf("MaxOutputTokens = %d, want 0 (no harness cap)", cfg.MaxOutputTokens)
+	}
+	if cfg.InputLimit != 0 {
+		t.Errorf("InputLimit = %d, want 0 before resolution", cfg.InputLimit)
+	}
+	if cfg.Limits != (agent.Limits{}) {
+		t.Errorf("Limits = %+v, want zero before resolution", cfg.Limits)
+	}
+	if cfg.maxContextSet || cfg.maxOutputSet || cfg.baseURLSet {
+		t.Errorf("explicit flags = context %t output %t base %t, want all false", cfg.maxContextSet, cfg.maxOutputSet, cfg.baseURLSet)
+	}
+	if !cfg.modelSet {
+		t.Error("modelSet = false, want true for -model")
 	}
 	if cfg.MaxTurns != defaultMaxTurns {
 		t.Errorf("MaxTurns = %d, want %d", cfg.MaxTurns, defaultMaxTurns)
@@ -92,40 +151,14 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.MaxTotalTokens != defaultMaxTotalTokens {
 		t.Errorf("MaxTotalTokens = %d, want %d", cfg.MaxTotalTokens, defaultMaxTotalTokens)
 	}
-	if cfg.MaxContextTokens != defaultMaxContextTokens {
-		t.Errorf("MaxContextTokens = %d, want %d", cfg.MaxContextTokens, defaultMaxContextTokens)
-	}
-	if cfg.MaxOutputTokens != defaultMaxOutputTokens {
-		t.Errorf("MaxOutputTokens = %d, want %d", cfg.MaxOutputTokens, defaultMaxOutputTokens)
-	}
 	if cfg.SessionTimeout != defaultSessionTimeout {
 		t.Errorf("SessionTimeout = %s, want %s", cfg.SessionTimeout, defaultSessionTimeout)
 	}
 	if cfg.ModelTimeout != defaultModelTimeout {
 		t.Errorf("ModelTimeout = %s, want %s", cfg.ModelTimeout, defaultModelTimeout)
 	}
-	if cfg.BaseURL != model.DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, model.DefaultBaseURL)
-	}
 	if cfg.LogRequests {
 		t.Error("LogRequests = true, want false")
-	}
-	if !cfg.ProvisionalContext {
-		t.Error("ProvisionalContext = false, want true when max context is not configured")
-	}
-	wantMargin := agent.SafetyMargin(defaultMaxContextTokens)
-	if wantMargin != 10_000 {
-		t.Fatalf("agent.SafetyMargin(%d) = %d, want 10000", defaultMaxContextTokens, wantMargin)
-	}
-	if cfg.Limits.SafetyMargin != wantMargin {
-		t.Errorf("Limits.SafetyMargin = %d, want %d", cfg.Limits.SafetyMargin, wantMargin)
-	}
-	wantInput := defaultMaxContextTokens - defaultMaxOutputTokens - wantMargin
-	if cfg.Limits.MaxInputTokens != wantInput {
-		t.Errorf("Limits.MaxInputTokens = %d, want %d", cfg.Limits.MaxInputTokens, wantInput)
-	}
-	if cfg.Limits.CompactionTarget != wantInput {
-		t.Errorf("Limits.CompactionTarget = %d, want %d", cfg.Limits.CompactionTarget, wantInput)
 	}
 }
 
@@ -156,9 +189,6 @@ func TestConfigEnvFlagPrecedence(t *testing.T) {
 	if cfg.Model != "crouton-alpha-free" {
 		t.Errorf("Model = %q, want flag value %q", cfg.Model, "crouton-alpha-free")
 	}
-	if cfg.Dialect != model.DialectResponses {
-		t.Errorf("Dialect = %q, want %q", cfg.Dialect, model.DialectResponses)
-	}
 	if cfg.Workspace != flagWorkspace {
 		t.Errorf("Workspace = %q, want flag value %q", cfg.Workspace, flagWorkspace)
 	}
@@ -168,18 +198,17 @@ func TestConfigEnvFlagPrecedence(t *testing.T) {
 	if cfg.MaxContextTokens != 150_000 {
 		t.Errorf("MaxContextTokens = %d, want flag value 150000", cfg.MaxContextTokens)
 	}
+	if !cfg.maxContextSet {
+		t.Error("maxContextSet = false, want true for -max-context-tokens")
+	}
 	if cfg.BaseURL != "http://flag.example/v1" {
 		t.Errorf("BaseURL = %q, want flag value %q", cfg.BaseURL, "http://flag.example/v1")
 	}
+	if !cfg.baseURLSet {
+		t.Error("baseURLSet = false, want true for -provider-base-url")
+	}
 	if cfg.Token != "env-token" {
 		t.Errorf("Token = %q, want environment value %q", cfg.Token, "env-token")
-	}
-	wantMargin := agent.SafetyMargin(150_000)
-	if cfg.Limits.SafetyMargin != wantMargin {
-		t.Errorf("Limits.SafetyMargin = %d, want %d", cfg.Limits.SafetyMargin, wantMargin)
-	}
-	if cfg.ProvisionalContext {
-		t.Error("ProvisionalContext = true, want false when max context is configured")
 	}
 }
 
@@ -221,8 +250,8 @@ func TestConfigEnvOverridesDefaults(t *testing.T) {
 	if !cfg.LogRequests {
 		t.Error("LogRequests = false, want true from AHARNESS_LOG_REQUESTS=1")
 	}
-	if cfg.ProvisionalContext {
-		t.Error("ProvisionalContext = true, want false when AHARNESS_MAX_CONTEXT_TOKENS is set")
+	if cfg.Dialect != "" || cfg.MaxOutputTokens != 0 {
+		t.Errorf("Dialect = %q output = %d, want unresolved/zero", cfg.Dialect, cfg.MaxOutputTokens)
 	}
 }
 
@@ -312,32 +341,66 @@ func TestConfigTaskRequiredExactlyOne(t *testing.T) {
 	})
 }
 
-func TestConfigModelRegistry(t *testing.T) {
-	common := []string{
-		"-task", "task",
-		"-workspace", t.TempDir(),
-		"-state-dir", t.TempDir(),
-	}
+func TestConfigNewSessionResolvedValues(t *testing.T) {
+	fake := startFakeModelsDev(t)
+	env := map[string]string{"AHARNESS_MODELS_DEV_URL": fake.URL()}
 	cases := []struct {
-		model   string
-		dialect model.Dialect
+		model       string
+		dialect     model.Dialect
+		context     int
+		inputLimit  int
+		inputCap    int
+		outputLimit int
 	}{
-		{"crouton-alpha-free", model.DialectResponses},
-		{"deepseek-v4.1-flash", model.DialectChat},
-		{"muse-spark-1.3-contributor", model.DialectResponses},
+		{model: "deepseek-v4.1-flash", dialect: model.DialectChat, context: 1_000_000, inputCap: 950_000, outputLimit: 384_000},
+		{model: "gpt-6-luna", dialect: model.DialectResponses, context: 1_050_000, inputLimit: 922_000, inputCap: 922_000, outputLimit: 128_000},
+		{model: "kimi-k2.7-code", dialect: model.DialectChat, context: 262_144, inputCap: 249_037, outputLimit: 262_144},
+		{model: "qwen3.7-plus", dialect: model.DialectChat, context: 131_072, inputCap: 124_519, outputLimit: 8_192},
+		{model: "crouton-alpha-free", dialect: model.DialectResponses, context: 200_000, inputCap: 190_000, outputLimit: 8_192},
+		{model: "old-deprecated", dialect: model.DialectChat, context: 100_000, inputCap: 95_000, outputLimit: 8_192},
 	}
 	for _, tc := range cases {
 		t.Run(tc.model, func(t *testing.T) {
-			args := append(append([]string{}, common...), "-model", tc.model)
-			cfg := cfgTestParseOK(t, args, nil)
+			args := cfgTestArgs(t)
+			args = append(args, "-model", tc.model)
+			cfg := cfgTestParseOK(t, args, env)
+			cfg, stderr := cfgTestResolve(t, cfg, fake)
+
 			if cfg.Model != tc.model {
 				t.Errorf("Model = %q, want %q", cfg.Model, tc.model)
 			}
 			if cfg.Dialect != tc.dialect {
 				t.Errorf("Dialect = %q, want %q", cfg.Dialect, tc.dialect)
 			}
-			if cfg.Provider != providerName {
-				t.Errorf("Provider = %q, want %q", cfg.Provider, providerName)
+			if cfg.BaseURL != testCatalogBaseURL {
+				t.Errorf("BaseURL = %q, want discovered %q", cfg.BaseURL, testCatalogBaseURL)
+			}
+			if cfg.MaxContextTokens != tc.context {
+				t.Errorf("MaxContextTokens = %d, want %d", cfg.MaxContextTokens, tc.context)
+			}
+			if cfg.InputLimit != tc.inputLimit {
+				t.Errorf("InputLimit = %d, want %d", cfg.InputLimit, tc.inputLimit)
+			}
+			// The advertised output ceiling is informational only.
+			if cfg.MaxOutputTokens != 0 || cfg.Limits.MaxOutputTokens != 0 {
+				t.Errorf("output budget = %d/%d, want 0 (no harness cap)", cfg.MaxOutputTokens, cfg.Limits.MaxOutputTokens)
+			}
+			wantMargin := agent.SafetyMargin(tc.context)
+			if cfg.Limits.SafetyMargin != wantMargin {
+				t.Errorf("SafetyMargin = %d, want %d", cfg.Limits.SafetyMargin, wantMargin)
+			}
+			if cfg.Limits.MaxInputTokens != tc.inputCap {
+				t.Errorf("MaxInputTokens = %d, want %d", cfg.Limits.MaxInputTokens, tc.inputCap)
+			}
+			if cfg.Limits.CompactionTarget != tc.inputCap {
+				t.Errorf("CompactionTarget = %d, want %d", cfg.Limits.CompactionTarget, tc.inputCap)
+			}
+			if tc.model == "old-deprecated" {
+				if !strings.Contains(stderr, "deprecated") {
+					t.Errorf("stderr = %q, want a deprecated model warning", stderr)
+				}
+			} else if strings.Contains(stderr, "deprecated") {
+				t.Errorf("unexpected deprecated warning: %q", stderr)
 			}
 		})
 	}
@@ -355,16 +418,267 @@ func TestConfigModelRequired(t *testing.T) {
 	}
 }
 
-func TestConfigModelUnsupported(t *testing.T) {
-	args := []string{
-		"-task", "task",
-		"-model", "unknown-model",
-		"-workspace", t.TempDir(),
-		"-state-dir", t.TempDir(),
+func TestConfigUnknownModelResolvesAsConfigError(t *testing.T) {
+	fake := startFakeModelsDev(t)
+	cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "unknown-model"), nil)
+	err := cfgTestResolveErr(t, cfg, fake)
+	if !errors.Is(err, model.ErrModelNotFound) || !strings.Contains(err.Error(), "unknown-model") {
+		t.Errorf("error = %q, want a catalog model-not-found error naming the model", err)
 	}
-	err := cfgTestParseErr(t, args, nil)
-	if !strings.Contains(err.Error(), "unsupported model") {
-		t.Errorf("error = %q, want unsupported model error", err)
+	if got := catalogExitCode(err); got != exitConfig {
+		t.Errorf("catalogExitCode = %d, want %d", got, exitConfig)
+	}
+}
+
+func TestConfigIneligibleModelsResolveAsConfigErrors(t *testing.T) {
+	fake := startFakeModelsDev(t)
+	cases := []struct {
+		model string
+		want  string
+	}{
+		{model: "no-tools", want: "tool calls are not supported"},
+		{model: "no-context", want: "missing context limit"},
+		{model: "exotic-sdk", want: "unsupported AI SDK package"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", tc.model), nil)
+			err := cfgTestResolveErr(t, cfg, fake)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err, tc.want)
+			}
+			if got := catalogExitCode(err); got != exitConfig {
+				t.Errorf("catalogExitCode = %d, want %d", got, exitConfig)
+			}
+		})
+	}
+}
+
+func TestConfigExplicitContext(t *testing.T) {
+	fake := startFakeModelsDev(t)
+
+	t.Run("flag below window", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "kimi-k2.7-code", "-max-context-tokens", "100000"), nil)
+		cfg, stderr := cfgTestResolve(t, cfg, fake)
+		if cfg.MaxContextTokens != 100_000 {
+			t.Fatalf("MaxContextTokens = %d, want explicit 100000", cfg.MaxContextTokens)
+		}
+		if cfg.Limits.SafetyMargin != 5_000 || cfg.Limits.MaxInputTokens != 95_000 {
+			t.Fatalf("limits = %+v, want margin 5000 input 95000", cfg.Limits)
+		}
+		if strings.Contains(stderr, "clamped") {
+			t.Errorf("unexpected clamp warning: %q", stderr)
+		}
+	})
+
+	t.Run("environment below window", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "kimi-k2.7-code"), map[string]string{
+			"AHARNESS_MODELS_DEV_URL":     fake.URL(),
+			"AHARNESS_MAX_CONTEXT_TOKENS": "100000",
+		})
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.MaxContextTokens != 100_000 || cfg.Limits.MaxInputTokens != 95_000 {
+			t.Fatalf("context/input = %d/%d, want 100000/95000", cfg.MaxContextTokens, cfg.Limits.MaxInputTokens)
+		}
+	})
+
+	t.Run("above window clamps and warns", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "kimi-k2.7-code", "-max-context-tokens", "999999"), nil)
+		cfg, stderr := cfgTestResolve(t, cfg, fake)
+		if cfg.MaxContextTokens != 262_144 {
+			t.Fatalf("MaxContextTokens = %d, want the model window 262144", cfg.MaxContextTokens)
+		}
+		if !strings.Contains(stderr, "clamped") || !strings.Contains(stderr, "262144") {
+			t.Fatalf("stderr = %q, want a clamp warning naming the window", stderr)
+		}
+		if cfg.Limits.SafetyMargin != 13_107 || cfg.Limits.MaxInputTokens != 249_037 {
+			t.Fatalf("limits = %+v, want margin 13107 input 249037", cfg.Limits)
+		}
+	})
+
+	t.Run("equal to window does not warn", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "kimi-k2.7-code", "-max-context-tokens", "262144"), nil)
+		_, stderr := cfgTestResolve(t, cfg, fake)
+		if strings.Contains(stderr, "clamped") {
+			t.Fatalf("unexpected clamp warning: %q", stderr)
+		}
+	})
+}
+
+func TestConfigOutputBudget(t *testing.T) {
+	fake := startFakeModelsDev(t)
+
+	t.Run("unset omits the budget", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t), nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.MaxOutputTokens != 0 || cfg.Limits.MaxOutputTokens != 0 {
+			t.Fatalf("output budget = %d/%d, want 0", cfg.MaxOutputTokens, cfg.Limits.MaxOutputTokens)
+		}
+		if cfg.Limits.MaxInputTokens != 950_000 {
+			t.Fatalf("MaxInputTokens = %d, want 950000 without output subtraction", cfg.Limits.MaxInputTokens)
+		}
+	})
+
+	t.Run("explicit positive passes through unchanged", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-max-output-tokens", "1234"), nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.MaxOutputTokens != 1234 || cfg.Limits.MaxOutputTokens != 1234 {
+			t.Fatalf("output budget = %d/%d, want 1234", cfg.MaxOutputTokens, cfg.Limits.MaxOutputTokens)
+		}
+		// The catalog output ceiling (384000) never clamps an explicit value,
+		// and the output budget is not subtracted from the input cap.
+		if cfg.Limits.MaxInputTokens != 950_000 {
+			t.Fatalf("MaxInputTokens = %d, want 950000", cfg.Limits.MaxInputTokens)
+		}
+	})
+
+	t.Run("explicit zero is allowed", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-max-output-tokens", "0"), nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.MaxOutputTokens != 0 || !cfg.maxOutputSet {
+			t.Fatalf("output = %d explicit = %t, want 0 and true", cfg.MaxOutputTokens, cfg.maxOutputSet)
+		}
+		if cfg.Limits.MaxInputTokens != 950_000 {
+			t.Fatalf("MaxInputTokens = %d, want 950000", cfg.Limits.MaxInputTokens)
+		}
+	})
+
+	t.Run("negative rejected at parse", func(t *testing.T) {
+		err := cfgTestParseErr(t, append(cfgTestArgs(t), "-max-output-tokens", "-1"), nil)
+		if !strings.Contains(err.Error(), "must not be negative") {
+			t.Fatalf("error = %q, want negative-output rejection", err)
+		}
+	})
+}
+
+func TestConfigProviderSelection(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestBaseArgs(t), nil)
+		if cfg.Provider != providerName || cfg.providerSet {
+			t.Fatalf("provider = %q explicit = %t", cfg.Provider, cfg.providerSet)
+		}
+	})
+	t.Run("flag", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestBaseArgs(t), "-provider", providerName), nil)
+		if cfg.Provider != providerName || !cfg.providerSet {
+			t.Fatalf("provider = %q explicit = %t", cfg.Provider, cfg.providerSet)
+		}
+	})
+	t.Run("environment", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestBaseArgs(t), map[string]string{"AHARNESS_PROVIDER": providerName})
+		if cfg.Provider != providerName || !cfg.providerSet {
+			t.Fatalf("provider = %q explicit = %t", cfg.Provider, cfg.providerSet)
+		}
+	})
+	t.Run("unknown flag", func(t *testing.T) {
+		err := cfgTestParseErr(t, append(cfgTestBaseArgs(t), "-provider", "other"), nil)
+		if !strings.Contains(err.Error(), "unsupported provider") || !strings.Contains(err.Error(), providerName) {
+			t.Fatalf("error = %q, want supported provider list", err)
+		}
+	})
+	t.Run("unknown environment", func(t *testing.T) {
+		err := cfgTestParseErr(t, cfgTestBaseArgs(t), map[string]string{"AHARNESS_PROVIDER": "other"})
+		if !strings.Contains(err.Error(), "unsupported provider") {
+			t.Fatalf("error = %q, want unsupported provider", err)
+		}
+	})
+	t.Run("flag overrides unknown environment", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(cfgTestBaseArgs(t), "-provider", providerName), map[string]string{"AHARNESS_PROVIDER": "other"})
+		if cfg.Provider != providerName {
+			t.Fatalf("provider = %q, want %q", cfg.Provider, providerName)
+		}
+	})
+}
+
+func TestConfigTerminalActions(t *testing.T) {
+	stateDir := t.TempDir()
+	env := map[string]string{
+		"AHARNESS_STATE_DIR":      stateDir,
+		"AHARNESS_MODELS_DEV_URL": "http://127.0.0.1:9/api.json",
+	}
+
+	t.Run("list models ignores session inputs", func(t *testing.T) {
+		args := []string{
+			"-list-models",
+			"-batch",
+			"-task-file", filepath.Join(t.TempDir(), "missing.md"),
+			"-resume", "not-a-session",
+			"-model", "unknown-model",
+			"-max-context-tokens", "0",
+			"-provider", providerName,
+			"-state-dir", stateDir,
+		}
+		cfg := cfgTestParseOK(t, args, env)
+		if !cfg.ListModels || cfg.RefreshModels {
+			t.Fatalf("terminal flags = refresh %t list %t", cfg.RefreshModels, cfg.ListModels)
+		}
+		if cfg.TaskSet || cfg.Model != "" {
+			t.Fatalf("terminal action should ignore task/model flags: %+v", cfg)
+		}
+		if cfg.StateDir != stateDir || cfg.Provider != providerName {
+			t.Fatalf("terminal action state/provider = %q/%q", cfg.StateDir, cfg.Provider)
+		}
+		if cfg.ModelsDevURL != "http://127.0.0.1:9/api.json" {
+			t.Fatalf("ModelsDevURL = %q", cfg.ModelsDevURL)
+		}
+	})
+
+	t.Run("refresh models ignores session inputs", func(t *testing.T) {
+		args := []string{
+			"-refresh-models",
+			"-task", "ignored",
+			"-model", "unknown-model",
+			"-ui-json",
+			"-ui-size", "not-a-size",
+			"-state-dir", stateDir,
+		}
+		cfg := cfgTestParseOK(t, args, env)
+		if !cfg.RefreshModels || cfg.ListModels {
+			t.Fatalf("terminal flags = refresh %t list %t", cfg.RefreshModels, cfg.ListModels)
+		}
+		if cfg.TaskSet || cfg.Model != "" || cfg.UIJSON || cfg.Batch {
+			t.Fatalf("terminal action retained session or mode flags: %+v", cfg)
+		}
+		if cfg.StateDir != stateDir {
+			t.Fatalf("StateDir = %q", cfg.StateDir)
+		}
+	})
+
+	t.Run("refresh then list", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, []string{"-refresh-models", "-list-models", "-state-dir", stateDir}, nil)
+		if !cfg.RefreshModels || !cfg.ListModels {
+			t.Fatalf("terminal flags = refresh %t list %t", cfg.RefreshModels, cfg.ListModels)
+		}
+	})
+
+	t.Run("failed terminal action errors do not block parse", func(t *testing.T) {
+		// -provider is still validated even for terminal actions.
+		err := cfgTestParseErr(t, []string{"-refresh-models", "-provider", "other"}, nil)
+		if !strings.Contains(err.Error(), "unsupported provider") {
+			t.Fatalf("error = %q", err)
+		}
+	})
+}
+
+func TestConfigVersionPrecedence(t *testing.T) {
+	cfg, err := parseConfig(
+		[]string{"-version", "-list-models", "-refresh-models", "-provider", "other"},
+		cfgTestGetenv(map[string]string{"AHARNESS_MAX_CONTEXT_TOKENS": "many"}),
+		io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if !cfg.ShowVersion || cfg.ListModels || cfg.RefreshModels {
+		t.Fatalf("version config = %+v", cfg)
+	}
+
+	cfg, err = parseConfig([]string{"-version=false", "-list-models", "-state-dir", t.TempDir()}, cfgTestGetenv(nil), io.Discard)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.ShowVersion || !cfg.ListModels {
+		t.Fatalf("-version=false config = %+v", cfg)
 	}
 }
 
@@ -438,12 +752,9 @@ func TestConfigValidation(t *testing.T) {
 		{"max total tokens negative", "-max-total-tokens=-1", "max total tokens"},
 		{"max context tokens zero", "-max-context-tokens=0", "max context tokens"},
 		{"max context tokens negative", "-max-context-tokens=-1", "max context tokens"},
-		{"max output tokens zero", "-max-output-tokens=0", "max output tokens"},
 		{"max output tokens negative", "-max-output-tokens=-1", "max output tokens"},
 		{"session timeout zero", "-session-timeout=0s", "session timeout"},
 		{"session timeout negative", "-session-timeout=-1s", "session timeout"},
-		{"output plus margin equals context", "-max-context-tokens=9192", "safety margin"},
-		{"output plus margin exceeds context", "-max-context-tokens=9000", "safety margin"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -456,27 +767,48 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestConfigLimitBoundary(t *testing.T) {
-	cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens=9193"), nil)
-	if cfg.Limits.SafetyMargin != 1000 {
-		t.Errorf("Limits.SafetyMargin = %d, want 1000", cfg.Limits.SafetyMargin)
-	}
-	if cfg.Limits.MaxInputTokens != 1 {
-		t.Errorf("Limits.MaxInputTokens = %d, want 1", cfg.Limits.MaxInputTokens)
-	}
-	if cfg.Limits.CompactionTarget != 1 {
-		t.Errorf("Limits.CompactionTarget = %d, want 1", cfg.Limits.CompactionTarget)
-	}
+	fake := startFakeModelsDev(t)
+
+	t.Run("one input token remains", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens=1001"), nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.Limits.SafetyMargin != 1000 {
+			t.Fatalf("SafetyMargin = %d, want 1000", cfg.Limits.SafetyMargin)
+		}
+		if cfg.Limits.MaxInputTokens != 1 || cfg.Limits.CompactionTarget != 1 {
+			t.Fatalf("input/compaction = %d/%d, want 1/1", cfg.Limits.MaxInputTokens, cfg.Limits.CompactionTarget)
+		}
+	})
+
+	t.Run("margin consumes the window", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens=1000"), nil)
+		err := cfgTestResolveErr(t, cfg, fake)
+		if !strings.Contains(err.Error(), "max input tokens must be positive") {
+			t.Fatalf("error = %q", err)
+		}
+	})
+
+	t.Run("output budget is not subtracted", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens=9192", "-max-output-tokens=5000"), nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.Limits.SafetyMargin != 1000 || cfg.Limits.MaxInputTokens != 8192 {
+			t.Fatalf("limits = %+v, want margin 1000 input 8192", cfg.Limits)
+		}
+	})
 }
 
 func TestConfigSafetyMargin(t *testing.T) {
+	fake := startFakeModelsDev(t)
 	for _, contextTokens := range []int{10_000, 20_000, 40_000, 100_000, 200_000, 250_000} {
 		t.Run(strconv.Itoa(contextTokens), func(t *testing.T) {
-			cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens="+strconv.Itoa(contextTokens)), nil)
+			args := cfgTestArgs(t, "-max-context-tokens="+strconv.Itoa(contextTokens), "-max-output-tokens=500")
+			cfg := cfgTestParseOK(t, args, nil)
+			cfg, _ = cfgTestResolve(t, cfg, fake)
 			wantMargin := agent.SafetyMargin(contextTokens)
 			if cfg.Limits.SafetyMargin != wantMargin {
 				t.Errorf("Limits.SafetyMargin = %d, want %d", cfg.Limits.SafetyMargin, wantMargin)
 			}
-			wantInput := contextTokens - cfg.MaxOutputTokens - wantMargin
+			wantInput := contextTokens - wantMargin
 			if cfg.Limits.MaxInputTokens != wantInput {
 				t.Errorf("Limits.MaxInputTokens = %d, want %d", cfg.Limits.MaxInputTokens, wantInput)
 			}
@@ -487,12 +819,14 @@ func TestConfigSafetyMargin(t *testing.T) {
 	}
 
 	cfg := cfgTestParseOK(t, cfgTestArgs(t, "-max-context-tokens=10000"), nil)
+	cfg, _ = cfgTestResolve(t, cfg, fake)
 	if cfg.Limits.SafetyMargin != 1000 {
 		t.Errorf("small-context safety margin = %d, want 1000 floor", cfg.Limits.SafetyMargin)
 	}
 }
 
 func TestConfigBaseURL(t *testing.T) {
+	fake := startFakeModelsDev(t)
 	common := []string{
 		"-task", "task",
 		"-model", "deepseek-v4.1-flash",
@@ -500,10 +834,10 @@ func TestConfigBaseURL(t *testing.T) {
 		"-state-dir", t.TempDir(),
 	}
 
-	t.Run("default", func(t *testing.T) {
+	t.Run("parse leaves it unset", func(t *testing.T) {
 		cfg := cfgTestParseOK(t, common, nil)
-		if cfg.BaseURL != model.DefaultBaseURL {
-			t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, model.DefaultBaseURL)
+		if cfg.BaseURL != "" {
+			t.Errorf("BaseURL = %q, want empty before discovery", cfg.BaseURL)
 		}
 	})
 
@@ -526,48 +860,33 @@ func TestConfigBaseURL(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid scheme", func(t *testing.T) {
-		err := cfgTestParseErr(t, append(append([]string{}, common...), "-provider-base-url=ftp://example.com/v1"), nil)
-		if !strings.Contains(err.Error(), "provider base URL") {
-			t.Errorf("error = %q, want base URL error", err)
+	t.Run("loopback accepted", func(t *testing.T) {
+		cfg := cfgTestParseOK(t, append(append([]string{}, common...), "-provider-base-url", "http://127.0.0.1:1234/v1"), nil)
+		if cfg.BaseURL != "http://127.0.0.1:1234/v1" {
+			t.Errorf("BaseURL = %q", cfg.BaseURL)
 		}
 	})
 
-	t.Run("missing host", func(t *testing.T) {
-		err := cfgTestParseErr(t, append(append([]string{}, common...), "-provider-base-url=http:///v1"), nil)
-		if !strings.Contains(err.Error(), "provider base URL") {
-			t.Errorf("error = %q, want base URL error", err)
+	t.Run("explicit wins over discovery", func(t *testing.T) {
+		args := append(append([]string{}, common...), "-provider-base-url", "http://127.0.0.1:1234/v1")
+		cfg := cfgTestParseOK(t, args, nil)
+		cfg, _ = cfgTestResolve(t, cfg, fake)
+		if cfg.BaseURL != "http://127.0.0.1:1234/v1" {
+			t.Errorf("BaseURL = %q, want the explicit loopback override", cfg.BaseURL)
 		}
 	})
-}
 
-func TestConfigProvisionalContext(t *testing.T) {
-	cases := []struct {
-		name string
-		env  map[string]string
-		args []string
-		want bool
-	}{
-		{
-			name: "neither set",
-			want: true,
-		},
-		{
-			name: "environment set",
-			env:  map[string]string{"AHARNESS_MAX_CONTEXT_TOKENS": "100000"},
-			want: false,
-		},
-		{
-			name: "flag set to default value",
-			args: []string{"-max-context-tokens=200000"},
-			want: false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := cfgTestParseOK(t, cfgTestArgs(t, tc.args...), tc.env)
-			if cfg.ProvisionalContext != tc.want {
-				t.Errorf("ProvisionalContext = %t, want %t", cfg.ProvisionalContext, tc.want)
+	for _, raw := range []string{
+		"ftp://example.com/v1",
+		"http:///v1",
+		"http://user:pass@example.com/v1",
+		"http://example.com/v1?token=x",
+		"http://example.com/v1#frag",
+	} {
+		t.Run("invalid "+raw, func(t *testing.T) {
+			err := cfgTestParseErr(t, append(append([]string{}, common...), "-provider-base-url", raw), nil)
+			if !strings.Contains(err.Error(), "provider base URL") {
+				t.Errorf("error = %q, want base URL error", err)
 			}
 		})
 	}
@@ -608,6 +927,24 @@ func TestConfigEnvErrors(t *testing.T) {
 				t.Errorf("error = %q, want substring %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCatalogExitCodes(t *testing.T) {
+	cases := []struct {
+		err  error
+		want int
+	}{
+		{model.ErrCatalogUnavailable, exitProvider},
+		{model.ErrCatalogInvalid, exitProtocol},
+		{model.ErrCatalogCache, exitConfig},
+		{model.ErrModelNotFound, exitConfig},
+		{errors.New("other"), exitConfig},
+	}
+	for _, tc := range cases {
+		if got := catalogExitCode(tc.err); got != tc.want {
+			t.Errorf("catalogExitCode(%v) = %d, want %d", tc.err, got, tc.want)
+		}
 	}
 }
 

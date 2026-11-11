@@ -1,14 +1,14 @@
 # aharness model discovery build plan (opencode-go)
 
-- **Date:** 2026-11-10
-- **Status:** proposed; implementation not started. This document is normative
-  for the provider/model-discovery contract until the implementation updates
-  the architecture, limits, and testing strategy.
+- **Date:** 2026-11-10; implemented 2026-11-11.
+- **Status:** implemented as of 2026-11-11. This document remains the normative
+  record of the provider/model-discovery contract; the shipped docs describe
+  the implementation, and §11 records deviations from the original sketch.
 - **Source:** [v1 build plan](v1-build.md), the shipped provider/model registry,
   and the opencode-go catalog.
 - **Target:** Go 1.27.3, module `aharness`.
 - **Architecture:** [architecture.md](architecture.md) describes the shipped
-  fixed-provider, three-model contract. This plan replaces that registry.
+  provider/model behavior after discovery replaced the fixed registry.
 - **Testing:** [testing-strategy.md](testing-strategy.md) plus §6 here.
 - **Limits:** [limits.md](limits.md); §7 records the new caps and changed
   values.
@@ -93,60 +93,70 @@
 
 ### 1.4 Definition of done
 
-- [ ] `-provider` and `AHARNESS_PROVIDER` work; an unknown provider fails with
+- [x] `-provider` and `AHARNESS_PROVIDER` work; an unknown provider fails with
       exit 2 and a message listing `opencode-go`.
-- [ ] A new session with a discovered `-model` uses the catalog's context and
+- [x] A new session with a discovered `-model` uses the catalog's context and
       input limits, dialect, and base URL; `session_start` and `run_start`
       record the effective values. A new session sends no output budget unless
       `-max-output-tokens` is explicit; resume/fork inherits the recorded value
       unless the flag clears it.
-- [ ] Provider length and context-overflow outcomes are reported clearly: a
+- [x] Provider length and context-overflow outcomes are reported clearly: a
       `length` response uses the existing continuation path, a context-overflow
       error uses the existing compaction retry, and an unrecoverable failure
       stops with a typed status.
-- [ ] No hardcoded model IDs, default model, or model-to-dialect switch remain.
+- [x] No hardcoded model IDs, default model, or model-to-dialect switch remain.
       A grep for `acceptedModels`, `acceptedModelIDs`, `defaultModelID`, and
       `dialectForModel` is empty.
-- [ ] All eligible opencode-go models are selectable; ineligible models are
+- [x] All eligible opencode-go models are selectable; ineligible models are
       omitted with a diagnostic. Deprecated models are labeled and selectable.
-- [ ] `-list-models` prints the usable catalog and exits without creating a
+- [x] `-list-models` prints the usable catalog and exits without creating a
       session.
-- [ ] The TUI picker is catalog-backed, and switching models updates the next
+- [x] The TUI picker is catalog-backed, and switching models updates the next
       run's dialect, base URL, and limits.
-- [ ] The catalog cache works: fresh-cache runs make no network request; stale
+- [x] The catalog cache works: fresh-cache runs make no network request; stale
       entries use conditional GET; a failed implicit refresh falls back to
       stale data with a warning; no cache plus a failed fetch is a clear error.
-- [ ] `-refresh-models` performs an unconditional fetch, atomically replaces
+- [x] `-refresh-models` performs an unconditional fetch, atomically replaces
       the cache, prints a summary, and exits without creating a session or
       requiring a task/token. A failed explicit refresh exits 3 or 4 and leaves
       the existing cache unchanged.
-- [ ] The TUI model picker refreshes with `Ctrl-R`, replaces its entries on
+- [x] The TUI model picker refreshes with `Ctrl-R`, replaces its entries on
       success, preserves the current selection when it still exists, and shows
       a notice on failure without discarding the loaded catalog.
-- [ ] Resume/fork without an explicit model works with the catalog server
+- [x] Resume/fork without an explicit model works with the catalog server
       unreachable; the recorded session values are used.
-- [ ] Unit, integration, fuzz, race, build, lint, and vulnerability gates pass.
+- [x] Unit, integration, fuzz, race, build, lint, and vulnerability gates pass.
+      Verified 2026-11-11: `goimports -l .` clean, `go vet ./...`,
+      `golangci-lint run` 0 issues, `go test -race -count=1 ./...`,
+      `go build -trimpath -o bin/aharness ./cmd/aharness`, and
+      `govulncheck ./...` (no called vulnerabilities). The catalog fuzz target
+      also passed a short local run.
 - [ ] A real-provider smoke passes for one Chat model and one Responses model;
       one translated Anthropic- or Google-native model is tested if credentials
-      and workspace policy allow it.
-- [ ] README, architecture, limits, testing-strategy, and TUI docs are updated.
+      and workspace policy allow it. Not run on 2026-11-11 because
+      `AHARNESS_PROVIDER_TOKEN` was unset. A local smoke against the real
+      models.dev catalog and a fake provider passed for a Chat model
+      (`deepseek-v4.1-flash`), a Responses model (`crouton-alpha-free`), and a
+      translated Anthropic model (`claude-haiku-5-5`, Chat path), including
+      discovered limits, recorded values, and omitted output fields.
+- [x] README, architecture, limits, testing-strategy, and TUI docs are updated.
 
-## 2. Current state and catalog findings
+## 2. Pre-implementation state and catalog findings
 
-The shipped code has three model options and two dialect mappings in
-`cmd/aharness/config.go`:
+Before discovery, the shipped code had three model options and two dialect
+mappings in `cmd/aharness/config.go`:
 
 - `acceptedModels`, `acceptedModelIDs`, and `defaultModelID`.
-- `dialectForModel` maps `deepseek-v4.1-flash` to Chat and
+- `dialectForModel` mapped `deepseek-v4.1-flash` to Chat and
   `crouton-alpha-free` / `muse-spark-1.3-contributor` to Responses.
-- Context defaults to 200,000 provisional; output defaults to 8,192; neither is
-  read from the provider. The `-max-context-tokens` flag currently defaults to
-  200,000, so the new resolution path must distinguish "unset" (use the catalog)
-  from an explicit value.
-- `model.DefaultBaseURL` is `https://opencode.ai/inference/go/v1`; the
+- Context defaulted to 200,000 provisional; output defaulted to 8,192; neither
+  was read from the provider. The `-max-context-tokens` flag defaulted to
+  200,000, so the new resolution path had to distinguish "unset" (use the
+  catalog) from an explicit value.
+- `model.DefaultBaseURL` was `https://opencode.ai/inference/go/v1`; the
   documented OpenAI endpoints are under
   `https://opencode.ai/inference/go/openai/v1`.
-- The TUI builds its picker from `acceptedModelIDs` and ignores per-model
+- The TUI built its picker from `acceptedModelIDs` and ignored per-model
   limits and base URLs.
 
 models.dev's `api.json` for `opencode-go` is a provider object with a `models`
@@ -458,7 +468,7 @@ Examples with the snapshot data:
   Explicit context flags are clamped to the new model; an explicit output
   budget is sent unchanged.
 - The details overlay shows the effective values for the current/next run,
-  including `output: unset` when no explicit budget applies.
+  including `max output: unset` when no explicit budget applies.
 - On resume without an explicit model, the TUI may skip the network. If the
   catalog is unavailable, the picker contains only the recorded current model
   with a notice that model switching is disabled; resume still works.
@@ -541,9 +551,11 @@ No `model` → `agent` import is introduced; limit computation stays in `cmd`.
 
 | File | Change |
 |---|---|
-| `internal/model/catalog.go` (new) | `CatalogModel`, `Catalog`, `CatalogSource`, models.dev fetch, normalization, cache, eligibility, dialect map. |
+| `internal/model/catalog.go` (new) | `CatalogModel`, `Catalog`, `CatalogSource`, `CatalogOptions`, normalization, eligibility, dialect map, cache path, normalized cache envelope. |
+| `internal/model/catalog_source.go` (new) | models.dev HTTP source: load, TTL revalidation, explicit refresh, conditional GET, cache read/write, stale fallback, `Catalog.Warnings`. |
 | `internal/model/catalog_test.go` (new) | Unit, cache, and fuzz tests; fixture under `internal/model/testdata/`. |
-| `cmd/aharness/config.go` | `-provider`/`AHARNESS_PROVIDER`; remove hardcoded registry; `resolveModel`; `-list-models`; `-refresh-models`; `-max-output-tokens` default 0 (unset); input cap without output subtraction. |
+| `cmd/aharness/config.go` | `-provider`/`AHARNESS_PROVIDER`; remove hardcoded registry; flag/env/limit defaults; `-list-models`; `-refresh-models`; terminal-action parsing. |
+| `cmd/aharness/models.go` (new) | `resolveModel`, session inheritance, provider/base-URL/limit resolution, catalog source wiring, list/refresh actions and exit-code mapping. |
 | `cmd/aharness/run.go` | Resolve the catalog model before session creation; run the terminal refresh/list actions; update the no-token warning to test the resolved base URL host. |
 | `cmd/aharness/tui.go` | Catalog-backed picker; `Ctrl-R` refresh with in-flight/cancel handling; per-run model resolution; offline resume fallback. |
 | `internal/tui/app.go` | `ModelChoice` metadata; picker refresh message/result; remove the hardcoded `Default` field. |
@@ -551,10 +563,12 @@ No `model` → `agent` import is introduced; limit computation stays in `cmd`.
 | `cmd/aharness/*_test.go` | Config precedence, discovery, cache, list, refresh, provider mismatch, TUI picker. |
 | `docs/*` | README, architecture, limits, testing strategy, TUI doc. |
 
-Both wire request structs already tag the output budget `omitempty`
-(`max_tokens` and `max_output_tokens`), so an unset budget of `0` omits the
-field; the adapters need no request-shape change. Limit computation stays in
-`cmd`, and the input cap no longer subtracts an output budget.
+Both wire request structs tag the output budget `omitzero` (`max_tokens` and
+`max_output_tokens`). `encoding/json/v2`'s `omitempty` did not omit a zero
+integer (the first smoke sent `max_tokens: 0`), so the tags use `omitzero`; an
+unset budget of `0` now omits the field. The adapters need no request-shape
+change. Limit computation stays in `cmd`, and the input cap no longer subtracts
+an output budget.
 
 Sketch:
 
@@ -581,32 +595,40 @@ type Catalog struct {
     Provider  string
     Source    string
     FetchedAt time.Time
+    ETag      string
     Models    map[string]CatalogModel
+    Warnings  []string // non-fatal stale-cache/refresh fallbacks
 }
 
 type CatalogSource interface {
     // Load returns a catalog, honoring the cache TTL and conditional GET.
     Load(ctx context.Context, provider string) (Catalog, error)
+    // Revalidate bypasses the TTL and keeps conditional GET and stale fallback;
+    // -list-models uses it to revalidate without a forced full download.
+    Revalidate(ctx context.Context, provider string) (Catalog, error)
     // Refresh bypasses the TTL and ETag and replaces the cache on success.
+    // It has no stale fallback.
     Refresh(ctx context.Context, provider string) (Catalog, error)
 }
 
 func (c Catalog) Lookup(id string) (CatalogModel, error)
 func (c Catalog) Usable() []CatalogModel
+func (c Catalog) SortedModels() []CatalogModel // includes unavailable entries
 ```
 
 `Catalog.Models` keeps normalized entries even when `Unavailable` is set, so an
 explicit selection can report why a model is not usable. `Usable` filters those
-entries and deprecation only affects the label, not availability. `cmd`
-constructs `model.NewModelsDevSource(...)` with the HTTP client, state
-directory, clock, and cache TTL; tests inject a fake `CatalogSource` or an
-`httptest` server.
+entries, sorts by ID, and deprecation only affects the label, not availability.
+`cmd` constructs the models.dev source with the HTTP client, state directory,
+clock, and cache TTL; tests inject a fake `CatalogSource` or an `httptest`
+server.
 
 ## 5. Milestones
 
 ### M0 — Catalog source and normalization
 
-- Implement `internal/model/catalog.go` and the fixture-based tests.
+- Implement `internal/model/catalog.go` and `internal/model/catalog_source.go`
+  with the fixture-based tests.
 - Fetch, normalize, validate, cache, conditionally refresh, and force-refresh.
 - Implement the SDK→dialect mapping and eligible-model filtering.
 - No CLI behavior changes yet.
@@ -820,8 +842,8 @@ only seam. That endpoint is the fallback if npm inference proves unreliable.
 
 ## 10. Documentation updates
 
-- `README.md`: add this plan to the documentation table; after implementation,
-  replace the three-model/provider-fixed bullets and examples.
+- `README.md`: add this plan to the documentation table; replace the
+  three-model/provider-fixed bullets and examples.
 - `docs/architecture.md`: §2 provider/model call behavior (the output field is
   omitted by default; `length` and context-overflow handling), §2.1 wire
   format/base URL, §3.1 package tree and `config.go` comment, §3.2 `cmd`
@@ -841,6 +863,40 @@ only seam. That endpoint is the fallback if npm inference proves unreliable.
   milestone/date and any deviations.
 
 `limits.md` owns cap values and formulas; `architecture.md` §9 owns the CLI
-flag, default, omission, and replay semantics. Until implementation, this plan
-is the normative source for both; the shipped docs continue to describe v1 and
-carry clearly marked planned-change notes.
+flag, default, omission, and replay semantics. The implementation and the
+shipped docs now describe discovery; the deferred verification items in §1.4
+are recorded at handoff.
+
+## 11. Implementation deviations
+
+- **`CatalogSource.Revalidate`.** The sketch had only `Load` and `Refresh`.
+  The shipped interface adds `Revalidate(ctx, provider)` for `-list-models`: it
+  bypasses the TTL, sends a conditional GET with `If-None-Match`, and keeps the
+  stale-cache fallback. `Load` remains the TTL-honoring path used for implicit
+  resolution; `Refresh` remains the unconditional, no-fallback path used by
+  `-refresh-models` and the picker `Ctrl-R`.
+- **Source split.** Discovery is implemented across
+  `internal/model/catalog.go` (types, catalog lookup/usable filtering, cache
+  path and the `CatalogSource` contract) and
+  `internal/model/catalog_source.go` (models.dev decoding, normalization,
+  eligibility, SDK/dialect mapping, HTTP source, conditional GET, cache
+  read/write, refresh, stale fallback). The contract and package boundary are
+  unchanged.
+- **`omitzero` output tags.** The plan assumed the existing `omitempty` tags
+  omitted a zero output budget. With `encoding/json/v2` they did not; the first
+  smoke sent `"max_tokens": 0`. Both request structs now use `omitzero`, and the
+  default request omits the field.
+- **Additive event fields.** `session_start` now records `base_url`, and
+  `run_start` now records `provider`, so both events carry the effective
+  provider/model/dialect/base URL/limits as §1.4 requires. This is an additive
+  payload change within v2; the schema version is unchanged and unknown fields
+  remain ignored. Old logs without the fields keep their recorded run values or
+  the legacy base-URL fallback.
+- **`Catalog.Warnings`.** A returned catalog carries non-fatal warnings for
+  stale-cache fallback, cache-write failures during implicit discovery, and
+  similar recoverable conditions. Batch mode prints them to stderr and the TUI
+  surfaces them as notices. The catalog payload and token are never included.
+- **Documentation status.** README, architecture, limits, testing strategy, and
+  the TUI doc describe the implemented behavior. The §1.4 gate and real-provider
+  smoke items remain unchecked here because their results are recorded at
+  handoff, not in this plan.

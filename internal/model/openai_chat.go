@@ -28,7 +28,7 @@ type chatRequest struct {
 	Model         string             `json:"model"`
 	Messages      []chatMessage      `json:"messages"`
 	Tools         []chatTool         `json:"tools,omitempty"`
-	MaxTokens     int                `json:"max_tokens,omitempty"`
+	MaxTokens     int                `json:"max_tokens,omitzero"`
 	Stream        bool               `json:"stream,omitempty"`
 	StreamOptions *chatStreamOptions `json:"stream_options,omitempty"`
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -36,11 +37,38 @@ const (
 	OverlayImage   OverlayKind = "image"
 )
 
-// ModelChoice is one accepted model in the picker.
+// ModelChoice is one catalog-backed model in the picker. Switchable is false
+// only for the offline recorded-model fallback, which cannot be applied as a
+// new selection until the catalog loads.
 type ModelChoice struct {
-	ID      string
-	Dialect model.Dialect
-	Default bool
+	ID            string
+	Name          string
+	Dialect       model.Dialect
+	ContextWindow int
+	InputLimit    int
+	OutputLimit   int
+	Status        string // "", "alpha", "beta", or "deprecated"
+	Translated    bool
+	Switchable    bool
+}
+
+// ModelRefresher is an optional Host capability for the model picker's
+// explicit catalog refresh. It bypasses the implicit catalog cache policy.
+type ModelRefresher interface {
+	RefreshModels(ctx context.Context) ([]ModelChoice, error)
+}
+
+// ModelSelector is an optional Host capability that resolves and applies a
+// model for the next run.
+type ModelSelector interface {
+	SelectModel(id string) (ModelChoice, error)
+}
+
+// ModelWarningProvider is an optional Host capability that consumes the
+// warning produced by the last successful SelectModel call, such as a clamped
+// explicit context budget.
+type ModelWarningProvider interface {
+	TakeModelWarning() string
 }
 
 // Info is the immutable session header information.
@@ -101,6 +129,7 @@ type Details struct {
 	HarnessVersion   string
 	MaxContextTokens int
 	MaxOutputTokens  int
+	MaxOutputUnset   bool
 	SessionTimeout   time.Duration
 	ModelTimeout     time.Duration
 }
@@ -201,7 +230,12 @@ type (
 		ev  agent.DisplayEvent
 	}
 	displayClosedMsg struct{}
-	runDoneMsg       struct {
+	modelRefreshMsg  struct {
+		seq     int
+		choices []ModelChoice
+		err     error
+	}
+	runDoneMsg struct {
 		run    int
 		result agent.Result
 	}
@@ -295,6 +329,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.completeRun()
 		}
 		return m, nil
+	case modelRefreshMsg:
+		m.handleModelRefresh(msg)
+		return m, nil
 	case runDoneMsg:
 		if msg.run != m.run.number {
 			return m, nil
@@ -316,6 +353,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.InterruptMsg:
 		return m, m.handleCtrlC()
 	case tea.QuitMsg:
+		m.cancelModelRefresh()
 		return m, tea.Quit
 	}
 	return m, nil
@@ -399,6 +437,9 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+l":
 		return func() tea.Msg { return tea.ClearScreen() }
 	case "ctrl+r":
+		if m.overlay.kind == OverlayModel {
+			return m.refreshModelCatalog()
+		}
 		m.rich = !m.rich
 		m.invalidateRenders()
 		m.ensureContent()
@@ -544,6 +585,7 @@ func (m *App) interruptOperation() {
 // requestQuit terminates an active run before quitting, or quits immediately
 // when idle.
 func (m *App) requestQuit(code int, interrupt bool) tea.Cmd {
+	m.cancelModelRefresh()
 	if m.run.active {
 		m.quitAfter = true
 		m.quitCode = code

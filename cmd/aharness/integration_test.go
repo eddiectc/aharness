@@ -70,6 +70,9 @@ func runHarnessEnv(t *testing.T, bin, workspace, stateDir, baseURL string, extra
 	if baseURL != "" {
 		env = append(env, "AHARNESS_PROVIDER_BASE_URL="+baseURL)
 	}
+	if !envHasKey(extraEnv, "AHARNESS_MODELS_DEV_URL") {
+		env = append(env, testCatalogEnv())
+	}
 	env = append(env, extraEnv...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -182,14 +185,27 @@ func responsesFinalResponse(text string) map[string]any {
 func TestBinaryRunsBothDialects(t *testing.T) {
 	bin := buildHarness(t)
 	for _, tc := range []struct {
-		model string
-		path  string
-		first map[string]any
-		final map[string]any
+		model      string
+		dialect    string
+		context    int
+		inputLimit int
+		advertised int
+		path       string
+		first      map[string]any
+		final      map[string]any
 	}{
-		{model: "deepseek-v4.1-flash", path: "/chat/completions", first: chatToolCallResponse(), final: chatFinalResponse("chat done")},
-		{model: "crouton-alpha-free", path: "/responses", first: responsesToolCallResponse(), final: responsesFinalResponse("responses done")},
-		{model: "muse-spark-1.3-contributor", path: "/responses", first: responsesToolCallResponse(), final: responsesFinalResponse("muse done")},
+		{
+			model: "deepseek-v4.1-flash", dialect: "openai-chat", context: 1_000_000, inputLimit: 0, advertised: 384_000,
+			path: "/chat/completions", first: chatToolCallResponse(), final: chatFinalResponse("chat done"),
+		},
+		{
+			model: "crouton-alpha-free", dialect: "openai-responses", context: 200_000, inputLimit: 0, advertised: 8_192,
+			path: "/responses", first: responsesToolCallResponse(), final: responsesFinalResponse("responses done"),
+		},
+		{
+			model: "muse-spark-1.3-contributor", dialect: "openai-responses", context: 200_000, inputLimit: 0, advertised: 8_192,
+			path: "/responses", first: responsesToolCallResponse(), final: responsesFinalResponse("muse done"),
+		},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -214,8 +230,6 @@ func TestBinaryRunsBothDialects(t *testing.T) {
 				"-task", "read hello.txt and finish",
 				"-model", tc.model,
 				"-max-turns", "5",
-				"-max-output-tokens", "1000",
-				"-max-context-tokens", "200000",
 			)
 			if run.exit != 0 {
 				t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", run.exit, run.stdout, run.stderr)
@@ -230,6 +244,42 @@ func TestBinaryRunsBothDialects(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(stateDir, "work", run.id)); !os.IsNotExist(err) {
 				t.Errorf("work dir not removed: %v", err)
+			}
+			margin := tc.context / 20
+			if margin < 1000 {
+				margin = 1000
+			}
+			wantInput := tc.context - margin
+			start, starts := recordedSession(t, filepath.Join(stateDir, "sessions", run.id+".jsonl"))
+			if start.Provider != providerName || start.Model != tc.model || start.Dialect != tc.dialect {
+				t.Errorf("session_start provider/model/dialect = %q/%q/%q", start.Provider, start.Model, start.Dialect)
+			}
+			if start.BaseURL != f.url {
+				t.Errorf("session_start base_url = %q, want the explicit loopback %q", start.BaseURL, f.url)
+			}
+			if start.Limits.MaxContextTokens != tc.context || start.Limits.MaxOutputTokens != 0 {
+				t.Errorf("session_start limits = %+v, want context %d and output 0", start.Limits, tc.context)
+			}
+			if len(starts) != 1 {
+				t.Fatalf("run_start events = %d, want 1", len(starts))
+			}
+			rs := starts[0]
+			if rs.Provider != providerName || rs.Model != tc.model || rs.Dialect != tc.dialect || rs.BaseURL != f.url {
+				t.Errorf("run_start = %+v", rs)
+			}
+			if rs.Limits.MaxContextTokens != tc.context || rs.Limits.MaxInputTokens != wantInput {
+				t.Errorf("run_start limits = %+v, want context %d input %d", rs.Limits, tc.context, wantInput)
+			}
+			if rs.Limits.MaxOutputTokens != 0 {
+				t.Errorf("run_start output = %d, want 0 (no harness cap)", rs.Limits.MaxOutputTokens)
+			}
+			f.mu.Lock()
+			bodies := append([][]byte(nil), f.bodies...)
+			f.mu.Unlock()
+			for i, body := range bodies {
+				if hasJSONField(t, body, "max_tokens") || hasJSONField(t, body, "max_output_tokens") {
+					t.Errorf("request %d includes an output budget without the flag: %s", i+1, body)
+				}
 			}
 			for i, h := range f.headers {
 				if got := h.Get("Authorization"); got != "Bearer test-token" {
