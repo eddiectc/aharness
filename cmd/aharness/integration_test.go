@@ -14,31 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
-
-// buildHarness builds the real binary once for a test. Integration tests run
-// the binary, not runArgs, so exit codes, signals, and file modes are real.
-func buildHarness(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	bin := filepath.Join(t.TempDir(), "aharness")
-	cmd := exec.CommandContext(context.Background(), "go", "build", "-trimpath", "-o", bin, "./cmd/aharness")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build harness: %v\n%s", err, out)
-	}
-	return bin
-}
 
 type harnessRun struct {
 	stdout string

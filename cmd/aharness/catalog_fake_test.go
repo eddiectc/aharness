@@ -243,6 +243,7 @@ func TestMain(m *testing.M) {
 	defaultTestModelsDev = newFakeModelsDev()
 	code := m.Run()
 	defaultTestModelsDev.Close()
+	cleanupHarness()
 	os.Exit(code)
 }
 
