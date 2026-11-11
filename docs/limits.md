@@ -37,6 +37,14 @@ own constant.
 | Retained verbatim turns | 4 | Most recent model-response turns in the projection. |
 | Token estimate | `ceil(bytes/4) + 8/message + 16/tool schema` | Conservative; provider usage is authoritative for totals. |
 
+**Planned change (model discovery, not implemented):** the fixed 8,192 output
+budget is removed. `-max-output-tokens` will default to unset (0), the request
+will omit `max_tokens` / `max_output_tokens`, and the input cap will become
+`min(model limit.input, context - safety margin)` with no output term.
+`model.limit.output` is informational and does not gate eligibility. Until the
+change ships, the v1 values above apply. See
+[model-discovery-build.md](model-discovery-build.md) §3.4.
+
 ## 2. Provider transport and streaming
 
 | Limit | v1 value | Behavior |

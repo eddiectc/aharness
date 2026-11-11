@@ -65,6 +65,8 @@ contract, milestones, and follow-ons are in [tui-build.md](docs/tui-build.md).
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [v1-build.md](docs/v1-build.md) | v1 scope, contract deltas, milestones, decisions, and costly-to-reverse assumptions |
 | [tui-build.md](docs/tui-build.md) | Post-v1 default TUI, `-batch`/`-ui-json` modes, display/terminal contracts, milestones, decisions, and risks |
+| [model-discovery-build.md](docs/model-discovery-build.md) | Planned provider flag and opencode-go model/limit/dialect discovery from models.dev; removes the hardcoded model registry |
+| [limits-removal-build.md](docs/limits-removal-build.md) | Planned removal of default turn/token/run-timeout/model-timeout budgets; opt-in limits and unbounded-run semantics |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |
 | [v0-build.md](docs/v0-build.md) | v0 scope, milestones, acceptance criteria, decisions, and risks |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke checks |

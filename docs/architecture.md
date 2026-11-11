@@ -908,7 +908,12 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   the model. The 200,000 default is provisional until the model context window
   is confirmed; acceptance runs MUST set the flag explicitly to the confirmed
   window. The harness logs a warning when the provisional default is used for a
-  new session.
+  new session. Planned model discovery (not implemented; see
+  [model-discovery-build.md](model-discovery-build.md) §3.4) removes the fixed
+  8,192 output default: `-max-output-tokens` will default to 0/unset and the
+  request will omit the field, with 0 clearing an inherited budget on
+  resume/fork. The input cap will no longer subtract an output budget. The v1
+  rules above apply until that plan is implemented.
 - Prompt and toolset versions are selected from `session_start` and must be
   supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
 - Effective limits are inherited from the last run unless overridden. A resume
