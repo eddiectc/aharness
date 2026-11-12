@@ -75,8 +75,10 @@ opt-in and unlimited by default.
   activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
   a workspace file picker, catalog-backed next-run model and thinking-effort
   pickers, details and help overlays, workspace-contained images, and mouse
-  wheel scrolling. One
-  process owns one session and may execute one run per submitted message.
+  wheel scrolling. The wheel capture also takes the terminal's own selection,
+  so an empty transcript and the help overlay point at the escape hatch:
+  `Shift`+drag to select and `Shift`+middle-click or `Ctrl+Shift+V` to paste.
+  One process owns one session and may execute one run per submitted message.
   Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
   `/provider`, `/details`, `/files`, `/table`, `/image`, `/rich`/`/raw`,
   `/repaint`, `/refresh`, `/interrupt`, `/cancel`, `/quit`); typing `/` opens

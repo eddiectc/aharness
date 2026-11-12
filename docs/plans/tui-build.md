@@ -9,6 +9,14 @@
   still the v1 release gate. The later [thinking effort](thinking-effort-build.md)
   feature adds `F2` and optional `thinking_effort` protocol fields; tui.md is
   authoritative for the shipped keys and protocol.
+  Two shipped behaviors deviate from the mouse decisions in §1.1, §2.9, and
+  T8 below: the scroll wheel is enabled, which captures the terminal's own
+  selection and middle-click paste, and the empty transcript carries an
+  onboarding tips block. Both are documented in
+  [tui.md § Keys and § Terminal safety](../tui.md); the mouse capture is an
+  accepted regression of native selection because no DEC mouse mode reports
+  only the wheel, and the tips block plus the help overlay point at the
+  terminal's `Shift` bypass instead of adding an in-app selection layer.
   The framework decision was revised again on 2026-11-10 after reviewing
   teatest/v2, Glamour v2, and ntcharts v2: **Bubble Tea v2 is the chosen
   application framework**, with Bubbles v2 for widgets, Glamour v2 for

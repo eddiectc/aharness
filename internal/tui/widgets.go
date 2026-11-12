@@ -293,7 +293,11 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"",
 		t.dim.Render("Slash commands: Up/Down select, Tab complete, Enter run."),
 		t.dim.Render("Esc dismisses the menu; unknown /text is sent as a message."),
-		t.dim.Render("Mouse reporting is on for the scroll wheel only; clicks are inert."),
+		"",
+		t.dim.Render("Mouse: the wheel scrolls the transcript or the top overlay."),
+		t.dim.Render("The app receives clicks and drags, so selecting text needs the"),
+		t.dim.Render("terminal's bypass: hold Shift while dragging (Option-drag in"),
+		t.dim.Render("iTerm2). Paste with Ctrl+Shift+V or Shift+middle-click."),
 	)
 	m.overlay.help = lines
 	m.overlay.push(OverlayHelp)

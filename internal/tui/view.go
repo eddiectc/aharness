@@ -20,6 +20,10 @@ const (
 	// mouseWheelLines is one wheel notch. It matches the viewport's own
 	// default wheel delta so the mouse and PgUp/PgDn feel consistent.
 	mouseWheelLines = 3
+
+	// minEmptyTipRows is the fewest tip rows worth showing. A transcript too
+	// short for a tips header plus this many rows keeps only the prompt.
+	minEmptyTipRows = 2
 )
 
 type uiTheme struct {
@@ -313,7 +317,54 @@ func (m *App) transcriptLines() []string {
 		lines = append(lines, "")
 	}
 	if len(lines) == 0 {
-		lines = append(lines, t.dim.Render("No messages yet. Type a task and press Enter."))
+		lines = m.emptyTranscriptLines(t)
+	}
+	return lines
+}
+
+// emptyTranscriptLines renders the tips block that fills an empty transcript.
+// It disappears as soon as the first item exists, so a live or resumed session
+// never mixes onboarding text into its history. Rows are planned against the
+// transcript viewport: the full block is used when it fits, and the prompt
+// keeps the transcript to itself when there is no room for a tips header plus
+// minEmptyTipRows rows. Every row fits the 40-column minimum terminal, so the
+// minimum window shows the block intact instead of clipping mid-word.
+func (m *App) emptyTranscriptLines(theme uiTheme) []string {
+	prompt := []string{theme.dim.Render("No messages yet. Type a task.")}
+	tips := []string{"", theme.label.Render("tips")}
+	headerRows := len(tips)
+	for _, tip := range emptyTranscriptTips {
+		tips = append(tips, theme.dim.Render(fmt.Sprintf("  %-13s %s", tip.key, tip.what)))
+	}
+	if height := m.viewport.Height(); height > 0 {
+		room := height - len(prompt)
+		if room < headerRows+minEmptyTipRows {
+			return truncateLines(prompt, m.width)
+		}
+		tips = tips[:min(len(tips), room)]
+	}
+	return truncateLines(append(prompt, tips...), m.width)
+}
+
+// emptyTranscriptTips are the onboarding rows shown before the first message,
+// ordered so that a short transcript keeps the most useful ones: the full key
+// list, then the terminal selection/paste bypass the mouse capture requires.
+var emptyTranscriptTips = []struct{ key, what string }{
+	{"F1", "keys and slash commands"},
+	{"Shift+drag", "select or copy text"},
+	{"Ctrl+Shift+V", "paste; Shift+middle too"},
+	{"wheel", "scroll; PgUp/PgDn also"},
+	{"Ctrl+P", "models · Ctrl+X · Ctrl+O"},
+}
+
+// truncateLines clips rows to the frame width. A zero width means the terminal
+// size is not known yet, so the rows are left intact for the first resize.
+func truncateLines(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], width, "")
 	}
 	return lines
 }

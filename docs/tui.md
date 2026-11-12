@@ -58,7 +58,8 @@ submitted message while idle starts one run.
 | `Ctrl-W`/`Ctrl-K` | delete previous word / to end | delete previous word / to end |
 | `Up`/`Down` | input history | input history |
 | `PgUp`/`PgDn` | scroll the transcript | scroll the transcript |
-| Mouse wheel | scroll the transcript or the top overlay | scroll the transcript or the top overlay |
+| Wheel | scroll the transcript or the top overlay | scroll the transcript or the top overlay |
+| `Shift`+drag, `Shift`+middle-click | terminal-side text selection and paste (the mouse capture takes both otherwise) | terminal-side text selection and paste |
 | `Ctrl-R` | toggle rich/raw assistant rendering; in the model picker, refresh the catalog | toggle rich/raw |
 | `Ctrl-T` | most recent markdown table overlay | table overlay |
 | `Ctrl-G` | image viewer for the most recent image block | image viewer |
@@ -78,6 +79,12 @@ help overlay (`F1`) lists the shipped keys and slash commands, including `F2`
 and the overlay keys. While the slash-command menu is open, `Up`/`Down` move
 its selection, `Tab` completes, `Enter` runs the highlighted command, and
 `Esc` dismisses the menu before the normal `Esc` action.
+
+An empty transcript shows a short tips block (`F1`, `Shift`+drag,
+`Ctrl+Shift+V`, the wheel, and the pickers). It disappears with the first
+transcript item and is dropped for a transcript too short to hold it, which
+keeps the one-line prompt and the composer. No `-ui-json` key or protocol
+change is involved; the block is ordinary frame text.
 
 ## Slash commands
 
@@ -280,7 +287,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Minimum terminal | 40×10 | Smaller shows a resize message and keeps quit/resize keys. |
 | Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
 | Escape timeout | 50 ms | Bare Esc; modified sequences never interrupt. |
-| Mouse wheel | 3 lines per notch | Scrolls the transcript, or the top overlay when one is open. Clicks, releases, motion, and horizontal wheel events are ignored; focus reporting stays off. |
+| Mouse wheel | 3 lines per notch | Scrolls the transcript, or the top overlay when one is open. Clicks, releases, motion, and horizontal wheel events are ignored; focus reporting stays off. Terminal selection and middle-click paste need the terminal's `Shift` bypass; see [Terminal safety](#terminal-safety-and-images). |
 | Display queue | 256 events | Backpressure; display text deltas are not durable. |
 | `-ui-json` command line / text | 1 MiB / 64 KiB | Longer is a protocol error. |
 | `-ui-json` frame line | 1 MiB | Over-cap emits `frame_too_large` and continues. |
@@ -324,3 +331,12 @@ re-attaches it. With an overlay open the wheel scrolls that overlay instead: the
 help and details panels scroll their text, the table moves its row cursor, and
 the file/model/effort pickers move their selection. Horizontal wheel events do
 nothing. Terminal focus reporting stays disabled.
+
+No terminal mouse mode reports only the wheel, so enabling the wheel stops the
+terminal from selecting text and handling middle-click paste itself. The
+terminal's own selection, copy, and paste stay reachable through its bypass
+modifier: hold `Shift` while dragging (Option-drag in iTerm2) to select and copy
+with the native terminal selection, and `Shift`+middle-click to paste.
+`Ctrl+Shift+V` (or the terminal's own paste binding) always works because
+bracketed paste remains enabled. An empty transcript lists these tips; the help
+overlay repeats them.

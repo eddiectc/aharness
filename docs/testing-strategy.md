@@ -113,7 +113,11 @@ real timeouts for subprocess and signal tests.
   input through a fake input pipe. Status line renders `turns N`/`tokens N`
   for unlimited budgets and `N/M` only for explicit positive budgets, never
   `0/0`; the details overlay renders `unlimited`/`none`; old `max_turns`/
-  `time_limit` terminal states still render.
+  `time_limit` terminal states still render. The empty transcript's tips block
+  lists `F1`, `Shift`+drag, `Ctrl+Shift+V`, and the wheel; it yields to the
+  first item, fits the 40-column and minimum-height frames, and falls back to
+  the one-line prompt when the transcript is too short; the help overlay
+  documents the terminal's `Shift` mouse bypass.
 - TUI slash commands: parser case/aliases/arguments, `/help` lists the
   registry, known commands execute without starting a run, unknown `/text` and
   seeded tasks fall through as messages, `/model`/`/effort` arguments and
@@ -423,7 +427,11 @@ For the TUI manual matrix, use at least one local emulator and tmux at 80x24 and
 resize during streaming and a tool call, scrollback, long lines, CJK/emoji/
 combining input and output, bracketed paste, `Esc`, first/second `Ctrl-C`, raw
 Option-`[`/Option-`]`, `SIGTERM`, `SIGHUP`, and `Ctrl-D`; confirm no child
-process or work directory survives. For images, render a PNG chart, open
+process or work directory survives. Mouse: confirm the wheel scrolls the
+transcript and the open overlay, that `Shift`+drag selects text with the
+terminal and `Shift`+middle-click pastes (Option in iTerm2), and that plain
+drag and middle-click stay inert. Confirm the empty transcript's tips block and
+the `F1` overlay both describe that bypass. For images, render a PNG chart, open
 `Ctrl-G`, verify Kitty where available and glyph fallback elsewhere, and check
 close/resize/scroll leave no stale image. Run `-ui-json` at 80x24 and 200x60 and
 confirm deterministic frames/snapshots for a fixed fake provider. Inspect the raw log, confirm stdout/stderr
