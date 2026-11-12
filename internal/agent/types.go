@@ -153,6 +153,11 @@ type Result struct {
 	RunUsage        model.Usage
 	CumulativeTurns int
 	CumulativeUsage model.Usage
+	// ContextTokens is the last model response's input plus output tokens: the
+	// context occupancy the next call would start from. CumulativeUsage is a
+	// session-cumulative sum over every response and is not comparable to a
+	// context window.
+	ContextTokens int
 	// Cost fields are observational estimates from the run's pricing
 	// snapshot. Completeness is false when any response lacked a price.
 	RunCostMicroUSD int64

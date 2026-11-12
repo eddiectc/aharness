@@ -84,6 +84,12 @@ type Info struct {
 	MaxTotalTokens int
 	Turns          int
 	Usage          model.Usage
+	// ContextTokens is the context occupancy after the latest model response
+	// (that response's input plus output tokens); ContextLimit is the effective
+	// per-call context ceiling. Usage is a session-cumulative sum and is not
+	// comparable to a context window.
+	ContextTokens int
+	ContextLimit  int
 	// CostMicroUSD is the cumulative estimated session cost; CostComplete is
 	// false when any model response lacked a price.
 	CostMicroUSD   int64
@@ -762,16 +768,18 @@ func (m *App) startRun(text, source string) tea.Cmd {
 	}
 	m.steerCh = steer
 	m.run = liveRun{
-		active:  true,
-		handle:  run,
-		number:  m.nextRun,
-		model:   m.nextModel,
-		dialect: string(m.nextDialect),
-		state:   StateRunning,
-		started: time.Now(),
-		pending: make(map[string]*transcriptItem),
-		events:  events,
-		stop:    stop,
+		active:        true,
+		handle:        run,
+		number:        m.nextRun,
+		model:         m.nextModel,
+		dialect:       string(m.nextDialect),
+		state:         StateRunning,
+		started:       time.Now(),
+		turns:         m.info.Turns,
+		contextTokens: m.info.ContextTokens,
+		pending:       make(map[string]*transcriptItem),
+		events:        events,
+		stop:          stop,
 	}
 	cmds := []tea.Cmd{m.waitDisplayCmd(), m.waitDoneCmd(run)}
 	if !m.headless {
@@ -879,6 +887,11 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		}))
 	case agent.ResponseCompleted:
 		m.run.state = StateRunning
+		m.run.turns++
+		// A response that reported no usage keeps the last known occupancy.
+		if total := ev.Usage.Total(); total > 0 {
+			m.run.contextTokens = total
+		}
 		m.dirty = true
 		text := CapText(Sanitize(ev.Text), maxTranscriptItemText)
 		streamed := m.run.streamed
@@ -1063,6 +1076,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	}
 	m.info.Turns = result.CumulativeTurns
 	m.info.Usage = result.CumulativeUsage
+	m.info.ContextTokens = result.ContextTokens
 	if m.run.model != "" {
 		m.info.Model = m.run.model
 		m.info.Dialect = m.run.dialect

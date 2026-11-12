@@ -103,26 +103,28 @@ type steerEntry struct {
 }
 
 type liveRun struct {
-	active       bool
-	handle       Run
-	number       int
-	model        string
-	dialect      string
-	state        UIState
-	turn         int
-	started      time.Time
-	streamed     *transcriptItem
-	thinking     *transcriptItem
-	pending      map[string]*transcriptItem
-	ctrlArmed    bool
-	finished     bool
-	closed       bool
-	draining     bool
-	eventsClosed bool
-	readPending  bool
-	doneResult   *agent.Result
-	events       chan agent.DisplayEvent
-	stop         chan struct{}
+	active        bool
+	handle        Run
+	number        int
+	model         string
+	dialect       string
+	state         UIState
+	turn          int
+	turns         int
+	contextTokens int
+	started       time.Time
+	streamed      *transcriptItem
+	thinking      *transcriptItem
+	pending       map[string]*transcriptItem
+	ctrlArmed     bool
+	finished      bool
+	closed        bool
+	draining      bool
+	eventsClosed  bool
+	readPending   bool
+	doneResult    *agent.Result
+	events        chan agent.DisplayEvent
+	stop          chan struct{}
 }
 
 // App is the Bubble Tea model for one TUI session.

@@ -153,8 +153,17 @@ func (m *App) headerLine() string {
 
 func (m *App) statusLine() string {
 	t := newTheme(m.noColor)
-	turns := "turns " + formatTurnBudget(m.info.Turns, m.info.MaxTurns)
-	tokens := "tokens " + formatTokenBudget(m.info.Usage.Total(), m.info.MaxTotalTokens)
+	turns, contextTokens := m.info.Turns, m.info.ContextTokens
+	if m.run.active {
+		// A live run shows its own progress instead of the counters that are
+		// only written when a run finishes.
+		turns, contextTokens = m.run.turns, m.run.contextTokens
+	}
+	turnsLabel := "turns " + formatTurnBudget(turns, m.info.MaxTurns)
+	// Tokens are context occupancy against the per-call context ceiling: the
+	// cumulative sum over every response is not comparable to a context window
+	// and grows with each tool round.
+	tokensLabel := "ctx " + formatTokenBudget(contextTokens, m.contextLimit())
 	state := string(m.currentState())
 	renderMode := "rich"
 	if !m.rich {
@@ -172,7 +181,7 @@ func (m *App) statusLine() string {
 	if runNo == 0 {
 		runNo = m.nextRun
 	}
-	parts := []string{"model " + SanitizeLine(modelName), fmt.Sprintf("run %d", runNo), turns, tokens, state + extra, renderMode}
+	parts := []string{"model " + SanitizeLine(modelName), fmt.Sprintf("run %d", runNo), turnsLabel, tokensLabel, state + extra, renderMode}
 	if m.overlay.kind != OverlayNone {
 		parts = append(parts, "overlay "+string(m.overlay.kind))
 	}
@@ -571,6 +580,21 @@ func humanTokens(n int) string {
 	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 }
 
+// contextLimit reports the effective per-call context ceiling: the host's
+// resolved context window when available, otherwise the selected model's
+// catalog window. Zero means unknown and omits the ratio.
+func (m *App) contextLimit() int {
+	if m.info.ContextLimit > 0 {
+		return m.info.ContextLimit
+	}
+	for _, choice := range m.models {
+		if choice.ID == m.currentModelID() && choice.ContextWindow > 0 {
+			return choice.ContextWindow
+		}
+	}
+	return 0
+}
+
 // formatTurnBudget renders cumulative turns with an explicit positive budget.
 // A zero budget means unlimited and omits the ratio.
 func formatTurnBudget(turns, maxTurns int) string {
@@ -580,8 +604,6 @@ func formatTurnBudget(turns, maxTurns int) string {
 	return fmt.Sprintf("%d", turns)
 }
 
-// formatTokenBudget renders cumulative tokens with an explicit positive budget.
-// A zero budget means unlimited and omits the ratio.
 // formatCostMicroUSD renders an observational cost estimate. Micro-USD is an
 // integer so accumulated estimates never drift.
 func formatCostMicroUSD(micro int64, complete bool) string {
@@ -592,6 +614,8 @@ func formatCostMicroUSD(micro int64, complete bool) string {
 	return value
 }
 
+// formatTokenBudget renders token occupancy against an explicit positive
+// ceiling. A zero ceiling omits the ratio.
 func formatTokenBudget(used, maxTokens int) string {
 	if maxTokens > 0 {
 		return fmt.Sprintf("%s/%s", humanTokens(used), humanTokens(maxTokens))

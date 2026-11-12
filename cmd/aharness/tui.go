@@ -395,6 +395,7 @@ func (h *tuiHost) run(run *hostRun, runner *agent.Runner, opts agent.RunOptions,
 	}
 	h.info.Turns = result.CumulativeTurns
 	h.info.Usage = result.CumulativeUsage
+	h.info.ContextTokens = result.ContextTokens
 	h.info.CostMicroUSD = result.CostMicroUSD
 	h.info.CostComplete = result.CostComplete
 	h.info.Model = modelName
@@ -606,6 +607,8 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		MaxTotalTokens: cfg.MaxTotalTokens,
 		Turns:          state.Turns,
 		Usage:          state.Usage,
+		ContextTokens:  state.ContextTokens,
+		ContextLimit:   cfg.MaxContextTokens,
 		CostMicroUSD:   state.CostMicroUSD,
 		CostComplete:   state.CostComplete,
 		ThinkingEffort: cfg.ThinkingEffort,

@@ -863,6 +863,12 @@ it on every turn. Compaction never mutates the log.
   source's Tier 1 requirement and is easier to reason about.
 - Cumulative totals include every model response's input and output tokens,
   including retries, and are recorded regardless of whether a budget is set.
+  Context occupancy is tracked separately: `State.ContextTokens` and
+  `Result.ContextTokens` hold the latest response's input plus output tokens —
+  the size the next call starts from — while `Usage` remains the
+  session-cumulative sum. The two diverge as soon as a run makes more than one
+  model call, so only occupancy is comparable to a context window; the TUI
+  status line reports occupancy and the details overlay reports both.
   The session additionally records an observational dollar estimate from the
   catalog price snapshot; it is not a billing authority and never changes a
   budget decision. When `-max-total-tokens` is explicit, a 1,000,000-token

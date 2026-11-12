@@ -92,6 +92,11 @@ func TestInspectReconstructsCumulativeStateAndPending(t *testing.T) {
 	if state.Turns != 1 || state.Usage.Total() != 14 {
 		t.Fatalf("turns/usage = %d/%d", state.Turns, state.Usage.Total())
 	}
+	// Context occupancy is the latest response's input plus output, not the
+	// cumulative sum, so it stays comparable to a context window.
+	if state.ContextTokens != 14 {
+		t.Fatalf("context tokens = %d, want 14", state.ContextTokens)
+	}
 	if !state.LastRunEnded || state.LastRunStatus != StopInterrupted {
 		t.Fatalf("last run = ended %v status %q", state.LastRunEnded, state.LastRunStatus)
 	}

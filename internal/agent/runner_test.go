@@ -40,6 +40,9 @@ func TestRunCompleted(t *testing.T) {
 	if res.CumulativeUsage.Total() != 15 {
 		t.Fatalf("usage total = %d, want 15", res.CumulativeUsage.Total())
 	}
+	if res.ContextTokens != 15 {
+		t.Fatalf("context tokens = %d, want 15", res.ContextTokens)
+	}
 	if comp.calls != 1 {
 		t.Fatalf("model calls = %d, want 1", comp.calls)
 	}
@@ -167,6 +170,11 @@ func TestRunToolLoopPairsEveryCall(t *testing.T) {
 	}
 	if res.CumulativeUsage.Total() != 61 {
 		t.Fatalf("usage total = %d, want 61", res.CumulativeUsage.Total())
+	}
+	// Context occupancy is the latest response (30+7), not the cumulative sum
+	// over both responses, so it stays comparable to a context window.
+	if res.ContextTokens != 37 {
+		t.Fatalf("context tokens = %d, want 37", res.ContextTokens)
 	}
 }
 

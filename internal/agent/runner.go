@@ -110,6 +110,7 @@ type runState struct {
 	start            time.Time
 	turns            int
 	usage            model.Usage
+	contextTokens    int
 	runTurns         int
 	runUsage         model.Usage
 	cost             int64
@@ -146,6 +147,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	}
 	st.turns = state.Turns
 	st.usage = state.Usage
+	st.contextTokens = state.ContextTokens
 	st.cost = state.CostMicroUSD
 	st.costComplete = state.CostComplete
 	st.runCostComplete = true
@@ -658,6 +660,9 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 	}
 	st.usage.InputTokens += comp.resp.Usage.InputTokens
 	st.usage.OutputTokens += comp.resp.Usage.OutputTokens
+	if total := comp.resp.Usage.Total(); total > 0 {
+		st.contextTokens = total
+	}
 	st.runUsage.InputTokens += comp.resp.Usage.InputTokens
 	st.runUsage.OutputTokens += comp.resp.Usage.OutputTokens
 	if priced {
@@ -938,6 +943,7 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	res.RunUsage = st.runUsage
 	res.CumulativeTurns = st.turns
 	res.CumulativeUsage = st.usage
+	res.ContextTokens = st.contextTokens
 	res.RunCostMicroUSD = st.runCost
 	res.CostMicroUSD = st.cost
 	res.RunCostComplete = st.runCostComplete

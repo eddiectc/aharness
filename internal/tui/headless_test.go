@@ -89,6 +89,7 @@ func (h *fakeHost) Start(sub Submission, opts RunOptions, steer <-chan string, d
 			Status: agent.StopCompleted, FinalText: "hello world",
 			RunTurns: 1, RunUsage: model.Usage{InputTokens: 10, OutputTokens: 2},
 			CumulativeTurns: 1, CumulativeUsage: model.Usage{InputTokens: 10, OutputTokens: 2},
+			ContextTokens: 12,
 		}
 		emit(agent.RunFinished{Result: result, Reason: "model completed the task", Duration: time.Millisecond})
 		done <- result
@@ -107,6 +108,7 @@ func newFakeHost() *fakeHost {
 		Dialect:   string(model.DialectChat),
 		Workspace: "/tmp/fake",
 		MaxTurns:  30, MaxTotalTokens: 2_000_000,
+		ContextLimit: 200_000,
 	}}
 }
 
@@ -202,6 +204,14 @@ func TestHeadlessScriptedSession(t *testing.T) {
 	text := strings.Join(anyStrings(frameText), "\n")
 	if !strings.Contains(text, "hello world") {
 		t.Fatalf("final frame does not contain assistant text:\n%s", text)
+	}
+	// The status line reports context occupancy, not a cumulative token sum.
+	statusLine := text[strings.LastIndex(text, "\n")+1:]
+	if !strings.Contains(statusLine, "ctx 12/200.0k") {
+		t.Fatalf("status line lacks the context occupancy:\n%s", statusLine)
+	}
+	if strings.Contains(statusLine, "tokens ") {
+		t.Fatalf("status line still shows a cumulative token sum:\n%s", statusLine)
 	}
 	t.Logf("final frame:\n%s", text)
 	if strings.ContainsRune(text, '\x1b') {

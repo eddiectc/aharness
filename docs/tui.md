@@ -196,13 +196,24 @@ new thinking.
 
 The header line shows `effort <value>` for the next run, or `effort default`
 when the provider/model default applies, so the effective effort stays visible
-without opening an overlay. The status line shows `turns N` and `tokens N`
-while those budgets are unlimited; it shows `turns N/M` and `tokens N/M` only
-when the corresponding `-max-turns` / `-max-total-tokens` flag is explicit and
-positive. Unlimited values never render as `0/0`.
+without opening an overlay.
+
+The status line shows `turns N` and `ctx N/L` and is refreshed while a run is
+active, not only when it ends. `turns` counts successful model responses
+cumulatively over the session; it shows `turns N/M` only when `-max-turns` is
+explicit and positive. `ctx` is context occupancy — the latest model response's
+input plus output tokens — against `L`, the effective per-call context window
+(the catalog `limit.context`, or an explicit `-max-context-tokens` clamped to
+it). It is deliberately not the session-cumulative token sum: that sum includes
+every tool round and retry, grows with each call, and is not comparable to a
+context window. A response that reported no usage leaves the last known
+occupancy in place instead of resetting it. When the context window is unknown
+the ratio is omitted and only the occupancy is shown; unlimited turn budgets
+never render as `0/0`.
 
 The details overlay (`Ctrl-X`) shows the observed `turns: N`,
-`tokens: <human>`, and `cost: $<micro-USD>` under the session block, the
+`tokens: <human>` (the session-cumulative sum), `ctx: <human>/<limit>`, and
+`cost: $<micro-USD>` under the session block, the
 effective `thinking effort: <value>` (or `provider default`), and the
 configured limits under
 configuration: `max turns: unlimited` (or the integer), `total tokens:

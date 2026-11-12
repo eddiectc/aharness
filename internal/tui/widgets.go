@@ -339,6 +339,7 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 		"thinking effort: " + effortLabel(m.nextEffort),
 		"turns:      " + formatTurnBudget(m.info.Turns, m.info.MaxTurns),
 		"tokens:     " + formatTokenBudget(m.info.Usage.Total(), m.info.MaxTotalTokens),
+		"ctx:        " + formatTokenBudget(m.info.ContextTokens, m.contextLimit()),
 		"cost:       " + formatCostMicroUSD(m.info.CostMicroUSD, m.info.CostComplete),
 		"run:        " + fmt.Sprintf("%d", m.run.number),
 		"",

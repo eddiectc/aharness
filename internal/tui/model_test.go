@@ -865,13 +865,16 @@ func TestStatusLineUnlimitedBudgets(t *testing.T) {
 	host.info.MaxTotalTokens = 0
 	host.info.Turns = 31
 	host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+	host.info.ContextTokens = 2_100_000
 	app := newTestApp(t, host)
 	line := app.statusLine()
 	if !strings.Contains(line, "turns 31") || strings.Contains(line, "turns 31/") {
 		t.Fatalf("status turns = %q, want an unlimited count", line)
 	}
-	if !strings.Contains(line, "tokens 2.1M") || strings.Contains(line, "tokens 2.1M/") {
-		t.Fatalf("status tokens = %q, want an unlimited count", line)
+	// Tokens are context occupancy against the context window, never the
+	// cumulative sum over every response.
+	if !strings.Contains(line, "ctx 2.1M/200.0k") {
+		t.Fatalf("status ctx = %q, want occupancy against the context window", line)
 	}
 }
 
@@ -879,13 +882,79 @@ func TestStatusLineExplicitBudgets(t *testing.T) {
 	host := newManualHost()
 	host.info.Turns = 31
 	host.info.Usage = model.Usage{InputTokens: 1_500_000, OutputTokens: 600_000}
+	host.info.ContextTokens = 123_456
 	app := newTestApp(t, host)
 	line := app.statusLine()
 	if !strings.Contains(line, "turns 31/30") {
 		t.Fatalf("status = %q, want the turn ratio", line)
 	}
-	if !strings.Contains(line, "tokens 2.1M/2.0M") {
-		t.Fatalf("status = %q, want the token ratio", line)
+	if !strings.Contains(line, "ctx 123.5k/200.0k") {
+		t.Fatalf("status = %q, want the context ratio", line)
+	}
+}
+
+func TestStatusLineTracksALiveRun(t *testing.T) {
+	host := newManualHost()
+	host.info.Turns = 4
+	host.info.ContextTokens = 10_000
+	app := newTestApp(t, host)
+	if line := app.statusLine(); !strings.Contains(line, "turns 4") || !strings.Contains(line, "ctx 10.0k/200.0k") {
+		t.Fatalf("idle status = %q, want the session counters", line)
+	}
+
+	startTestRun(t, app, "live counters")
+	// Mid-run counters come from the live run, not the values that are only
+	// written when a run finishes.
+	deliver(app, agent.ResponseCompleted{
+		Turn: 5, Text: "working", FinishReason: model.FinishToolCalls,
+		Usage: model.Usage{InputTokens: 30_000, OutputTokens: 500, Reported: true},
+	})
+	line := app.statusLine()
+	if !strings.Contains(line, "turns 5") {
+		t.Fatalf("live status = %q, want the incremented turn", line)
+	}
+	if !strings.Contains(line, "ctx 30.5k/200.0k") {
+		t.Fatalf("live status = %q, want the live context occupancy", line)
+	}
+
+	// A second response moves both counters again, before the run ends.
+	deliver(app, agent.ResponseCompleted{
+		Turn: 6, Text: "done", FinishReason: model.FinishStop,
+		Usage: model.Usage{InputTokens: 42_000, OutputTokens: 700, Reported: true},
+	})
+	line = app.statusLine()
+	if !strings.Contains(line, "turns 6") || !strings.Contains(line, "ctx 42.7k/200.0k") {
+		t.Fatalf("live status = %q, want the second response reflected", line)
+	}
+	if host.info.Turns != 4 {
+		t.Fatalf("host info turns = %d, want the finished-run value to stay untouched", host.info.Turns)
+	}
+
+	run, _, _ := host.last()
+	run.done <- agent.Result{
+		Status: agent.StopCompleted, RunTurns: 2,
+		CumulativeTurns: 6, ContextTokens: 42_700,
+	}
+	close(run.done)
+	finishRun(t, app, agent.Result{
+		Status: agent.StopCompleted, RunTurns: 2,
+		CumulativeTurns: 6, ContextTokens: 42_700,
+	})
+	if line := app.statusLine(); !strings.Contains(line, "turns 6") || !strings.Contains(line, "ctx 42.7k/200.0k") {
+		t.Fatalf("settled status = %q, want the run result", line)
+	}
+}
+
+func TestStatusLineKeepsOccupancyWithoutReportedUsage(t *testing.T) {
+	host := newManualHost()
+	host.info.ContextTokens = 9_000
+	app := newTestApp(t, host)
+	startTestRun(t, app, "unreported usage")
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, Text: "no usage", FinishReason: model.FinishStop,
+	})
+	if line := app.statusLine(); !strings.Contains(line, "ctx 9.0k/200.0k") {
+		t.Fatalf("status = %q, want the last known occupancy kept", line)
 	}
 }
 
@@ -928,6 +997,7 @@ func TestDetailsOverlayRunBudgets(t *testing.T) {
 		for _, want := range []string{
 			"turns:      31",
 			"tokens:     2.1M",
+			"ctx:        0/200.0k",
 			"max turns:  unlimited",
 			"total tokens: unlimited",
 			"run timeout:  none",
@@ -958,6 +1028,7 @@ func TestDetailsOverlayRunBudgets(t *testing.T) {
 		for _, want := range []string{
 			"turns:      31/30",
 			"tokens:     2.1M/2.0M",
+			"ctx:        0/200.0k",
 			"max turns:  30",
 			"total tokens: 2.0M",
 			"run timeout:  13m0s",

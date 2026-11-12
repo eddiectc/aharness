@@ -45,6 +45,10 @@ type State struct {
 	Stream         bool
 	Turns          int
 	Usage          model.Usage
+	// ContextTokens is the size of the context after the latest recorded model
+	// response: that response's input plus output tokens. It is the occupancy
+	// the next call starts from, not a session-cumulative sum.
+	ContextTokens int
 	// CostMicroUSD is the cumulative estimated session cost; CostComplete is
 	// false when any recorded model response lacked a price.
 	CostMicroUSD int64
@@ -135,6 +139,11 @@ func Inspect(events []session.Event) (State, error) {
 			state.Turns++
 			state.Usage.InputTokens += data.Usage.InputTokens
 			state.Usage.OutputTokens += data.Usage.OutputTokens
+			// A response that reported no usage leaves the last known context
+			// occupancy in place rather than resetting it to zero.
+			if total := data.Usage.Total(); total > 0 {
+				state.ContextTokens = total
+			}
 			if data.CostMicroUSD != nil {
 				state.CostMicroUSD += *data.CostMicroUSD
 			} else {

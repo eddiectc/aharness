@@ -645,6 +645,54 @@ func TestBinaryUIJSONCtrlDActiveExits130(t *testing.T) {
 	}
 }
 
+func TestBinaryUIJSONStatusLineShowsContextOccupancy(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if call == 1 {
+			// A tool round with reported usage, so the session-cumulative token
+			// sum and the context occupancy diverge.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{"content":"checking"}}]}`)
+			writeSSE(t, w, "", `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+			writeSSE(t, w, "", `{"choices":[],"usage":{"prompt_tokens":9000,"completion_tokens":300}}`)
+			writeSSE(t, w, "", `[DONE]`)
+			return
+		}
+		sseFinal(t, w, "second answer")
+	})
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"text","text":"first"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"text","text":"second"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+		"-ui-json", "-model", "deepseek-v4.1-flash", "-max-output-tokens", "1000",
+		"-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", exit, stderr)
+	}
+	status := lastFrameText(t, stdout)
+	status = status[strings.LastIndex(status, "\n")+1:]
+	// Two responses accumulated into the session total, but the status line
+	// reports the latest response's occupancy against the context window.
+	if !strings.Contains(status, "ctx ") || !strings.Contains(status, "/200.0k") {
+		t.Fatalf("status line = %q, want the context occupancy", status)
+	}
+	if strings.Contains(status, "tokens ") {
+		t.Fatalf("status line = %q, still shows a cumulative token sum", status)
+	}
+	if !strings.Contains(status, "turns 2") {
+		t.Fatalf("status line = %q, want the cumulative turn count", status)
+	}
+}
+
 func TestBinaryUIJSONTwoRunsInOneSession(t *testing.T) {
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {

@@ -110,9 +110,11 @@ real timeouts for subprocess and signal tests.
   unacknowledged requeue, first/second `Ctrl-C`, `Ctrl-D`, `Esc`, overlay
   focus/restore, rich/raw toggle, table/file/model/image overlays, model picker
   next-run-only, workspace containment, sanitizer, and raw Option-`[`/Option-`]`
-  input through a fake input pipe. Status line renders `turns N`/`tokens N`
-  for unlimited budgets and `N/M` only for explicit positive budgets, never
-  `0/0`; the details overlay renders `unlimited`/`none`; old `max_turns`/
+  input through a fake input pipe. Status line renders `turns N` and
+  `ctx N/L` for unlimited turn budgets and `N/M` only for explicit positive
+  turn budgets, never `0/0`; `ctx` tracks a live run and reports context
+  occupancy against the context window rather than the session-cumulative
+  token sum; the details overlay renders `unlimited`/`none`; old `max_turns`/
   `time_limit` terminal states still render. The empty transcript's tips block
   lists `F1`, `Shift`+drag, `Ctrl+Shift+V`, and the wheel; it yields to the
   first item, fits the 40-column and minimum-height frames, and falls back to
@@ -418,7 +420,7 @@ deadline; resume or fork a seeded log with recorded budgets and confirm it
 continues unbounded and the new `run_start` records `0`; exercise explicit
 `-max-turns`, `-max-total-tokens`, `-session-timeout`, and `-model-timeout`
 values and confirm each still stops or retries as documented. Confirm the TUI
-status line shows `turns N`/`tokens N` and the details overlay shows
+status line shows `turns N` and `ctx N/L` and the details overlay shows
 `unlimited`/`none` for the defaults. Record the real terminal,
 `TERM`, exit code, and `stty -a` before/after.
 
