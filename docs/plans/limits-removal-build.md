@@ -354,7 +354,7 @@ recorded run budgets on old logs are historical and are not re-enforced.
 - **Long-run log growth.** The session log has no rotation or retention; a very
   long run increases disk use. Log rotation remains out of scope.
 - **Network hangs.** Removing the model timeout leaves the HTTP client timeout
-  (5 minutes) and the transport attempt budget as the outer bound. A provider
+  (15 minutes) and the transport attempt budget as the outer bound. A provider
   that never responds still fails after those attempts.
 - **Tests must terminate.** Remove any test that blocks indefinitely; use
   `testing/synctest` and deterministic fake completions. Do not use real

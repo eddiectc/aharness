@@ -128,7 +128,7 @@ func TestNewAdapterTargets(t *testing.T) {
 	if got, want := chat.transport.url, DefaultBaseURL+"/chat/completions"; got != want {
 		t.Errorf("chat URL = %q, want %q", got, want)
 	}
-	if got, want := chat.transport.client.Timeout, 5*time.Minute; got != want {
+	if got, want := chat.transport.client.Timeout, 15*time.Minute; got != want {
 		t.Errorf("chat client timeout = %v, want %v", got, want)
 	}
 
@@ -136,7 +136,7 @@ func TestNewAdapterTargets(t *testing.T) {
 	if got, want := responses.transport.url, "http://provider.test/v1/responses"; got != want {
 		t.Errorf("responses URL = %q, want %q", got, want)
 	}
-	if got, want := responses.transport.client.Timeout, 5*time.Minute; got != want {
+	if got, want := responses.transport.client.Timeout, 15*time.Minute; got != want {
 		t.Errorf("responses client timeout = %v, want %v", got, want)
 	}
 }

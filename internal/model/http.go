@@ -23,7 +23,7 @@ const (
 	// maxErrorBody is the largest provider error body retained for logs.
 	maxErrorBody = 4 << 10
 	// requestTimeout bounds one provider request, including body reads.
-	requestTimeout = 5 * time.Minute
+	requestTimeout = 15 * time.Minute
 	// maxSSEEvent bounds one SSE event's data. A terminal Responses event
 	// wraps the full response in JSON.
 	maxSSEEvent = 4 << 20

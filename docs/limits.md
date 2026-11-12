@@ -42,7 +42,7 @@ by its own constant.
 | Discovered base URL | HTTPS `opencode.ai` | Host must be `opencode.ai` with no userinfo, query, or fragment; an explicit `-provider-base-url` wins. |
 | Session wall clock | 0 (none) | Opt-in `-session-timeout`; per run, checked before each turn. `0` or an omitted flag imposes no deadline; a parent context deadline may still stop the run. |
 | Model call timeout | 0 (none) | Opt-in `-model-timeout`; per model attempt. `0` or an omitted flag imposes no harness deadline; the HTTP client timeout remains the outer network bound. |
-| HTTP client timeout | 5 minutes | Outer bound on a provider request, including body reads. |
+| HTTP client timeout | 15 minutes | Outer bound on a provider request, including body reads. |
 | Transport attempts | 5 total (initial + 4 retries) | 429, 5xx, transport failures, and an explicit `-model-timeout` expiry while the run context is alive. |
 | Retry backoff | 1s base, 30s max, 25% jitter | Context-aware sleep. |
 | `Retry-After` cap | 60 seconds | Longer values are clamped. |
