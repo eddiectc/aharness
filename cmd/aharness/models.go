@@ -33,6 +33,7 @@ func newCatalogSource(cfg config) (model.CatalogSource, error) {
 		UserAgent: "aharness/" + cfg.HarnessVersion,
 		Now:       time.Now,
 		TTL:       model.CatalogTTL,
+		Timeout:   cfg.CatalogTimeout,
 	})
 }
 

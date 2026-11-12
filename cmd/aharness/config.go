@@ -76,6 +76,11 @@ type config struct {
 	Limits         agent.Limits
 	SessionTimeout time.Duration
 	ModelTimeout   time.Duration
+	// HTTPTimeout bounds one provider request, including body reads. It is
+	// resolved to a positive duration before the adapter is built.
+	HTTPTimeout time.Duration
+	// CatalogTimeout bounds one catalog request, including body reads.
+	CatalogTimeout time.Duration
 	LogRequests    bool
 	RequireUsage   bool
 	// Pricing is the effective model's catalog price snapshot. It is
@@ -101,6 +106,9 @@ type config struct {
 	HarnessVersion string
 	PromptVersion  string
 	ToolsetVersion string
+	// ConfigPath is the resolved config file path, empty when no file is
+	// consulted. It is reported at startup for operator visibility.
+	ConfigPath string
 
 	modelSet          bool
 	providerSet       bool
@@ -113,23 +121,100 @@ type config struct {
 	maxOutputSet      bool
 	sessionTimeoutSet bool
 	modelTimeoutSet   bool
+	httpTimeoutSet    bool
+	catalogTimeoutSet bool
 	thinkingEffortSet bool
 }
 
-// envSettings is the environment layer of the flag defaults. It is parsed
-// before flags so defaults are env-aware and env errors remain config errors.
+// envSettings is the environment layer. It is parsed before flags so defaults
+// are environment-aware and environment errors remain config errors. Each
+// value carries a "set" bit because an empty variable means unset, which lets
+// the config-file layer below it apply.
 type envSettings struct {
-	model          string
-	provider       string
-	workspace      string
-	stateDir       string
-	token          string
-	baseURL        string
-	modelsDevURL   string
-	thinkingEffort string
-	maxContext     int
-	maxContextSet  bool
-	logRequests    bool
+	model             string
+	provider          string
+	providerSet       bool
+	workspace         string
+	workspaceSet      bool
+	stateDir          string
+	token             string
+	baseURL           string
+	baseURLSet        bool
+	modelsDevURL      string
+	thinkingEffort    string
+	thinkingEffortSet bool
+	maxTurns          int
+	maxTurnsSet       bool
+	maxTotalTokens    int
+	maxTotalTokensSet bool
+	maxContext        int
+	maxContextSet     bool
+	maxOutput         int
+	maxOutputSet      bool
+	sessionTimeout    time.Duration
+	sessionTimeoutSet bool
+	modelTimeout      time.Duration
+	modelTimeoutSet   bool
+	httpTimeout       time.Duration
+	httpTimeoutSet    bool
+	catalogTimeout    time.Duration
+	catalogTimeoutSet bool
+	requireUsage      bool
+	requireUsageSet   bool
+	logRequests       bool
+	logRequestsSet    bool
+	config            string
+}
+
+// envInt reads an optional integer environment variable.
+func envInt(getenv func(string) string, name string) (int, bool, error) {
+	raw := getenv(name)
+	if raw == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("parse %s %q: %w", name, raw, err)
+	}
+	return n, true, nil
+}
+
+// envDuration reads an optional duration environment variable. Durations use
+// the same "90s"/"2h" spelling as the flags.
+func envDuration(getenv func(string) string, name string) (time.Duration, bool, error) {
+	raw := getenv(name)
+	if raw == "" {
+		return 0, false, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("parse %s %q: %w", name, raw, err)
+	}
+	return d, true, nil
+}
+
+// envBool reads an optional boolean environment variable.
+func envBool(getenv func(string) string, name string) (bool, bool, error) {
+	raw := getenv(name)
+	if raw == "" {
+		return false, false, nil
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, false, fmt.Errorf("parse %s %q: %w", name, raw, err)
+	}
+	return b, true, nil
+}
+
+// durationOr returns value when it was set, otherwise fallback. It keeps the
+// help text honest for a timeout whose flag default is the built-in value
+// rather than the zero sentinel: an unset variable must not print 0s when the
+// effective default is positive.
+func durationOr(value time.Duration, set bool, fallback time.Duration) time.Duration {
+	if !set {
+		return fallback
+	}
+	return value
 }
 
 func loadEnv(getenv func(string) string) (envSettings, error) {
@@ -145,28 +230,51 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		baseURL:        getenv("AHARNESS_PROVIDER_BASE_URL"),
 		modelsDevURL:   getenv("AHARNESS_MODELS_DEV_URL"),
 		thinkingEffort: getenv("AHARNESS_THINKING_EFFORT"),
+		config:         getenv("AHARNESS_CONFIG"),
 	}
-	if raw := getenv("AHARNESS_MAX_CONTEXT_TOKENS"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return envSettings{}, fmt.Errorf("parse AHARNESS_MAX_CONTEXT_TOKENS %q: %w", raw, err)
-		}
-		env.maxContext = n
-		env.maxContextSet = true
+	env.providerSet = env.provider != ""
+	env.workspaceSet = env.workspace != ""
+	env.baseURLSet = env.baseURL != ""
+	env.thinkingEffortSet = env.thinkingEffort != ""
+
+	var err error
+	if env.maxTurns, env.maxTurnsSet, err = envInt(getenv, "AHARNESS_MAX_TURNS"); err != nil {
+		return envSettings{}, err
 	}
-	if raw := getenv("AHARNESS_LOG_REQUESTS"); raw != "" {
-		b, err := strconv.ParseBool(raw)
-		if err != nil {
-			return envSettings{}, fmt.Errorf("parse AHARNESS_LOG_REQUESTS %q: %w", raw, err)
-		}
-		env.logRequests = b
+	if env.maxTotalTokens, env.maxTotalTokensSet, err = envInt(getenv, "AHARNESS_MAX_TOTAL_TOKENS"); err != nil {
+		return envSettings{}, err
+	}
+	if env.maxContext, env.maxContextSet, err = envInt(getenv, "AHARNESS_MAX_CONTEXT_TOKENS"); err != nil {
+		return envSettings{}, err
+	}
+	if env.maxOutput, env.maxOutputSet, err = envInt(getenv, "AHARNESS_MAX_OUTPUT_TOKENS"); err != nil {
+		return envSettings{}, err
+	}
+	if env.sessionTimeout, env.sessionTimeoutSet, err = envDuration(getenv, "AHARNESS_SESSION_TIMEOUT"); err != nil {
+		return envSettings{}, err
+	}
+	if env.modelTimeout, env.modelTimeoutSet, err = envDuration(getenv, "AHARNESS_MODEL_TIMEOUT"); err != nil {
+		return envSettings{}, err
+	}
+	if env.httpTimeout, env.httpTimeoutSet, err = envDuration(getenv, "AHARNESS_HTTP_TIMEOUT"); err != nil {
+		return envSettings{}, err
+	}
+	if env.catalogTimeout, env.catalogTimeoutSet, err = envDuration(getenv, "AHARNESS_CATALOG_TIMEOUT"); err != nil {
+		return envSettings{}, err
+	}
+	if env.requireUsage, env.requireUsageSet, err = envBool(getenv, "AHARNESS_REQUIRE_USAGE"); err != nil {
+		return envSettings{}, err
+	}
+	if env.logRequests, env.logRequestsSet, err = envBool(getenv, "AHARNESS_LOG_REQUESTS"); err != nil {
+		return envSettings{}, err
 	}
 	return env, nil
 }
 
-// parseConfig resolves defaults, environment, and flags in that order and
-// validates what can be validated before a session log is opened. Resume and
-// fork defer model/workspace/limit inheritance to applySessionDefaults.
+// parseConfig resolves flags, environment, the optional config file, and
+// defaults in that order (first match wins) and validates what can be
+// validated before a session log is opened. Resume and fork defer
+// model/workspace/limit inheritance to applySessionDefaults.
 func parseConfig(args []string, getenv func(string) string, out io.Writer) (config, error) {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -187,6 +295,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.SetOutput(io.Discard)
 
 	var (
+		configFile       string
 		task             string
 		taskFile         string
 		workspace        string
@@ -208,10 +317,14 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		thinkingEffort   string
 		sessionTimeout   time.Duration
 		modelTimeout     time.Duration
+		httpTimeout      time.Duration
+		catalogTimeout   time.Duration
 		providerBaseURL  string
 		requireUsage     bool
+		logRequests      bool
 		showVersion      bool
 	)
+	fs.StringVar(&configFile, "config", env.config, "JSON config file (default: AHARNESS_CONFIG, then "+configFileHint+"; \"\" disables it)")
 	fs.StringVar(&task, "task", "", "task text; seeds the first message in TUI modes")
 	fs.StringVar(&taskFile, "task-file", "", "file containing the task; seeds the first message in TUI modes")
 	fs.StringVar(&workspace, "workspace", env.workspace, "workspace directory (default: AHARNESS_WORKSPACE, then the current directory; inherited on resume/fork)")
@@ -230,15 +343,18 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.BoolVar(&uiJSON, "ui-json", false, "run the TUI headlessly with the versioned JSONL protocol")
 	fs.StringVar(&uiSize, "ui-size", fmt.Sprintf("%dx%d", defaultUISizeWidth, defaultUISizeHeight), "initial -ui-json frame size (WxH, 20x5-500x200)")
 	fs.BoolVar(&stream, "stream", false, "stream assistant text in batch mode (implied in TUI modes)")
-	fs.IntVar(&maxTurns, "max-turns", defaultMaxTurns, "maximum cumulative model turns (0: unlimited; negative is invalid)")
-	fs.IntVar(&maxTotalTokens, "max-total-tokens", defaultMaxTotalTokens, "cumulative token budget (0: unlimited; negative is invalid)")
+	fs.IntVar(&maxTurns, "max-turns", env.maxTurns, "maximum cumulative model turns (0: unlimited; negative is invalid)")
+	fs.IntVar(&maxTotalTokens, "max-total-tokens", env.maxTotalTokens, "cumulative token budget (0: unlimited; negative is invalid)")
 	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window (0: use the model catalog)")
-	fs.DurationVar(&sessionTimeout, "session-timeout", defaultSessionTimeout, "per-run wall-clock timeout (0: no deadline; negative is invalid)")
-	fs.DurationVar(&modelTimeout, "model-timeout", defaultModelTimeout, "per-model-call harness timeout (0: no deadline; negative is invalid)")
-	fs.IntVar(&maxOutputTokens, "max-output-tokens", 0, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
+	fs.DurationVar(&sessionTimeout, "session-timeout", env.sessionTimeout, "per-run wall-clock timeout (0: no deadline; negative is invalid)")
+	fs.DurationVar(&modelTimeout, "model-timeout", env.modelTimeout, "per-model-call harness timeout (0: no deadline; negative is invalid)")
+	fs.DurationVar(&httpTimeout, "http-timeout", durationOr(env.httpTimeout, env.httpTimeoutSet, model.DefaultHTTPTimeout), "provider HTTP client timeout, including body reads (default: AHARNESS_HTTP_TIMEOUT, then "+model.DefaultHTTPTimeout.String()+"; must be positive)")
+	fs.DurationVar(&catalogTimeout, "catalog-timeout", durationOr(env.catalogTimeout, env.catalogTimeoutSet, model.CatalogRequestTimeout), "catalog HTTP request timeout, including body reads (default: AHARNESS_CATALOG_TIMEOUT, then "+model.CatalogRequestTimeout.String()+"; must be positive)")
+	fs.IntVar(&maxOutputTokens, "max-output-tokens", env.maxOutput, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
 	fs.StringVar(&thinkingEffort, "thinking-effort", env.thinkingEffort, "model-advertised reasoning effort for model calls, or \"default\" to clear (default: AHARNESS_THINKING_EFFORT)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
 	fs.BoolVar(&requireUsage, "require-usage", false, "fail with protocol_error when a completed model response omits provider usage")
+	fs.BoolVar(&logRequests, "log-requests", false, "record each projected model request as a debug event (default: AHARNESS_LOG_REQUESTS)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -254,33 +370,71 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		return config{ShowVersion: true}, nil
 	}
 
-	providerSet := env.provider != "" || visited["provider"]
-	provider := providerNameFlag
-	if provider == "" && !providerSet {
-		provider = providerName
-	}
-	if err := validateProvider(provider); err != nil {
+	// Resolve every layered setting. The config file sits below flags and
+	// environment; the state directory is resolved first because the implicit
+	// config path depends on it, and the file's own keys never move it.
+	state, err := resolveStateDir(stateDir, getenv)
+	if err != nil {
 		return config{}, err
 	}
 
+	// Load the config file below flags and environment. An explicit -config or
+	// AHARNESS_CONFIG must exist; the implicit default may be absent. An
+	// explicit empty -config disables the file entirely.
+	var configPath string
+	var configExplicit bool
+	switch {
+	case visited["config"]:
+		configPath, configExplicit = configFile, configFile != ""
+	case env.config != "":
+		configPath, configExplicit = env.config, true
+	default:
+		configPath = filepath.Join(state, "config.json")
+	}
+	file, err := loadFileConfig(configPath, configExplicit)
+	if err != nil {
+		return config{}, err
+	}
+
+	modelName = layered(modelName, visited["model"], env.model, env.model != "", file.Model, "").value()
+	modelSet := visited["model"] || env.model != "" || file.Model != nil
+	provider := layered(providerNameFlag, visited["provider"], env.provider, env.providerSet,
+		file.Provider, providerName).value()
+	providerSet := visited["provider"] || env.providerSet || file.Provider != nil
+	if err := validateProvider(provider); err != nil {
+		return config{}, err
+	}
+	workspace = layered(workspace, visited["workspace"], env.workspace, env.workspaceSet, file.Workspace, "").value()
+	workspaceSet := visited["workspace"] || env.workspaceSet || file.Workspace != nil
+	providerBaseURL = layered(providerBaseURL, visited["provider-base-url"], env.baseURL, env.baseURLSet,
+		file.ProviderBaseURL, "").value()
+	baseURLSet := visited["provider-base-url"] || env.baseURLSet || file.ProviderBaseURL != nil
+	modelsDevURL := layered("", false, env.modelsDevURL, env.modelsDevURL != "", file.ModelsDevURL, "").value()
+	catalogTimeoutLayer := durationLayer(catalogTimeout, visited["catalog-timeout"], env.catalogTimeout, env.catalogTimeoutSet,
+		file.CatalogTimeout, model.CatalogRequestTimeout)
+
 	// Terminal catalog actions ignore task, session, and mode flags. They
-	// still honor the provider, state directory, and catalog URL.
+	// still honor the provider, state directory, catalog URL, and timeouts.
 	if listModels || refreshModels {
-		state, err := resolveStateDir(stateDir, getenv)
-		if err != nil {
-			return config{}, err
+		catalogTimeout := catalogTimeoutLayer.value()
+		if catalogTimeout <= 0 {
+			return config{}, fmt.Errorf("catalog timeout must be positive, got %s", catalogTimeout)
 		}
 		return config{
-			Provider:      provider,
-			providerSet:   providerSet,
-			StateDir:      state,
-			ModelsDevURL:  env.modelsDevURL,
-			ListModels:    listModels,
-			RefreshModels: refreshModels,
+			Provider:       provider,
+			providerSet:    providerSet,
+			StateDir:       state,
+			ModelsDevURL:   modelsDevURL,
+			CatalogTimeout: catalogTimeout,
+			ListModels:     listModels,
+			RefreshModels:  refreshModels,
+			ConfigPath:     configPath,
 		}, nil
 	}
 
-	thinkingEffortSet := visited["thinking-effort"] || env.thinkingEffort != ""
+	thinkingEffort = layered(thinkingEffort, visited["thinking-effort"], env.thinkingEffort, env.thinkingEffortSet,
+		file.ThinkingEffort, "").value()
+	thinkingEffortSet := visited["thinking-effort"] || env.thinkingEffortSet || file.ThinkingEffort != nil
 	if visited["thinking-effort"] && thinkingEffort == "" {
 		return config{}, errors.New("thinking effort must not be empty; use \"default\" to clear")
 	}
@@ -291,6 +445,25 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	if thinkingEffort == "default" {
 		thinkingEffort = ""
 	}
+
+	maxTurnsLayer := layered(maxTurns, visited["max-turns"], env.maxTurns, env.maxTurnsSet,
+		file.MaxTurns, defaultMaxTurns)
+	maxTotalTokensLayer := layered(maxTotalTokens, visited["max-total-tokens"], env.maxTotalTokens, env.maxTotalTokensSet,
+		file.MaxTotalTokens, defaultMaxTotalTokens)
+	maxContextLayer := layered(maxContextTokens, visited["max-context-tokens"], env.maxContext, env.maxContextSet,
+		file.MaxContextTokens, 0)
+	maxOutputLayer := layered(maxOutputTokens, visited["max-output-tokens"], env.maxOutput, env.maxOutputSet,
+		file.MaxOutputTokens, 0)
+	sessionTimeoutLayer := durationLayer(sessionTimeout, visited["session-timeout"], env.sessionTimeout, env.sessionTimeoutSet,
+		file.SessionTimeout, defaultSessionTimeout)
+	modelTimeoutLayer := durationLayer(modelTimeout, visited["model-timeout"], env.modelTimeout, env.modelTimeoutSet,
+		file.ModelTimeout, defaultModelTimeout)
+	httpTimeoutLayer := durationLayer(httpTimeout, visited["http-timeout"], env.httpTimeout, env.httpTimeoutSet,
+		file.HTTPTimeout, model.DefaultHTTPTimeout)
+	requireUsageLayer := layered(requireUsage, visited["require-usage"], env.requireUsage, env.requireUsageSet,
+		file.RequireUsage, false)
+	logRequestsLayer := layered(logRequests, visited["log-requests"], env.logRequests, env.logRequestsSet,
+		file.LogRequests, false)
 
 	taskText, taskSource, taskSet, err := resolveTask(task, taskFile)
 	if err != nil {
@@ -332,11 +505,6 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		}
 	}
 
-	state, err := resolveStateDir(stateDir, getenv)
-	if err != nil {
-		return config{}, err
-	}
-
 	cfg := config{
 		Task:              taskText,
 		TaskSource:        taskSource,
@@ -345,16 +513,18 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		Model:             modelName,
 		Provider:          provider,
 		Token:             env.token,
-		MaxTurns:          maxTurns,
-		MaxTotalTokens:    maxTotalTokens,
-		MaxContextTokens:  maxContextTokens,
-		MaxOutputTokens:   maxOutputTokens,
+		MaxTurns:          maxTurnsLayer.value(),
+		MaxTotalTokens:    maxTotalTokensLayer.value(),
+		MaxContextTokens:  maxContextLayer.value(),
+		MaxOutputTokens:   maxOutputLayer.value(),
 		ThinkingEffort:    thinkingEffort,
-		ModelsDevURL:      env.modelsDevURL,
-		SessionTimeout:    sessionTimeout,
-		ModelTimeout:      modelTimeout,
-		LogRequests:       env.logRequests,
-		RequireUsage:      requireUsage,
+		ModelsDevURL:      modelsDevURL,
+		HTTPTimeout:       httpTimeoutLayer.value(),
+		CatalogTimeout:    catalogTimeoutLayer.value(),
+		SessionTimeout:    sessionTimeoutLayer.value(),
+		ModelTimeout:      modelTimeoutLayer.value(),
+		LogRequests:       logRequestsLayer.value(),
+		RequireUsage:      requireUsageLayer.value(),
 		ResumeID:          resumeID,
 		ForkID:            forkID,
 		Mode:              mode,
@@ -364,22 +534,25 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		UISizeHeight:      sizeHeight,
 		Stream:            stream,
 		StreamSet:         visited["stream"],
+		ConfigPath:        configPath,
 		PromptVersion:     agent.PromptVersion,
 		ToolsetVersion:    tools.Version,
-		modelSet:          env.model != "" || visited["model"],
+		modelSet:          modelSet,
 		providerSet:       providerSet,
-		workspaceSet:      env.workspace != "" || visited["workspace"],
-		baseURLSet:        env.baseURL != "" || visited["provider-base-url"],
-		maxTurnsSet:       visited["max-turns"],
-		maxTotalTokensSet: visited["max-total-tokens"],
-		maxContextSet:     env.maxContextSet || visited["max-context-tokens"],
-		maxOutputSet:      visited["max-output-tokens"],
-		sessionTimeoutSet: visited["session-timeout"],
-		modelTimeoutSet:   visited["model-timeout"],
+		workspaceSet:      workspaceSet,
+		baseURLSet:        baseURLSet,
+		maxTurnsSet:       maxTurnsLayer.set(),
+		maxTotalTokensSet: maxTotalTokensLayer.set(),
+		maxContextSet:     maxContextLayer.set(),
+		maxOutputSet:      maxOutputLayer.set(),
+		sessionTimeoutSet: sessionTimeoutLayer.set(),
+		modelTimeoutSet:   modelTimeoutLayer.set(),
+		httpTimeoutSet:    httpTimeoutLayer.set(),
+		catalogTimeoutSet: catalogTimeoutLayer.set(),
 		thinkingEffortSet: thinkingEffortSet,
 	}
 	if cfg.maxContextSet {
-		cfg.maxContextValue = maxContextTokens
+		cfg.maxContextValue = cfg.MaxContextTokens
 	}
 	if providerBaseURL != "" {
 		cfg.BaseURL = providerBaseURL
@@ -489,9 +662,15 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	})
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "environment: AHARNESS_MODEL, AHARNESS_PROVIDER, AHARNESS_WORKSPACE,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_STATE_DIR, AHARNESS_PROVIDER_TOKEN, AHARNESS_MAX_CONTEXT_TOKENS,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_STATE_DIR, AHARNESS_CONFIG, AHARNESS_PROVIDER_TOKEN,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_CONTEXT_TOKENS, AHARNESS_MAX_TURNS, AHARNESS_MAX_TOTAL_TOKENS,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_OUTPUT_TOKENS, AHARNESS_SESSION_TIMEOUT, AHARNESS_MODEL_TIMEOUT,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_HTTP_TIMEOUT, AHARNESS_CATALOG_TIMEOUT, AHARNESS_REQUIRE_USAGE,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_PROVIDER_BASE_URL, AHARNESS_MODELS_DEV_URL,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_THINKING_EFFORT")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "precedence: flag > environment > config file > default;")
+	_, _ = fmt.Fprintf(w, "the config file is %s (JSON; see docs/configuration.md)\n", configFileHint)
 }
 
 // versionRequested reports whether args select -version, including the
@@ -646,6 +825,14 @@ func validateExplicitValues(cfg *config) error {
 	}
 	if cfg.modelTimeoutSet && cfg.ModelTimeout < 0 {
 		return fmt.Errorf("model timeout must not be negative, got %s", cfg.ModelTimeout)
+	}
+	// The HTTP client timeout is always in effect, so it must be positive
+	// whichever layer supplied it.
+	if cfg.HTTPTimeout <= 0 {
+		return fmt.Errorf("HTTP timeout must be positive, got %s", cfg.HTTPTimeout)
+	}
+	if cfg.CatalogTimeout <= 0 {
+		return fmt.Errorf("catalog timeout must be positive, got %s", cfg.CatalogTimeout)
 	}
 	return nil
 }

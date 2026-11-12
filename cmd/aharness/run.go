@@ -322,6 +322,8 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		"max_total_tokens", cfg.MaxTotalTokens,
 		"session_timeout_ms", cfg.SessionTimeout.Milliseconds(),
 		"model_timeout_ms", cfg.ModelTimeout.Milliseconds(),
+		"http_timeout_ms", cfg.HTTPTimeout.Milliseconds(),
+		"config", configState(cfg.ConfigPath),
 	)
 	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
 		logger.Warn("provider token is unset; hosted OpenCode Go requires AHARNESS_PROVIDER_TOKEN")
@@ -464,9 +466,9 @@ func newCompleter(cfg config, sessionID string) model.Completer {
 // selected model.
 func newCompleterFor(dialect model.Dialect, cfg config, sessionID string) model.Completer {
 	if dialect == model.DialectResponses {
-		return model.NewOpenAIResponses(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion)
+		return model.NewOpenAIResponses(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion, cfg.HTTPTimeout)
 	}
-	return model.NewOpenAIChat(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion)
+	return model.NewOpenAIChat(cfg.BaseURL, cfg.Token, sessionID, cfg.HarnessVersion, cfg.HTTPTimeout)
 }
 
 // authState reports whether a provider token is configured without exposing
@@ -476,6 +478,15 @@ func authState(token string) string {
 		return "unset"
 	}
 	return "set"
+}
+
+// configState names the resolved config file so an operator can see which file
+// supplied a value. An empty path means the file was disabled with -config="".
+func configState(path string) string {
+	if path == "" {
+		return "none"
+	}
+	return path
 }
 
 // authFailureHint reports whether err is a provider 401, which is actionable

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // OpenAIChat is the dialect adapter for the OpenAI Chat Completions API.
@@ -17,10 +18,11 @@ type OpenAIChat struct {
 }
 
 // NewOpenAIChat constructs a Chat Completions adapter. An empty baseURL uses
-// DefaultBaseURL. An empty token omits the Authorization header.
-func NewOpenAIChat(baseURL, token, sessionID, version string) *OpenAIChat {
+// DefaultBaseURL. An empty token omits the Authorization header. A
+// non-positive timeout selects DefaultHTTPTimeout.
+func NewOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIChat {
 	return &OpenAIChat{
-		transport: newHTTPTransport(baseURL, "/chat/completions", token, sessionID, version),
+		transport: newHTTPTransport(baseURL, "/chat/completions", token, sessionID, version, timeout),
 	}
 }
 

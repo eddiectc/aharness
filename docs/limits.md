@@ -1,9 +1,10 @@
 # aharness limits and timeouts
 
 - **Date:** 2026-11-11
-- **Status:** current for v1, the shipped TUI, model discovery, and thinking
-  effort.
-- **Related:** [architecture](architecture.md), [v1 build plan](plans/v1-build.md),
+- **Status:** current for v1, the shipped TUI, model discovery, thinking
+  effort, and the flag/env/config-file configuration layers.
+- **Related:** [architecture](architecture.md), [configuration](configuration.md),
+  [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
   [slash commands](commands.md),
   [model discovery build plan](plans/model-discovery-build.md),
@@ -20,29 +21,29 @@ by its own constant.
 
 | Limit | v1 value | Behavior |
 |---|---|---|
-| Max turns | 0 (unlimited) | Opt-in `-max-turns`. When explicit and positive, checked before each model call; counts successful model responses. Resume reconstructs cumulative turns from the log but does not inherit the budget. |
-| Max total tokens | 0 (unlimited) | Opt-in `-max-total-tokens`. When explicit and positive, cumulative over the session; a retry that succeeds counts once. Recorded budgets are historical and are not inherited. |
-| Max context tokens | Catalog `limit.context` | Per call. `-max-context-tokens` defaults to 0 (unset); an explicit positive value is clamped down to the model ceiling with a warning. |
-| Max output tokens | Unset (0) | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is invalid. |
+| Max turns | 0 (unlimited) | Opt-in `-max-turns` / `AHARNESS_MAX_TURNS` / `max_turns`. When explicit and positive, checked before each model call; counts successful model responses. Resume reconstructs cumulative turns from the log but does not inherit the budget. |
+| Max total tokens | 0 (unlimited) | Opt-in `-max-total-tokens` / `AHARNESS_MAX_TOTAL_TOKENS` / `max_total_tokens`. When explicit and positive, cumulative over the session; a retry that succeeds counts once. Recorded budgets are historical and are not inherited. |
+| Max context tokens | Catalog `limit.context` | Per call. `-max-context-tokens` / `AHARNESS_MAX_CONTEXT_TOKENS` / `max_context_tokens` defaults to 0 (unset); an explicit positive value is clamped down to the model ceiling with a warning. |
+| Max output tokens | Unset (0) | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is invalid. Accepts `-max-output-tokens`, `AHARNESS_MAX_OUTPUT_TOKENS`, and `max_output_tokens`. |
 | Advertised output ceiling | Catalog `limit.output` | Display/validation metadata only; never a request budget and never an eligibility gate. |
 | Safety margin | `max(5% of context, 1,000)` | Reserved from the context window for estimator error. |
 | Max input tokens | `min(model limit.input, context - safety_margin)` | Per call. When the catalog has no positive input limit, `context - safety_margin`. No output budget is subtracted. |
 | Compaction target | max input tokens | Older tool-result bodies are elided to this target. |
-| Catalog URL | `https://models.dev/api.json` | `AHARNESS_MODELS_DEV_URL` overrides for tests and mirrors; HTTPS except loopback HTTP. |
-| Catalog request timeout | 15 seconds total | Includes body reads; no automatic retry. |
+| Catalog URL | `https://models.dev/api.json` | `AHARNESS_MODELS_DEV_URL` / `models_dev_url` override for tests and mirrors; HTTPS except loopback HTTP. |
+| Catalog request timeout | 15 seconds total (`-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT` / `catalog_timeout`) | Includes body reads; must be positive; no automatic retry. |
 | Catalog response body | 16 MiB | Larger is a protocol error, not a partial parse. |
 | Catalog cache TTL | 24 hours | A fresh cache is used without a network request; a stale cache triggers a conditional GET. |
 | Catalog stale fallback | implicit and `-list-models` only | On failure, a valid stale cache is used with a warning. Explicit refresh never falls back. |
-| Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R` | Unconditional GET, reusing the 15-second timeout, 16 MiB body cap, and 0600 cache policy. Failure exits 3/4 (CLI) or notifies (TUI); no stale fallback. |
+| Explicit catalog refresh | `-refresh-models` or picker `Ctrl-R` | Unconditional GET, reusing the catalog timeout, 16 MiB body cap, and 0600 cache policy. Failure exits 3/4 (CLI) or notifies (TUI); no stale fallback. |
 | Catalog cache file | `<state>/cache/models.dev/<provider>.json` | File 0600, directory 0700; atomic replacement. |
 | Catalog cache version | 3 | A version mismatch or corrupt entry is ignored and treated as absent. Version 2 carries normalized `reasoning`/`reasoning_efforts`; version 3 adds the optional normalized `cost` snapshot. Older caches are refetched. |
 | Model ID | at most 256 bytes | Valid UTF-8 with no control characters; used only as a JSON value/map key, never a path. |
 | Thinking effort value | at most 32 bytes | Non-empty valid UTF-8 matching `[a-z][a-z0-9_-]*`; `default` is reserved for clearing and is never a catalog value. Applies to the catalog, cache, CLI, and environment. |
 | Effort values per model | 16 | Extra values are dropped after canonical ordering; invalid values are dropped. A model with none advertises no effort control. |
 | Discovered base URL | HTTPS `opencode.ai` | Host must be `opencode.ai` with no userinfo, query, or fragment; an explicit `-provider-base-url` wins. |
-| Session wall clock | 0 (none) | Opt-in `-session-timeout`; per run, checked before each turn. `0` or an omitted flag imposes no deadline; a parent context deadline may still stop the run. |
-| Model call timeout | 0 (none) | Opt-in `-model-timeout`; per model attempt. `0` or an omitted flag imposes no harness deadline; the HTTP client timeout remains the outer network bound. |
-| HTTP client timeout | 15 minutes | Outer bound on a provider request, including body reads. |
+| Session wall clock | 0 (none) | Opt-in `-session-timeout` / `AHARNESS_SESSION_TIMEOUT` / `session_timeout`; per run, checked before each turn. `0` or an omitted value imposes no deadline; a parent context deadline may still stop the run. |
+| Model call timeout | 0 (none) | Opt-in `-model-timeout` / `AHARNESS_MODEL_TIMEOUT` / `model_timeout`; per model attempt. `0` or an omitted value imposes no harness deadline; the HTTP client timeout remains the outer network bound. |
+| HTTP client timeout | 15 minutes (`-http-timeout` / `AHARNESS_HTTP_TIMEOUT` / `http_timeout`) | Outer bound on a provider request, including body reads. Must be positive; a smaller value fails a stalled request sooner, a larger one tolerates a long generation. |
 | Transport attempts | 5 total (initial + 4 retries) | 429, 5xx, transport failures, and an explicit `-model-timeout` expiry while the run context is alive. |
 | Retry backoff | 1s base, 30s max, 25% jitter | Context-aware sleep. |
 | `Retry-After` cap | 60 seconds | Longer values are clamped. |
@@ -152,27 +153,52 @@ Other event payloads:
 
 ## 5. CLI, input, and configuration
 
-| Limit | v1 value | Behavior |
-|---|---|---|
-| `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
-| `-list-models` | off | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT` and exits; no session, task, or token. `EFFORT` is comma-separated normalized values or `-`. No separate output cap; bounded by the catalog size. |
-| `-refresh-models` | off | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |
-| `-max-turns` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
-| `-max-total-tokens` | 0 (unlimited) | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
-| `-max-context-tokens` | 0 (unset) | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
-| `-max-output-tokens` | 0 (unset) | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
-| `-require-usage` | off | Opt-in fail-closed accounting: a completed buffered response without provider usage is a `protocol_error` before tools run. Per-run, not inherited. No new budget. |
-| `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | unset | Provider/model default. An explicit non-default value must be advertised by the effective model and match the 32-byte syntax rule; `default` clears. Flag wins over environment; resume/fork inherit the latest recorded value. Invalid or unsupported values exit 2. No new run budget. |
-| `-session-timeout` | 0 (none) | Per run when explicit and positive; `0`/omitted no deadline; negative is a config error. |
-| `-model-timeout` | 0 (none) | Per model attempt when explicit and positive; `0`/omitted no harness deadline; negative is a config error. |
-| `-task` / `-task-file` | no read cap | Effective transcript text is 64 KiB. |
-| Steering message | 64 KiB | TUI composer submission while a run is active. |
-| Session selection | UUIDv7 ID | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
-| Provider token | no length cap | In memory only; never logged or passed to tools. |
-| Provider base URL | no length cap | Explicit override must be http(s) with a host; userinfo and query/fragment are rejected. Discovered URLs are HTTPS `opencode.ai`. |
-| Catalog URL | no length cap | Default `https://models.dev/api.json`; `AHARNESS_MODELS_DEV_URL` must be HTTPS except loopback HTTP. |
-| State directory path | OS path limit | No explicit application cap. |
-| Session log retention | none | No rotation or automatic deletion. |
+Every configurable limit resolves per setting as **flag > environment > config
+file > default**; see [configuration.md](configuration.md). The "Layer" column
+below names which sources exist for that row: a flag name, an environment
+variable, and a config-file key.
+
+| Limit | v1 value | Layer | Behavior |
+|---|---|---|---|
+| Config file | `<state-dir>/config.json` | `-config`, `AHARNESS_CONFIG` | Optional JSON; an explicit path must exist, the implicit default may be absent; `-config ""` disables it; 1 MiB cap; unknown keys and invalid values are config errors (exit 2). |
+| `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | flag, env, `provider` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
+| `-list-models` | off | flag | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT` and exits; no session, task, or token. `EFFORT` is comma-separated normalized values or `-`. No separate output cap; bounded by the catalog size. |
+| `-refresh-models` | off | flag | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |
+| `-max-turns` | 0 (unlimited) | flag, `AHARNESS_MAX_TURNS`, `max_turns` | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
+| `-max-total-tokens` | 0 (unlimited) | flag, `AHARNESS_MAX_TOTAL_TOKENS`, `max_total_tokens` | Cumulative when explicit and positive; `0`/omitted unlimited; negative is a config error. |
+| `-max-context-tokens` | 0 (unset) | flag, `AHARNESS_MAX_CONTEXT_TOKENS`, `max_context_tokens` | Use the catalog context window. When explicitly set it must be positive and is clamped to the model ceiling with a warning. |
+| `-max-output-tokens` | 0 (unset) | flag, `AHARNESS_MAX_OUTPUT_TOKENS`, `max_output_tokens` | Omit the request field. A positive value is sent unchanged; `0` clears an inherited budget; a negative value is a config error. |
+| `-require-usage` | off | flag, `AHARNESS_REQUIRE_USAGE`, `require_usage` | Opt-in fail-closed accounting: a completed buffered response without provider usage is a `protocol_error` before tools run. Per-run, not inherited. No new budget. |
+| `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | unset | flag, env, `thinking_effort` | Provider/model default. An explicit non-default value must be advertised by the effective model and match the 32-byte syntax rule; `default` clears. Flag wins over environment and file; resume/fork inherit the latest recorded value. Invalid or unsupported values exit 2. No new run budget. |
+| `-session-timeout` | 0 (none) | flag, `AHARNESS_SESSION_TIMEOUT`, `session_timeout` | Per run when explicit and positive; `0`/omitted no deadline; negative is a config error. |
+| `-model-timeout` | 0 (none) | flag, `AHARNESS_MODEL_TIMEOUT`, `model_timeout` | Per model attempt when explicit and positive; `0`/omitted no harness deadline; negative is a config error. |
+| `-http-timeout` | 15 minutes | flag, `AHARNESS_HTTP_TIMEOUT`, `http_timeout` | Outer bound on a provider request, including body reads. Must be positive in every layer; a negative or zero value is a config error. |
+| `-catalog-timeout` | 15 seconds | flag, `AHARNESS_CATALOG_TIMEOUT`, `catalog_timeout` | Bound on one catalog request, including body reads. Must be positive; valid for the terminal catalog actions too. |
+| `-log-requests` / `AHARNESS_LOG_REQUESTS` | off | flag, env, `log_requests` | Records each projected model request as a debug event, capped at 1 MiB. |
+| `-task` / `-task-file` | no read cap | flag | Per-invocation only; effective transcript text is 64 KiB. |
+| Steering message | 64 KiB | TUI | Composer submission while a run is active. |
+| Session selection | UUIDv7 ID | flag | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
+| Provider token | no length cap | `AHARNESS_PROVIDER_TOKEN` only | In memory only; never logged or passed to tools; deliberately not a flag or config key. |
+| Provider base URL | no length cap | flag, env, `provider_base_url` | Explicit override must be http(s) with a host; userinfo and query/fragment are rejected. Discovered URLs are HTTPS `opencode.ai`. |
+| Catalog URL | no length cap | env, `models_dev_url` | Default `https://models.dev/api.json`; must be HTTPS except loopback HTTP. |
+| State directory path | OS path limit | flag, `AHARNESS_STATE_DIR` | No explicit application cap. Deliberately not a config key: it locates the default config file. |
+| Session log retention | none | — | No rotation or automatic deletion. |
+
+### 5.1 What is worth configuring
+
+`docs/configuration.md` §4 explains the reasoning. In short, a limit belongs in
+the flag/env/config surface when two operators could reasonably disagree for the
+same binary:
+
+- **Worth configuring:** the HTTP client timeout, the per-call model timeout,
+  the session wall clock, the turn/total-token budgets, the context/output
+  budgets, thinking effort, the catalog timeout and URL, and the model /
+  provider / base-URL / workspace selectors.
+- **Intentionally fixed:** body and stream caps, tool result caps, the session
+  line and schema versions, file modes, retention, the retry policy, UI display
+  caps, and the `-ui-json` protocol caps. Each defines the wire format, the
+  replay contract, or a display-only safety boundary. Nothing in §2, §3, §4, or
+  §6 is configurable.
 
 ## 6. TUI and `-ui-json`
 

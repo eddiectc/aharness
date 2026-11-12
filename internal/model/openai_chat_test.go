@@ -103,7 +103,7 @@ func TestOpenAIChatCompleteCanonical(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	got, err := adapter.Complete(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
@@ -215,7 +215,7 @@ func TestOpenAIChatToolCallValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newStaticServer(t, staticResponse{status: http.StatusOK, body: []byte(tc.body)})
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 			if err == nil {
 				t.Fatal("Complete() error = nil, want error")
@@ -260,7 +260,7 @@ func TestOpenAIChatFinishNormalization(t *testing.T) {
 			body := `{"choices":[` + choice + `]}`
 
 			srv := newStaticServer(t, staticResponse{status: http.StatusOK, body: []byte(body)})
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			got, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 			if err != nil {
 				t.Fatalf("Complete() error = %v", err)
@@ -280,7 +280,7 @@ func TestOpenAIChatEmptyChoices(t *testing.T) {
 		status: http.StatusOK,
 		body:   []byte(`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}`),
 	})
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 	if err == nil {
 		t.Fatal("Complete() error = nil, want error")
@@ -296,7 +296,7 @@ func TestOpenAIChatOmitsUnsetOutputBudget(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	if _, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"}); err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}

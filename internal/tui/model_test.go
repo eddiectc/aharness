@@ -1002,6 +1002,7 @@ func TestDetailsOverlayRunBudgets(t *testing.T) {
 			"total tokens: unlimited",
 			"run timeout:  none",
 			"model timeout: none",
+			"http timeout: none",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("details missing %q:\n%s", want, text)
@@ -1021,6 +1022,7 @@ func TestDetailsOverlayRunBudgets(t *testing.T) {
 			MaxContextTokens: 200_000,
 			SessionTimeout:   13 * time.Minute,
 			ModelTimeout:     42 * time.Second,
+			HTTPTimeout:      15 * time.Minute,
 		}}
 		app := newTestApp(t, details)
 		press(t, app, "ctrl+x")
@@ -1033,6 +1035,7 @@ func TestDetailsOverlayRunBudgets(t *testing.T) {
 			"total tokens: 2.0M",
 			"run timeout:  13m0s",
 			"model timeout: 42s",
+			"http timeout: 15m0s",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("details missing %q:\n%s", want, text)

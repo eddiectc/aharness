@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // OpenAIResponses is the dialect adapter for the OpenAI Responses API.
@@ -17,10 +18,11 @@ type OpenAIResponses struct {
 }
 
 // NewOpenAIResponses constructs a Responses adapter. An empty baseURL uses
-// DefaultBaseURL. An empty token omits the Authorization header.
-func NewOpenAIResponses(baseURL, token, sessionID, version string) *OpenAIResponses {
+// DefaultBaseURL. An empty token omits the Authorization header. A
+// non-positive timeout selects DefaultHTTPTimeout.
+func NewOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIResponses {
 	return &OpenAIResponses{
-		transport: newHTTPTransport(baseURL, "/responses", token, sessionID, version),
+		transport: newHTTPTransport(baseURL, "/responses", token, sessionID, version, timeout),
 	}
 }
 

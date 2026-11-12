@@ -117,8 +117,10 @@ schema.
 - No schema change, no TUI state in the log, no replay of display deltas.
 - No second application framework. Bubble Tea v2 is the chosen framework;
   tview and termbox are rejected. The tcell v3 + in-house plan is the fallback,
-  not a second implementation in the same milestone. No plugin/theme system and
-  no config file.
+  not a second implementation in the same milestone. No plugin/theme system.
+  (A later, harness-wide deviation added an optional JSON config file below
+  flags and environment; it is not TUI-specific. See
+  [configuration.md](../configuration.md).)
 - Rich text and the table/file/model widgets are M4; image viewing is M5. The
   first usable TUI (M2/M3) renders text without markdown styling plus
   help/details overlays. There are no split panes, tabs, session picker, or

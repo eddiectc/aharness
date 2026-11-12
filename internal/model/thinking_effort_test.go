@@ -398,7 +398,7 @@ func TestOpenAIChatReasoningEffortBody(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			req := Request{Model: "deepseek-v4.1-flash", ThinkingEffort: tc.effort}
 			if tc.streaming {
 				if _, err := adapter.CompleteStream(t.Context(), req, StreamHandler{}); err != nil {
@@ -450,7 +450,7 @@ func TestOpenAIResponsesReasoningEffortBody(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 			req := Request{Model: "crouton-alpha-free", ThinkingEffort: tc.effort}
 			if tc.streaming {
 				if _, err := adapter.CompleteStream(t.Context(), req, StreamHandler{}); err != nil {

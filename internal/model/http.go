@@ -22,8 +22,9 @@ const (
 	maxResponseBody = 1 << 20
 	// maxErrorBody is the largest provider error body retained for logs.
 	maxErrorBody = 4 << 10
-	// requestTimeout bounds one provider request, including body reads.
-	requestTimeout = 15 * time.Minute
+	// DefaultHTTPTimeout bounds one provider request, including body reads,
+	// unless the adapter constructor is given another timeout.
+	DefaultHTTPTimeout = 15 * time.Minute
 	// maxSSEEvent bounds one SSE event's data. A terminal Responses event
 	// wraps the full response in JSON.
 	maxSSEEvent = 4 << 20
@@ -45,13 +46,17 @@ type httpTransport struct {
 
 // newHTTPTransport builds the request target and client for one adapter. An
 // empty baseURL selects DefaultBaseURL; a trailing slash on the base URL is
-// trimmed so the dialect path is appended exactly once.
-func newHTTPTransport(baseURL, path, token, sessionID, version string) *httpTransport {
+// trimmed so the dialect path is appended exactly once. A non-positive timeout
+// selects DefaultHTTPTimeout.
+func newHTTPTransport(baseURL, path, token, sessionID, version string, timeout time.Duration) *httpTransport {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	if timeout <= 0 {
+		timeout = DefaultHTTPTimeout
+	}
 	return &httpTransport{
-		client:    &http.Client{Timeout: requestTimeout},
+		client:    &http.Client{Timeout: timeout},
 		url:       strings.TrimRight(baseURL, "/") + path,
 		token:     token,
 		sessionID: sessionID,

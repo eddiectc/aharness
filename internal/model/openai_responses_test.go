@@ -116,7 +116,7 @@ func TestOpenAIResponsesCompleteCanonical(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	got, err := adapter.Complete(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
@@ -231,7 +231,7 @@ func TestOpenAIResponsesToolCallValidation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newStaticServer(t, staticResponse{status: http.StatusOK, body: []byte(tc.body)})
-			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 			if err == nil {
 				t.Fatal("Complete() error = nil, want error")
@@ -258,7 +258,7 @@ func TestOpenAIResponsesOutputItemStrictness(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newStaticServer(t, staticResponse{status: http.StatusOK, body: tc.body})
-			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 			if err == nil {
 				t.Fatal("Complete() error = nil, want error")
@@ -358,7 +358,7 @@ func TestOpenAIResponsesFinishNormalization(t *testing.T) {
 			body := "{" + strings.Join(fields, ",") + "}"
 
 			srv := newStaticServer(t, staticResponse{status: http.StatusOK, body: []byte(body)})
-			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 			got, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 			if tc.wantError {
 				if err == nil {
@@ -391,7 +391,7 @@ func TestOpenAIResponsesOmitsUnsetOutputBudget(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	if _, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"}); err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}

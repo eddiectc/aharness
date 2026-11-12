@@ -6,7 +6,9 @@ are defined there, and it wins over other docs on Go practice. Product scope
 and milestones live in [docs/plans/v1-build.md](docs/plans/v1-build.md) (v0
 history is in [docs/plans/v0-build.md](docs/plans/v0-build.md)); system
 structure, tool behavior, and CLI/config contracts live in
-[docs/architecture.md](docs/architecture.md); the testing strategy lives in
+[docs/architecture.md](docs/architecture.md); the flag/env/config-file layers
+are in [docs/configuration.md](docs/configuration.md); the testing strategy
+lives in
 [docs/testing-strategy.md](docs/testing-strategy.md). Every implementation and
 build plan verifies against the project-wide
 [docs/definition-of-done.md](docs/definition-of-done.md); feature-specific

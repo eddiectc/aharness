@@ -40,6 +40,7 @@ rewriting its conclusions.
 | Document | Defines |
 |---|---|
 | [architecture.md](architecture.md) | System structure, packages, loop and tool contracts, CLI, and configuration |
+| [configuration.md](configuration.md) | Flag > environment > config file > default precedence, the JSON config file, environment variables, and configurable vs fixed limits |
 | [coding-standard.md](coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [commands.md](commands.md) | Shipped slash commands, autocomplete, arguments, and `-ui-json` mapping |
 | [definition-of-done.md](definition-of-done.md) | Normative completion checklist for every change |

@@ -217,8 +217,10 @@ The details overlay (`Ctrl-X`) shows the observed `turns: N`,
 effective `thinking effort: <value>` (or `provider default`), and the
 configured limits under
 configuration: `max turns: unlimited` (or the integer), `total tokens:
-unlimited` (or a human token count), `run timeout: none` (or a duration), and
-`model timeout: none` (or a duration). Unlimited values never render as `0s`.
+unlimited` (or a human token count), `run timeout: none` (or a duration),
+`model timeout: none` (or a duration), and `http timeout: <duration>`. Run and
+model timeouts never render `0` as a duration, because `0` means "no harness
+deadline"; the HTTP timeout is always positive and always shown.
 
 A resumed or forked session shows the new run's effective values, which are
 unlimited by default; historical recorded budgets are not shown as the current

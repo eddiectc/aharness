@@ -95,8 +95,10 @@ opt-in and unlimited by default.
 - Opt-in cumulative turn/token budgets, an optional per-run wall clock and
   per-call model timeout, context projection with deterministic compaction, and
   typed stop reasons. Run budgets default to unlimited (no deadline).
-- One binary configured by flags and environment; no daemon, config file, or
-  provider matrix.
+- One binary configured by flags, environment, an optional JSON config file
+  (`-config` / `AHARNESS_CONFIG`, default `<state-dir>/config.json`), or built-in
+  defaults, in that order; no daemon, provider matrix, or profile system. See
+  [docs/configuration.md](docs/configuration.md).
 
 Out of scope: hooks, model-based summarization, subagents, RAG/embeddings,
 MCP/plugins, additional provider dialects, built-in evals, price tracking,
@@ -109,6 +111,7 @@ input, or security boundary.
 | Document | What it defines |
 |---|---|
 | [architecture.md](docs/architecture.md) | System structure, packages, loop and tool contracts, CLI and configuration |
+| [configuration.md](docs/configuration.md) | Precedence, the JSON config file, environment variables, and which limits are worth configuring |
 | [limits.md](docs/limits.md) | Caps, limits, and timeouts |
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [tui.md](docs/tui.md) | Shipped TUI modes, keys, `-ui-json` protocol, caps, and verification status |

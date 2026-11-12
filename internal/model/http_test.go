@@ -124,20 +124,43 @@ func requireContextOverflow(t *testing.T, err error) {
 }
 
 func TestNewAdapterTargets(t *testing.T) {
-	chat := NewOpenAIChat("", testToken, testSessionID, testVersion)
+	chat := NewOpenAIChat("", testToken, testSessionID, testVersion, 0)
 	if got, want := chat.transport.url, DefaultBaseURL+"/chat/completions"; got != want {
 		t.Errorf("chat URL = %q, want %q", got, want)
 	}
-	if got, want := chat.transport.client.Timeout, 15*time.Minute; got != want {
+	if got, want := chat.transport.client.Timeout, DefaultHTTPTimeout; got != want {
 		t.Errorf("chat client timeout = %v, want %v", got, want)
 	}
 
-	responses := NewOpenAIResponses("http://provider.test/v1/", testToken, testSessionID, testVersion)
+	responses := NewOpenAIResponses("http://provider.test/v1/", testToken, testSessionID, testVersion, 0)
 	if got, want := responses.transport.url, "http://provider.test/v1/responses"; got != want {
 		t.Errorf("responses URL = %q, want %q", got, want)
 	}
-	if got, want := responses.transport.client.Timeout, 15*time.Minute; got != want {
+	if got, want := responses.transport.client.Timeout, DefaultHTTPTimeout; got != want {
 		t.Errorf("responses client timeout = %v, want %v", got, want)
+	}
+}
+
+func TestNewAdapterTimeoutOverride(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{"explicit positive", 90 * time.Second, 90 * time.Second},
+		{"zero selects the default", 0, DefaultHTTPTimeout},
+		{"negative selects the default", -time.Second, DefaultHTTPTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chat := NewOpenAIChat("", testToken, testSessionID, testVersion, tc.timeout)
+			if got := chat.transport.client.Timeout; got != tc.want {
+				t.Errorf("chat client timeout = %v, want %v", got, tc.want)
+			}
+			responses := NewOpenAIResponses("", testToken, testSessionID, testVersion, tc.timeout)
+			if got := responses.transport.client.Timeout; got != tc.want {
+				t.Errorf("responses client timeout = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -155,7 +178,7 @@ func TestAdapterRequiredHeaders(t *testing.T) {
 			response:  `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`,
 			wantToken: true,
 			newAdapter: func(baseURL, token string) Completer {
-				return NewOpenAIChat(baseURL, token, testSessionID, testVersion)
+				return NewOpenAIChat(baseURL, token, testSessionID, testVersion, 0)
 			},
 		},
 		{
@@ -164,7 +187,7 @@ func TestAdapterRequiredHeaders(t *testing.T) {
 			response:  `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`,
 			wantToken: false,
 			newAdapter: func(baseURL, token string) Completer {
-				return NewOpenAIChat(baseURL, token, testSessionID, testVersion)
+				return NewOpenAIChat(baseURL, token, testSessionID, testVersion, 0)
 			},
 		},
 		{
@@ -173,7 +196,7 @@ func TestAdapterRequiredHeaders(t *testing.T) {
 			response:  `{"status":"completed","output":[]}`,
 			wantToken: true,
 			newAdapter: func(baseURL, token string) Completer {
-				return NewOpenAIResponses(baseURL, token, testSessionID, testVersion)
+				return NewOpenAIResponses(baseURL, token, testSessionID, testVersion, 0)
 			},
 		},
 		{
@@ -182,7 +205,7 @@ func TestAdapterRequiredHeaders(t *testing.T) {
 			response:  `{"status":"completed","output":[]}`,
 			wantToken: false,
 			newAdapter: func(baseURL, token string) Completer {
-				return NewOpenAIResponses(baseURL, token, testSessionID, testVersion)
+				return NewOpenAIResponses(baseURL, token, testSessionID, testVersion, 0)
 			},
 		},
 	}
@@ -272,13 +295,13 @@ func TestAdapterResponseErrors(t *testing.T) {
 		{
 			name: "chat completions",
 			newAdapter: func(baseURL string) Completer {
-				return NewOpenAIChat(baseURL, testToken, testSessionID, testVersion)
+				return NewOpenAIChat(baseURL, testToken, testSessionID, testVersion, 0)
 			},
 		},
 		{
 			name: "responses",
 			newAdapter: func(baseURL string) Completer {
-				return NewOpenAIResponses(baseURL, testToken, testSessionID, testVersion)
+				return NewOpenAIResponses(baseURL, testToken, testSessionID, testVersion, 0)
 			},
 		},
 	}
@@ -310,7 +333,7 @@ func TestContextOverflowMarkers(t *testing.T) {
 		t.Run(message, func(t *testing.T) {
 			body := []byte(`{"error":{"message":` + strconvQuote(message) + `}}`)
 			srv := newStaticServer(t, staticResponse{status: http.StatusBadRequest, body: body})
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 			if err == nil {
 				t.Fatal("Complete() error = nil, want error")
@@ -327,7 +350,7 @@ func TestRetryAfter(t *testing.T) {
 			body:    []byte(`{"error":"slow down"}`),
 			headers: http.Header{"Retry-After": []string{"120"}},
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 		if err == nil {
 			t.Fatal("Complete() error = nil, want error")
@@ -348,7 +371,7 @@ func TestRetryAfter(t *testing.T) {
 			body:    []byte(`{"error":"slow down"}`),
 			headers: http.Header{"Retry-After": []string{when}},
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 		if err == nil {
 			t.Fatal("Complete() error = nil, want error")
@@ -370,7 +393,7 @@ func TestRetryAfter(t *testing.T) {
 				body:    []byte(`{"error":"unavailable"}`),
 				headers: headers,
 			})
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 			if err == nil {
 				t.Fatal("Complete() error = nil, want error")
@@ -386,7 +409,7 @@ func TestRetryAfter(t *testing.T) {
 func TestHTTPErrorBodyRedactionAndCap(t *testing.T) {
 	body := []byte(`{"error":"` + strings.Repeat(testToken+" ", 2000) + `"}`)
 	srv := newStaticServer(t, staticResponse{status: http.StatusInternalServerError, body: body})
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 	if err == nil {
 		t.Fatal("Complete() error = nil, want error")
@@ -411,7 +434,7 @@ func TestTransportError(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	adapter := NewOpenAIChat(url, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(url, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.Complete(t.Context(), Request{Model: "demo-model"})
 	if err == nil {
 		t.Fatal("Complete() error = nil, want error")

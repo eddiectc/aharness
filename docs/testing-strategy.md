@@ -196,6 +196,19 @@ real timeouts for subprocess and signal tests.
   rejection; exit-code mapping; unlimited `0` defaults for turns/tokens/session
   timeout/model timeout; explicit `0` and explicit positive values; negative
   rejection naming the flag; recorded-budget ignoring on resume/fork.
+- Configuration layers: flag > environment > config file > default per setting,
+  including a mixed case where each layer contributes; file-supplied values
+  count as explicit for clamping and clearing; the implicit
+  `<state-dir>/config.json` and `AHARNESS_CONFIG`/`-config` selection with
+  flag-over-environment; `-config ""` disabling the file; an explicit or
+  environment-selected missing file rejected while an absent implicit file is
+  allowed; unknown keys, duplicate keys, wrong types, bare-number durations, and
+  an oversize file rejected; every key validated even when a higher layer
+  overrides it; `-version` bypassing a broken file; and the HTTP/catalog timeout
+  reaching the adapter and catalog source. Integration covers one real run whose
+  model, base URL, workspace, and turn budget come only from the file, a flag
+  beating a file value, the resolved path in the startup log, and a broken file
+  exiting 2 before any session state.
 - Thinking-effort config: flag-over-environment precedence; explicit
   `default`; an explicitly empty flag rejected while an empty environment value
   is unset; malformed syntax, over-32-byte values, and leading non-lowercase

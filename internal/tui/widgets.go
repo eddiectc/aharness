@@ -371,6 +371,7 @@ func (m *App) openDetailsOverlay() tea.Cmd {
 			"total tokens: "+formatMaxTokens(m.info.MaxTotalTokens),
 			"run timeout:  "+formatTimeout(d.SessionTimeout),
 			"model timeout: "+formatTimeout(d.ModelTimeout),
+			"http timeout: "+formatTimeout(d.HTTPTimeout),
 		)
 	}
 	m.overlay.help = lines

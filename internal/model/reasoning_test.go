@@ -16,7 +16,7 @@ func TestChatReasoningMapping(t *testing.T) {
 			body: []byte(`{"choices":[{"message":{"content":"answer","reasoning_content":"step one"},"finish_reason":"stop"}],` +
 				`"usage":{"prompt_tokens":1,"completion_tokens":2}}`),
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -32,7 +32,7 @@ func TestChatReasoningMapping(t *testing.T) {
 			body: []byte(`{"choices":[{"message":{"content":"answer","reasoning":"step one"},"finish_reason":"stop"}],` +
 				`"usage":{"prompt_tokens":1,"completion_tokens":2}}`),
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -48,7 +48,7 @@ func TestChatReasoningMapping(t *testing.T) {
 			body: []byte(`{"choices":[{"message":{"content":"answer","reasoning_content":"preferred","reasoning":"other"},"finish_reason":"stop"}],` +
 				`"usage":{"prompt_tokens":1,"completion_tokens":2}}`),
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -63,7 +63,7 @@ func TestChatReasoningMapping(t *testing.T) {
 			status: 200,
 			body:   []byte(`{"choices":[{"message":{"content":"answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`),
 		})
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "deepseek-v4.1-flash"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -90,7 +90,7 @@ func TestChatStreamReasoningDeltas(t *testing.T) {
 		``,
 	}, "\n")
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	var text, reasoning strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{
 		Text:      func(delta string) error { text.WriteString(delta); return nil },
@@ -116,7 +116,7 @@ func TestChatStreamReasoningIsCapped(t *testing.T) {
 		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n" +
 		"data: [DONE]\n\n"
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	var emitted strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{
 		Reasoning: func(delta string) error { emitted.WriteString(delta); return nil },
@@ -140,7 +140,7 @@ func TestResponsesReasoningMapping(t *testing.T) {
 				`{"type":"message","content":[{"type":"output_text","text":"answer"}]}],` +
 				`"usage":{"input_tokens":1,"output_tokens":2}}`),
 		})
-		adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -162,7 +162,7 @@ func TestResponsesReasoningMapping(t *testing.T) {
 				`{"type":"message","content":[{"type":"output_text","text":"answer"}]}],` +
 				`"usage":{"input_tokens":1,"output_tokens":2}}`),
 		})
-		adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 		resp, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 		if err != nil {
 			t.Fatalf("Complete() error = %v", err)
@@ -189,7 +189,7 @@ func TestResponsesStreamReasoningDeltas(t *testing.T) {
 		``,
 	}, "\n")
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	var text, reasoning strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{
 		Text:      func(delta string) error { text.WriteString(delta); return nil },
@@ -221,7 +221,7 @@ func TestResponsesStreamTerminalReasoningWins(t *testing.T) {
 		``,
 	}, "\n")
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{
 		Reasoning: func(string) error { return nil },
 	})
@@ -243,7 +243,7 @@ func TestResponsesReasoningIsCapped(t *testing.T) {
 		`{"type":"message","content":[{"type":"output_text","text":"answer"}]}],` +
 		`"usage":{"input_tokens":1,"output_tokens":2}}`
 	srv := newStaticServer(t, staticResponse{status: 200, body: []byte(body)})
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	resp, err := adapter.Complete(t.Context(), Request{Model: "crouton-alpha-free"})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)

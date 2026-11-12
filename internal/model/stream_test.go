@@ -71,7 +71,7 @@ func TestOpenAIChatCompleteStream(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var emitted strings.Builder
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{Text: func(delta string) error {
 		emitted.WriteString(delta)
 		return nil
@@ -108,7 +108,7 @@ func TestOpenAIChatCompleteStreamNonSSEFallback(t *testing.T) {
 		status: http.StatusOK,
 		body:   []byte(`{"choices":[{"message":{"content":"plain"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}`),
 	})
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	var emitted strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{Text: func(delta string) error {
 		emitted.WriteString(delta)
@@ -155,7 +155,7 @@ func TestOpenAIChatStreamProtocolErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newSSEServer(t, tc.body)
-			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{})
 			if err == nil {
 				t.Fatal("CompleteStream() error = nil, want error")
@@ -171,7 +171,7 @@ func TestOpenAIChatStreamPartialError(t *testing.T) {
 		``,
 	}, "\n")
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{})
 	if err == nil {
 		t.Fatal("CompleteStream() error = nil, want error")
@@ -191,7 +191,7 @@ func TestOpenAIChatStreamCaps(t *testing.T) {
 		huge := strings.Repeat("x", MaxCanonicalResponse+1)
 		body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"" + huge + "\"}}]}\n\n"
 		srv := newSSEServer(t, body)
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		_, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{})
 		if err == nil {
 			t.Fatal("CompleteStream() error = nil, want error")
@@ -202,7 +202,7 @@ func TestOpenAIChatStreamCaps(t *testing.T) {
 		huge := strings.Repeat("x", maxSSEEvent+1)
 		body := "data: " + huge + "\n\n"
 		srv := newSSEServer(t, body)
-		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+		adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 		_, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{})
 		if err == nil {
 			t.Fatal("CompleteStream() error = nil, want error")
@@ -219,7 +219,7 @@ func TestOpenAIChatStreamCommentsCRLFAndMultiline(t *testing.T) {
 		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\r\n\r\n" +
 		"data: [DONE]\r\n\r\n"
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	var emitted strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{Text: func(delta string) error {
 		emitted.WriteString(delta)
@@ -271,7 +271,7 @@ func TestOpenAIResponsesCompleteStream(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var emitted strings.Builder
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{Text: func(delta string) error {
 		emitted.WriteString(delta)
 		return nil
@@ -304,7 +304,7 @@ func TestOpenAIResponsesCompleteStreamNonSSEFallback(t *testing.T) {
 		status: http.StatusOK,
 		body:   []byte(`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"plain"}]}],"usage":{"input_tokens":2,"output_tokens":3}}`),
 	})
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	var emitted strings.Builder
 	resp, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{Text: func(delta string) error {
 		emitted.WriteString(delta)
@@ -350,7 +350,7 @@ func TestOpenAIResponsesStreamProtocolErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newSSEServer(t, tc.body)
-			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+			adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 			_, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{})
 			if err == nil {
 				t.Fatal("CompleteStream() error = nil, want error")
@@ -366,7 +366,7 @@ func TestOpenAIResponsesStreamPartialError(t *testing.T) {
 		``,
 	}, "\n")
 	srv := newSSEServer(t, body)
-	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIResponses(srv.URL, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.CompleteStream(t.Context(), Request{Model: "crouton-alpha-free"}, StreamHandler{})
 	if err == nil {
 		t.Fatal("CompleteStream() error = nil, want error")
@@ -388,7 +388,7 @@ func TestSSEDecoderTransportErrorAfterDelta(t *testing.T) {
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion)
+	adapter := NewOpenAIChat(srv.URL, testToken, testSessionID, testVersion, 0)
 	_, err := adapter.CompleteStream(t.Context(), Request{Model: "deepseek-v4.1-flash"}, StreamHandler{})
 	if err == nil {
 		t.Fatal("CompleteStream() error = nil, want error")

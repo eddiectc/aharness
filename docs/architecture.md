@@ -163,8 +163,9 @@ dialect, not a neutral standard, so it is not the canonical model either.
 Each adapter owns the wire format, authentication, tool-schema translation, and
 the mapping of finish reasons, usage, and errors. It uses one `http.Client` with
 a timeout and `http.NewRequestWithContext`, always closes and caps the response
-body at 1 MiB, and never uses `http.DefaultClient`. Provider error bodies are
-capped and redacted before logging.
+body at 1 MiB, and never uses `http.DefaultClient`. The client timeout defaults
+to 15 minutes and is selectable with `-http-timeout` / `AHARNESS_HTTP_TIMEOUT` /
+`http_timeout`. Provider error bodies are capped and redacted before logging.
 
 | Layer | Owns |
 |---|---|
@@ -364,6 +365,7 @@ cmd/aharness/
   run.go         # mode selection, batch wiring, exit codes, work directories
   models.go      # catalog wiring, model resolution, list/refresh terminal actions
   config.go      # parsing, validation, inheritance, discovery resolution
+  fileconfig.go  # optional JSON config file: schema, load, layered resolution
   control.go     # operation controller and batch signal delivery
   tui.go         # TUI host, session shell, -ui-json wiring, summary
   textsink.go    # streamed stdout newline handling
@@ -1045,8 +1047,11 @@ The examples target the hosted `opencode-go` endpoint and assume
 empty token for local no-auth endpoints and tests (Section 2.1).
 
 - Use the standard `flag` package; no CLI framework.
-- Precedence: defaults, then environment, then flags. Parse environment errors
-  as config errors; validate the effective config once before the run.
+- Precedence, per setting and highest first: explicit flag, environment, config
+  file, built-in default. Parse environment and config-file errors as config
+  errors; validate the effective config once before the run. The config file is
+  [configuration.md](configuration.md)'s contract; `-config`/`AHARNESS_CONFIG`
+  select it and `<state-dir>/config.json` is the optional default.
 - `-provider` or `AHARNESS_PROVIDER` selects the provider and defaults to
   `opencode-go`; there is no provider matrix. An unknown provider is a config
   error (exit 2) listing `opencode-go`. `-model` or `AHARNESS_MODEL` is
@@ -1140,9 +1145,12 @@ empty token for local no-auth endpoints and tests (Section 2.1).
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
 - `-max-turns`, `-max-total-tokens`, `-session-timeout`, `-model-timeout`,
-  `-max-context-tokens`, and `-max-output-tokens` are CLI flags. The four run
-  budgets and `-max-output-tokens` have no environment variable;
-  `-max-context-tokens` also honors `AHARNESS_MAX_CONTEXT_TOKENS`. The four run
+  `-max-context-tokens`, and `-max-output-tokens` are configurable through a
+  flag, an environment variable, and a config-file key. The matching variables
+  are `AHARNESS_MAX_TURNS`, `AHARNESS_MAX_TOTAL_TOKENS`,
+  `AHARNESS_SESSION_TIMEOUT`, `AHARNESS_MODEL_TIMEOUT`,
+  `AHARNESS_MAX_CONTEXT_TOKENS`, and `AHARNESS_MAX_OUTPUT_TOKENS`; see
+  [configuration.md](configuration.md) for the key names. The four run
   budgets default to `0`: `-max-turns` and
   `-max-total-tokens` are unlimited, and `-session-timeout`/`-model-timeout`
   impose no deadline. An omitted flag or an explicit `0` is unlimited; an
@@ -1150,8 +1158,8 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   config error. Recorded run budgets are historical: resume/fork does not
   inherit or enforce `max_turns`, `max_total_tokens`, `session_timeout_ms`, or
   `model_timeout_ms`, and new `session_start`/`run_start` events record `0`
-  unless the corresponding flag is explicit. At-or-over session checks apply
-  only to an explicit positive turn/token flag. `AHARNESS_MAX_CONTEXT_TOKENS`
+  unless the corresponding setting is explicit. At-or-over session checks apply
+  only to an explicit positive turn/token budget. `AHARNESS_MAX_CONTEXT_TOKENS`
   sets the context window explicitly. For a new session, context defaults to
   the catalog `limit.context`; `-max-context-tokens` defaults to 0 (unset), an
   explicit positive value is clamped down to the model ceiling with a warning,
@@ -1241,18 +1249,25 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   setup/sync/close/protocol-I/O/internal failure 1. `-batch` keeps the
   `StopReason` mapping (completed 0, limits 2, provider 3, protocol/stuck 4,
   interrupted 130, internal 1).
-- No config file. The TUI owns interactive input and signals; batch is
-  non-interactive and has no steering. The `-ui-json` v1 protocol is the
-  machine-readable UI surface.
+- The optional JSON config file (`-config` / `AHARNESS_CONFIG`, default
+  `<state-dir>/config.json`) supplies the subset of settings that are not
+  per-invocation: model, provider, workspace, base URL, catalog URL, thinking
+  effort, the run budgets and timeouts, and the usage/logging switches. It
+  never holds the provider token, the state directory, the task, or a session
+  ID. The TUI owns interactive input and signals; batch is non-interactive and
+  has no steering. The `-ui-json` v1 protocol is the machine-readable UI
+  surface.
 
 Defaults are deliberately conservative and easy to change:
 
 | Setting | Default |
 |---|---|
+| Config file | `<state-dir>/config.json` (`-config` / `AHARNESS_CONFIG`; optional, JSON) |
+| Precedence | flag > environment > config file > default |
 | Provider | `opencode-go` (`-provider` / `AHARNESS_PROVIDER`) |
 | Catalog | `https://models.dev/api.json` (`AHARNESS_MODELS_DEV_URL` override) |
 | Catalog cache TTL | 24 hours |
-| Catalog request timeout | 15 seconds |
+| Catalog request timeout | 15 seconds (`-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT`) |
 | Catalog response body | 16 MiB |
 | Max turns | 0 (unlimited; `-max-turns`) |
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
@@ -1263,6 +1278,7 @@ Defaults are deliberately conservative and easy to change:
 | Max total tokens | 0 (unlimited; `-max-total-tokens`) |
 | Max run wall clock | 0 (none; `-session-timeout`) |
 | Model call timeout | 0 (none; `-model-timeout`) |
+| HTTP client timeout | 15 minutes (`-http-timeout` / `AHARNESS_HTTP_TIMEOUT`) |
 | `run_command` timeout | 120 seconds (max 600) |
 | Tool result cap | 60 KiB file tools; 64 KiB command output plus a spill path |
 | `read_file` window | 2,000 lines (max 4,000), contiguous, 60 KiB |

@@ -239,6 +239,7 @@ func (h *tuiHost) Details() tui.Details {
 		MaxOutputUnset:   h.cfg.MaxOutputTokens == 0,
 		SessionTimeout:   h.cfg.SessionTimeout,
 		ModelTimeout:     h.cfg.ModelTimeout,
+		HTTPTimeout:      h.cfg.HTTPTimeout,
 		ThinkingEffort:   h.cfg.ThinkingEffort,
 	}
 }

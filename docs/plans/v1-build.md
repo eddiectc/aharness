@@ -3,7 +3,10 @@
 - **Date:** 2026-11-10
 - **Status:** implemented (M0–M3); real-provider streamed smoke pending
   credentials in this environment. Mock-provider, integration, fuzz, and gate
-  checks pass.
+  checks pass. **Deviation:** the v1 "no config file" decision was later
+  reversed. Aharness now supports an optional JSON config file below flags and
+  environment; see [configuration.md](../configuration.md) and the deviation
+  noted in §1.2.
 - **Source:** [v0 build plan](v0-build.md); v0 is complete, including both
   dialect smoke runs.
 - **Research:** [Bare-Minimum Agent Harness](../research/agent-harness-minimum.md). v1
@@ -49,8 +52,9 @@ evaluation platform.
 - `os.Root` containment, `.git` protection, symlink policy, command environment
   allowlist, and output caps.
 - The canonical model, deterministic compaction, and the projection constants.
-- One process, one loop, one writer; no daemon, UI, config file, or plugin
-  system.
+- One process, one loop, one writer; no daemon, UI, or plugin system. (A later
+  deviation added an optional JSON config file: see
+  [configuration.md](../configuration.md).)
 - No built-in isolation or approval. External isolation remains the operator's
   responsibility.
 

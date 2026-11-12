@@ -147,6 +147,7 @@ type Details struct {
 	MaxOutputUnset   bool
 	SessionTimeout   time.Duration
 	ModelTimeout     time.Duration
+	HTTPTimeout      time.Duration
 	ThinkingEffort   string
 }
 
