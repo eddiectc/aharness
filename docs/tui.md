@@ -58,6 +58,7 @@ submitted message while idle starts one run.
 | `Ctrl-W`/`Ctrl-K` | delete previous word / to end | delete previous word / to end |
 | `Up`/`Down` | input history | input history |
 | `PgUp`/`PgDn` | scroll the transcript | scroll the transcript |
+| Mouse wheel | scroll the transcript or the top overlay | scroll the transcript or the top overlay |
 | `Ctrl-R` | toggle rich/raw assistant rendering; in the model picker, refresh the catalog | toggle rich/raw |
 | `Ctrl-T` | most recent markdown table overlay | table overlay |
 | `Ctrl-G` | image viewer for the most recent image block | image viewer |
@@ -279,6 +280,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Minimum terminal | 40×10 | Smaller shows a resize message and keeps quit/resize keys. |
 | Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
 | Escape timeout | 50 ms | Bare Esc; modified sequences never interrupt. |
+| Mouse wheel | 3 lines per notch | Scrolls the transcript, or the top overlay when one is open. Clicks, releases, motion, and horizontal wheel events are ignored; focus reporting stays off. |
 | Display queue | 256 events | Backpressure; display text deltas are not durable. |
 | `-ui-json` command line / text | 1 MiB / 64 KiB | Longer is a protocol error. |
 | `-ui-json` frame line | 1 MiB | Over-cap emits `frame_too_large` and continues. |
@@ -310,5 +312,15 @@ when `AHARNESS_IMAGE_PROTOCOL=auto|kitty` selects it. `glyph` and `none` force
 the universal fallback or placeholders; `-ui-json` always forces glyph. Kitty
 placements are cleared on viewer close, resize, and exit.
 
-Mouse and focus reporting are disabled. Bubble Tea/ultraviolet owns raw mode,
-the alternate screen, bracketed paste, resize, cursor, and restoration.
+Bubble Tea/ultraviolet owns raw mode, the alternate screen, bracketed paste,
+resize, cursor, and restoration.
+
+Mouse reporting is limited to the scroll wheel. `View()` selects Bubble Tea cell
+motion (SGR button events), which reports clicks, releases, and wheel notches but
+not hover; clicks, releases, and motion are ignored. The wheel scrolls the
+transcript by three lines per notch, so `PgUp`/`PgDn` remain the keyboard
+equivalent. Scrolling up detaches the live tail and scrolling back to the bottom
+re-attaches it. With an overlay open the wheel scrolls that overlay instead: the
+help and details panels scroll their text, the table moves its row cursor, and
+the file/model/effort pickers move their selection. Horizontal wheel events do
+nothing. Terminal focus reporting stays disabled.

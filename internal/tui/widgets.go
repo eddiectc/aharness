@@ -117,6 +117,36 @@ func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
 	return nil
 }
 
+// wheel scrolls the top overlay by one wheel notch. Overlays without a vertical
+// list or scroll area ignore it, so the wheel never leaks into the transcript
+// while a modal is open.
+func (o *overlayState) wheel(up bool) {
+	switch o.kind {
+	case OverlayHelp, OverlayDetails:
+		if up {
+			o.scroll = max(0, o.scroll-mouseWheelLines)
+		} else {
+			o.scroll += mouseWheelLines
+		}
+	case OverlayTable:
+		if o.table != nil {
+			o.table.wheel(up)
+		}
+	case OverlayFile:
+		if o.file != nil {
+			o.file.wheel(up)
+		}
+	case OverlayModel:
+		if o.model != nil {
+			o.model.wheel(up)
+		}
+	case OverlayEffort:
+		if o.effort != nil {
+			o.effort.wheel(up)
+		}
+	}
+}
+
 func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.Keystroke()
 	switch key {
@@ -212,6 +242,20 @@ func boxInner(width, height int) (int, int) {
 	return max(10, boxW-4), max(3, boxH-2)
 }
 
+// wheelList moves a Bubbles list cursor by one wheel notch. The list has no
+// separate scroll position, so the cursor is the scroll; moving it past a page
+// boundary turns the page, and the clamps at each end come from CursorUp and
+// CursorDown themselves.
+func wheelList(l *list.Model, up bool) {
+	for range mouseWheelLines {
+		if up {
+			l.CursorUp()
+			continue
+		}
+		l.CursorDown()
+	}
+}
+
 func renderScroll(lines []string, width, height, offset int) string {
 	if len(lines) == 0 {
 		return ""
@@ -238,7 +282,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"Ctrl-A / Ctrl-E  composer start / end",
 		"Ctrl-W / Ctrl-K  delete previous word / to end",
 		"Up / Down        input history",
-		"PgUp / PgDn      scroll the transcript",
+		"PgUp / PgDn      scroll the transcript (mouse wheel also scrolls)",
 		"Ctrl-R           toggle rich/raw rendering",
 		"Ctrl-T           table overlay",
 		"Ctrl-G           image viewer",
@@ -249,7 +293,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"",
 		t.dim.Render("Slash commands: Up/Down select, Tab complete, Enter run."),
 		t.dim.Render("Esc dismisses the menu; unknown /text is sent as a message."),
-		t.dim.Render("Mouse reporting is disabled. Terminal output is sanitized."),
+		t.dim.Render("Mouse reporting is on for the scroll wheel only; clicks are inert."),
 	)
 	m.overlay.help = lines
 	m.overlay.push(OverlayHelp)
@@ -402,6 +446,14 @@ func (to *tableOverlay) update(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+func (to *tableOverlay) wheel(up bool) {
+	if up {
+		to.table.MoveUp(mouseWheelLines)
+		return
+	}
+	to.table.MoveDown(mouseWheelLines)
+}
+
 func (to *tableOverlay) view(width, height int) string {
 	lines := strings.Split(to.table.View(), "\n")
 	if len(lines) > height-1 {
@@ -539,6 +591,8 @@ func (f *fileOverlay) view() string {
 	}
 	return f.list.View()
 }
+
+func (f *fileOverlay) wheel(up bool) { wheelList(&f.list, up) }
 
 func (f *fileOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.Keystroke()
@@ -739,6 +793,8 @@ func (mo *modelOverlay) view() string {
 	return strings.Join([]string{mo.list.View(), footer}, "\n")
 }
 
+func (mo *modelOverlay) wheel(up bool) { wheelList(&mo.list, up) }
+
 func (mo *modelOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	if msg.Keystroke() == "enter" {
 		item, ok := mo.list.SelectedItem().(modelItem)
@@ -839,6 +895,8 @@ func (eo *effortOverlay) resize(width, height int) {
 func (eo *effortOverlay) view() string {
 	return strings.Join([]string{eo.list.View(), "Enter select · Esc close"}, "\n")
 }
+
+func (eo *effortOverlay) wheel(up bool) { wheelList(&eo.list, up) }
 
 func (eo *effortOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	if msg.Keystroke() == "enter" {

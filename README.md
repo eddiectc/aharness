@@ -74,7 +74,8 @@ opt-in and unlimited by default.
   display-only `thinking` block for model reasoning, tool
   activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
   a workspace file picker, catalog-backed next-run model and thinking-effort
-  pickers, details and help overlays, and workspace-contained images. One
+  pickers, details and help overlays, workspace-contained images, and mouse
+  wheel scrolling. One
   process owns one session and may execute one run per submitted message.
   Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
   `/provider`, `/details`, `/files`, `/table`, `/image`, `/rich`/`/raw`,

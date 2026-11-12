@@ -282,6 +282,12 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
+	case tea.MouseWheelMsg:
+		return m, m.handleMouseWheel(msg)
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		// Only the wheel scrolls; clicks, drags, and motion stay inert so the
+		// composer and transcript never act on an accidental click.
+		return m, nil
 	case tea.PasteMsg:
 		m.insertInput(Sanitize(msg.Content))
 		return m, nil
@@ -382,6 +388,44 @@ func (m *App) snapshot() StateSnapshot {
 		RunFinished: m.runFinishedCount,
 		Composer:    m.composer.Value(),
 	}
+}
+
+// handleMouseWheel scrolls the transcript, or the scrollable top overlay. The
+// wheel never selects text, clicks, or moves the composer cursor.
+func (m *App) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
+	up := false
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		up = true
+	case tea.MouseWheelDown:
+	default:
+		// Horizontal wheel events have no vertical meaning here.
+		return nil
+	}
+	if m.overlay.kind != OverlayNone {
+		m.overlay.wheel(up)
+		return nil
+	}
+	m.scrollTranscript(up, mouseWheelLines)
+	return nil
+}
+
+// scrollTranscript moves the transcript by lines. Scrolling up stops
+// following the live tail; returning to the bottom resumes following, exactly
+// as PgUp/PgDn do. A scroll that cannot move keeps the current follow state so
+// a stray notch at the top or bottom never detaches a live stream.
+func (m *App) scrollTranscript(up bool, lines int) {
+	m.ensureContent()
+	offset := m.viewport.YOffset()
+	if up {
+		m.viewport.ScrollUp(lines)
+		if m.viewport.YOffset() != offset {
+			m.follow = false
+		}
+		return
+	}
+	m.viewport.ScrollDown(lines)
+	m.follow = m.viewport.AtBottom()
 }
 
 func (m *App) setSize(width, height int) tea.Cmd {
@@ -565,12 +609,10 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.recallHistory(1)
 		return nil
 	case "pgup":
-		m.follow = false
-		m.viewport.PageUp()
+		m.scrollTranscript(true, m.viewport.Height())
 		return nil
 	case "pgdown":
-		m.viewport.PageDown()
-		m.follow = m.viewport.AtBottom()
+		m.scrollTranscript(false, m.viewport.Height())
 		return nil
 	case "ctrl+u":
 		m.clearComposer()
@@ -806,7 +848,6 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		}
 		m.run.thinking.text = CapText(m.run.thinking.text+Sanitize(ev.Text), maxThinkingItemText)
 		m.dirty = true
-		m.follow = true
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
 		}
@@ -829,7 +870,6 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.run.streamed.text = CapText(m.run.streamed.text+Sanitize(ev.Text), maxTranscriptItemText)
 		m.dirty = true
 		m.run.streamed.renderedSet = false
-		m.follow = true
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
 		}

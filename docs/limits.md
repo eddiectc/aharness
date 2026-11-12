@@ -203,6 +203,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Minimum terminal size | 40×10 | Below shows a resize message; quit/resize keys still work. |
 | Frame coalescing | 16 ms | Text deltas coalesce; state changes flush immediately. |
 | Escape timeout | 50 ms | A lone Esc is delivered; modified sequences never interrupt. |
+| Mouse wheel | 3 lines per notch | Scrolls the transcript, or the top overlay when one is open. Clicks, releases, motion, and horizontal wheel events are ignored; focus reporting stays off. |
 | Display queue | 256 events | Backpressure; text deltas are not durable. |
 | Slash-command menu | 8 rows | Filtered by command name/alias; scrolls to the selection; shrinks to keep the header, one transcript row, composer, and status visible. |
 | TUI catalog refresh | `Ctrl-R` in the model picker | Idle only; reuses the catalog timeout/body/cache caps; no `-ui-json` protocol version change. |

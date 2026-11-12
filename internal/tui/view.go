@@ -16,6 +16,10 @@ import (
 const (
 	minWidth  = 40
 	minHeight = 10
+
+	// mouseWheelLines is one wheel notch. It matches the viewport's own
+	// default wheel delta so the mouse and PgUp/PgDn feel consistent.
+	mouseWheelLines = 3
 )
 
 type uiTheme struct {
@@ -73,7 +77,9 @@ func newTheme(noColor bool) uiTheme {
 func (m *App) View() tea.View {
 	view := tea.NewView("")
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeNone
+	// Cell-motion mode is click/release/wheel only; the app ignores clicks
+	// and uses the wheel to scroll. All-motion (hover) reporting stays off.
+	view.MouseMode = tea.MouseModeCellMotion
 	view.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	if !m.ready || m.width <= 0 || m.height <= 0 {
 		return view
