@@ -346,8 +346,11 @@ and writes no new session events. A v0 or unknown schema log is a config error
   tool execution, so every executed tool call is fully recorded.
 - `<state>/work/<session-id>` is removed and recreated at the start of every
   run, and removed best-effort at the end. A failure to clear a stale work
-  directory is a startup failure (exit 1), not a silent reuse. Child
-  `HOME`/`TMPDIR` are per-run and are not durable.
+  directory is a startup failure (exit 1), not a silent reuse. Cleanup restores
+  owner access before retrying once, so a child that leaves read-only
+  directories cannot wedge later runs. Child `TMPDIR` is per-run and is not
+  durable; `HOME` is inherited so git and other tools see the user's identity
+  and configuration.
 - The session log remains `<state>/sessions/<id>.jsonl`, mode 0600, with the
   state directory at 0700. Resume and fork verify the source log's mode; a
   broader mode is a startup error. No rotation or retention policy in v1.
@@ -484,6 +487,7 @@ run on a schedule. No real network in CI.
 | D16 | Record and inherit the provider base URL; reject URL userinfo and query/fragment. | A local/test resume must not silently target the hosted endpoint, and the log must not capture URL credentials. | Low. |
 | D17 | No built-in isolation or approval in v1. | Keeps the external-sandbox posture; the harness owns the loop, not the boundary. | High if built-in isolation becomes required. |
 | D18 | 4 MiB per SSE event, 1 MiB assembled response, 8 MiB total stream; 1 MiB `model_response` log and 4 MiB session line. | A terminal Responses event wraps the full response in JSON; a 1 MiB response must be fully logged for replay. | Medium; log size and memory. |
+| D19 | `run_command` inherits the host `HOME`; only `TMPDIR` is harness-owned. The work directory is still removed and recreated per run. | A harness-owned `HOME` broke `git commit` (no `user.email`), `safe.directory`, credential helpers, and `includeIf` rules, and defeated every cache, while buying no containment: the child runs with the harness's privileges and reads any path by absolute name. Isolation is external (bwrap, container, VM), where a container-scoped home already provides the same seam. `TMPDIR` stays harness-owned because the host `/tmp` may be `noexec`, size-limited, or cleaned mid-session. | Low; a future `-child-home` flag can restore a redirected home for untrusted runs. |
 
 ### 5.2 Risks
 

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -302,8 +303,8 @@ func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *
 // executeRun prepares the work directory, installs signals and streaming, and
 // performs one run over an already-open session.
 func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID string, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger, opts agent.RunOptions, action string) int {
-	workDir, homeDir, tmpDir := workPaths(cfg.StateDir, sessionID)
-	if err := resetWorkDirs(workDir, homeDir, tmpDir); err != nil {
+	workDir, tmpDir := workPaths(cfg.StateDir, sessionID)
+	if err := resetWorkDirs(workDir, tmpDir); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitSetup
 	}
@@ -337,7 +338,7 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 	if sink != nil {
 		rcfg.Display = textDisplay(sink)
 	}
-	registry := tools.NewRegistry(ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir, WorkDir: workDir})
+	registry := tools.NewRegistry(ws, tools.Options{TmpDir: tmpDir, WorkDir: workDir})
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
 	result, runErr := runner.Run(runCtx, opts)
@@ -521,16 +522,18 @@ func checkWritable(dir string) error {
 	return removeErr
 }
 
-func workPaths(stateDir, sessionID string) (workDir, homeDir, tmpDir string) {
+// workPaths returns the per-session work directory and the harness-owned TMPDIR
+// the child receives. HOME is deliberately not redirected; see commandEnv.
+func workPaths(stateDir, sessionID string) (workDir, tmpDir string) {
 	workDir = filepath.Join(stateDir, "work", sessionID)
-	return workDir, filepath.Join(workDir, "home"), filepath.Join(workDir, "tmp")
+	return workDir, filepath.Join(workDir, "tmp")
 }
 
 // resetWorkDirs removes any stale per-session work tree and recreates the
-// harness-owned HOME and TMPDIR. A failure to clear it is a startup failure,
-// not a silent reuse.
-func resetWorkDirs(workDir, homeDir, tmpDir string) error {
-	if err := os.RemoveAll(workDir); err != nil {
+// harness-owned TMPDIR. A failure to clear it is a startup failure, not a
+// silent reuse.
+func resetWorkDirs(workDir, tmpDir string) error {
+	if err := removeTree(workDir); err != nil {
 		return fmt.Errorf("clear work directory %s: %w", workDir, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(workDir), 0o700); err != nil {
@@ -542,13 +545,11 @@ func resetWorkDirs(workDir, homeDir, tmpDir string) error {
 	if err := os.Chmod(workDir, 0o700); err != nil {
 		return fmt.Errorf("set work directory mode %s: %w", workDir, err)
 	}
-	for _, dir := range []string{homeDir, tmpDir} {
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			return fmt.Errorf("create work directory %s: %w", dir, err)
-		}
-		if err := os.Chmod(dir, 0o700); err != nil {
-			return fmt.Errorf("set work directory mode %s: %w", dir, err)
-		}
+	if err := os.Mkdir(tmpDir, 0o700); err != nil {
+		return fmt.Errorf("create work directory %s: %w", tmpDir, err)
+	}
+	if err := os.Chmod(tmpDir, 0o700); err != nil {
+		return fmt.Errorf("set work directory mode %s: %w", tmpDir, err)
 	}
 	return nil
 }
@@ -556,9 +557,68 @@ func resetWorkDirs(workDir, homeDir, tmpDir string) error {
 // removeWorkDir removes the per-session work tree best-effort. A failure is
 // reported with the leftover path and never changes the terminal status.
 func removeWorkDir(dir string, stderr io.Writer) {
-	if err := os.RemoveAll(dir); err != nil {
+	if err := removeTree(dir); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: cleanup leftover work directory %s: %v\n", dir, sanitizeText(err.Error()))
 	}
+}
+
+// removeTree removes dir and its contents, including trees a child command left
+// without owner write permission on some directories. os.RemoveAll cannot unlink
+// entries from a directory it may not write to, so a module cache or an
+// extracted archive in the harness-owned TMPDIR (created read-only by the tool
+// that produced it) would otherwise make every later run fail to start. Removal
+// retries once after restoring owner access on every directory in the tree.
+func removeTree(dir string) error {
+	err := os.RemoveAll(dir)
+	if err == nil || !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	if chmodErr := restoreOwnerAccess(dir); chmodErr != nil {
+		return errors.Join(err, chmodErr)
+	}
+	return os.RemoveAll(dir)
+}
+
+// restoreOwnerAccess adds owner read, write, and search permission to dir and
+// every directory beneath it so removal can unlink their entries. It never
+// follows a symlink and skips entries that disappeared.
+func restoreOwnerAccess(dir string) error {
+	info, err := os.Lstat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	}
+	if !info.IsDir() {
+		// RemoveAll unlinks a non-directory from its parent, so the entry's own
+		// mode cannot block removal.
+		return nil
+	}
+	if err := os.Chmod(dir, info.Mode().Perm()|0o700); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		// ReadDir reports a symlink as a non-directory, so this never follows
+		// one out of the tree.
+		if !entry.IsDir() {
+			continue
+		}
+		if err := restoreOwnerAccess(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func lastSeq(events []session.Event) uint64 {

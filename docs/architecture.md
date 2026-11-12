@@ -581,6 +581,8 @@ schema version.
    and repairs unpaired calls in the copy. The parent is never modified.
 3. Remove and recreate `<state>/work/<session-id>` before the run. A failure to
    clear a stale directory is a startup failure (exit 1), not a silent reuse.
+   Cleanup restores owner access before retrying once, so read-only directories
+   left by a child cannot wedge later runs.
 4. Append `run_start` with a UUIDv7 `run_id`, `resumed_from_seq`, effective
    model/dialect/base URL/context/output values, the recorded run budgets
    (`0` unless explicitly set), prompt/toolset/harness versions, and
@@ -775,25 +777,30 @@ the open file (fchmod, not path-based `Chmod`), `f.Sync`, close, then
 `Root.Rename`; remove the temp file on error. New files use mode 0644.
 
 `run_command` receives an explicit allowlist, never `os.Environ`: `PATH`,
-`LANG`, `LC_ALL`, `TERM`, and harness-set `HOME` and `TMPDIR`. `HOME` and
-`TMPDIR` point at harness-owned directories under the state dir, not the user's
-home, so child commands do not pick up the user's dotfiles, caches, or
-credentials by default: `<state>/work/<session-id>/home` and
-`<state>/work/<session-id>/tmp`, created with mode 0700 when the session starts.
-They are session scratch, not durable storage: the runner removes
+`LANG`, `LC_ALL`, `TERM`, `HOME`, and a harness-set `TMPDIR`. `HOME` is
+inherited unchanged: it is where git, ssh, and language toolchains find user
+identity and configuration, and replacing it silently breaks `git commit` with
+no `user.email`. A harness-owned `HOME` would buy no containment anyway, because
+the child runs with the harness's privileges and can read any path by absolute
+name; the boundary is external isolation. `TMPDIR` points at a harness-owned
+directory under the state dir, `<state>/work/<session-id>/tmp`, created with mode
+0700 when the session starts, because the host `/tmp` may be mounted `noexec`,
+size-limited, or cleaned while a long session runs.
+It is session scratch, not durable storage: the runner removes
 `<state>/work/<session-id>` after the session log is synced and closed, on every
 terminal path including signal and internal error. Cleanup is best-effort; if
 removal fails, the run reports the leftover path on stderr and leaves it for
-inspection. The workspace is the intended place for durable task artifacts;
-child `HOME`/`TMPDIR` are ephemeral. An explicit denylist rejects any allowlisted
-name matching `*_TOKEN`, `*_SECRET`, `*_KEY`, or `*_PASSWORD`
-(case-insensitive); this is defense in depth, not a boundary. The child never
-inherits provider credentials or unrelated host variables. This is hygiene, not
-isolation; a child process can still inspect the harness process. Use external
-isolation when that matters. v1 deliberately does not use the host `/tmp` for
-these paths: `/tmp` may be mounted `noexec`, size-limited, or cleaned while a
-long session runs. The state dir is configurable; point it at fast local disk
-if needed.
+inspection, and because a child may leave directories without owner write
+permission, cleanup restores owner access before retrying once. The workspace is
+the intended place for durable task artifacts; child `TMPDIR` is ephemeral. An
+explicit denylist rejects any allowlisted name matching `*_TOKEN`, `*_SECRET`,
+`*_KEY`, or `*_PASSWORD` (case-insensitive); this is defense in depth, not a
+boundary. The child never inherits provider credentials or unrelated host
+variables. This is hygiene, not isolation; a child process can still inspect the
+harness process and read the user's home by absolute path. Use external
+isolation when that matters, and run the harness inside bwrap, a container, or a
+VM with a container-scoped home when the child needs config isolation. The state
+dir is configurable; point it at fast local disk if needed.
 
 The tool descriptions and JSON schemas are versioned prompt material, not
 afterthoughts. Schemas are hand-written `json.RawMessage` constants. Arguments
@@ -876,11 +883,11 @@ it on every turn. Compaction never mutates the log.
 
 - **Location:** `-state-dir` or `AHARNESS_STATE_DIR`, defaulting to
   `~/.aharness`. The log is `<state>/sessions/<session-id>.jsonl`; session IDs
-  are UUIDv7 and are validated before a path is built. `run_command` gets
-  harness-owned `HOME` and `TMPDIR` at `<state>/work/<session-id>/home` and
-  `<state>/work/<session-id>/tmp`, created with mode 0700 at the start of every
-  run. The whole `<state>/work/<session-id>` subtree is removed at run start and
-  best-effort at run end; `sessions/` is the only durable record.
+  are UUIDv7 and are validated before a path is built. `run_command` gets a
+  harness-owned `TMPDIR` at `<state>/work/<session-id>/tmp`, created with mode
+  0700 at the start of every run; `HOME` is inherited. The whole
+  `<state>/work/<session-id>` subtree is removed at run start and best-effort at
+  run end; `sessions/` is the only durable record.
 - **Creation:** create the state directory with mode 0700 and the session file
   with `O_CREATE|O_RDWR|O_APPEND|O_EXCL`, mode 0600, then take an exclusive
   non-blocking `flock`. If the state directory is not writable, start-up fails
@@ -1002,7 +1009,7 @@ the shell would require a separate UID or process boundary and is out of scope.
 | v0 (`v=1`) or unknown schema | Config error (2) with a clear message; no migration. |
 | Corrupt or unreadable existing log | State failure (1); no new session events are written. |
 | Disk write failure for the log | Fail fast with `internal_error`; still attempt work-directory removal; the run cannot be made durable. |
-| Work-directory cleanup failure | Report the leftover path on stderr and leave it for inspection; the terminal status is unchanged. A surviving child or a read-only filesystem can cause this; use external isolation for hard containment. |
+| Work-directory cleanup failure | Report the leftover path on stderr and leave it for inspection; the terminal status is unchanged. A surviving child or a read-only filesystem can cause this; use external isolation for hard containment. Directories that lost owner write permission are restored and retried once, so a child that leaves a read-only tree does not wedge later runs. |
 
 Model requests are retried; tool executions are not. This distinction prevents
 duplicate file edits and commands after a transient failure. Streaming retries

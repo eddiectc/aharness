@@ -21,7 +21,8 @@ func newCommandRegistry(t *testing.T) (r *Registry, dir, home, tmp string) {
 	ws, dir := newTestWorkspace(t)
 	home = t.TempDir()
 	tmp = t.TempDir()
-	return NewRegistry(ws, Options{HomeDir: home, TmpDir: tmp}), dir, home, tmp
+	t.Setenv("HOME", home)
+	return NewRegistry(ws, Options{TmpDir: tmp}), dir, home, tmp
 }
 
 func TestRunCommandNonZeroExit(t *testing.T) {
@@ -163,7 +164,6 @@ func newSpillRegistry(t *testing.T) (*Registry, string) {
 	ws, _ := newTestWorkspace(t)
 	work := t.TempDir()
 	return NewRegistry(ws, Options{
-		HomeDir: t.TempDir(),
 		TmpDir:  t.TempDir(),
 		WorkDir: work,
 	}), work
@@ -323,7 +323,7 @@ func TestRunCommandEnvAllowlist(t *testing.T) {
 	t.Setenv("SOME_SECRET", "secret-xyz")
 	t.Setenv("SOME_TOKEN", "token-xyz")
 	t.Setenv("HOST_ONLY", "host-only-xyz")
-	t.Setenv("HOME", "/host/home-xyz")
+	t.Setenv("HOME", home)
 	t.Setenv("LANG", "C.UTF-8")
 	t.Setenv("TERM", "xterm-test")
 
@@ -340,10 +340,7 @@ printf 'SOME_TOKEN=%s\n' "${SOME_TOKEN-unset}"
 	if !res.OK {
 		t.Fatalf("run_command(env) failed: code=%s error=%s", res.Code, res.Error)
 	}
-	for _, forbidden := range []string{
-		"provider-secret-xyz", "host-only-xyz", "/host/home-xyz",
-		"secret-xyz", "token-xyz",
-	} {
+	for _, forbidden := range []string{"provider-secret-xyz", "host-only-xyz", "secret-xyz", "token-xyz"} {
 		if strings.Contains(res.Output, forbidden) {
 			t.Errorf("child environment contains %q: %q", forbidden, res.Output)
 		}
@@ -364,11 +361,35 @@ printf 'SOME_TOKEN=%s\n' "${SOME_TOKEN-unset}"
 	if !strings.Contains(res.Output, "TERM=xterm-test") {
 		t.Errorf("child environment is missing TERM: %q", res.Output)
 	}
+	// HOME is inherited so git, ssh, and language toolchains find their user
+	// configuration; isolation is the operator's external boundary.
 	if !strings.Contains(res.Output, "HOME="+home) {
-		t.Errorf("child environment is missing harness HOME %q: %q", home, res.Output)
+		t.Errorf("child environment is missing inherited HOME %q: %q", home, res.Output)
 	}
 	if !strings.Contains(res.Output, "TMPDIR="+tmp) {
 		t.Errorf("child environment is missing harness TMPDIR %q: %q", tmp, res.Output)
+	}
+}
+
+// TestRunCommandInheritsGitIdentity covers the reason HOME is inherited: a
+// commit inside the child must find the host user identity.
+func TestRunCommandInheritsGitIdentity(t *testing.T) {
+	r, _, home, _ := newCommandRegistry(t)
+	gitconfig := filepath.Join(home, ".gitconfig")
+	content := "[user]\n\tname = Test User\n\temail = test@example.com\n"
+	if err := os.WriteFile(gitconfig, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := executeArgs(t, r, "run_command", map[string]any{
+		"command": `git config --global user.email; git config --global user.name`,
+	})
+	if !res.OK {
+		t.Fatalf("run_command(git config) failed: code=%s error=%s", res.Code, res.Error)
+	}
+	for _, want := range []string{"test@example.com", "Test User"} {
+		if !strings.Contains(res.Output, want) {
+			t.Errorf("child cannot read inherited git identity %q: %q", want, res.Output)
+		}
 	}
 }
 
@@ -377,18 +398,36 @@ func TestCommandEnv(t *testing.T) {
 	t.Setenv("LANG", "C")
 	t.Setenv("LC_ALL", "C.UTF-8")
 	t.Setenv("TERM", "xterm")
+	t.Setenv("HOME", "/host/home")
 	t.Setenv("GITHUB_TOKEN", "nope")
-	env := commandEnv(Options{HomeDir: "/state/home", TmpDir: "/state/tmp"})
+	env := commandEnv(Options{TmpDir: "/state/tmp"})
 	want := []string{
 		"PATH=/test/bin",
 		"LANG=C",
 		"LC_ALL=C.UTF-8",
 		"TERM=xterm",
-		"HOME=/state/home",
+		"HOME=/host/home",
 		"TMPDIR=/state/tmp",
 	}
 	if strings.Join(env, "\n") != strings.Join(want, "\n") {
 		t.Errorf("env = %q, want %q", env, want)
+	}
+}
+
+// TestCommandEnvNoHome proves an unset HOME is not invented: the child sees the
+// harness environment as-is rather than a fabricated path.
+func TestCommandEnvNoHome(t *testing.T) {
+	t.Setenv("PATH", "/test/bin")
+	t.Setenv("HOME", "")
+	t.Setenv("GITHUB_TOKEN", "nope")
+	if err := os.Unsetenv("HOME"); err != nil {
+		t.Fatal(err)
+	}
+	env := commandEnv(Options{})
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "HOME=") {
+			t.Errorf("env contains %q with HOME unset", entry)
+		}
 	}
 }
 

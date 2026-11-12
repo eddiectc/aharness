@@ -108,7 +108,7 @@ Other event payloads:
 | Schema version | 2 | The reader accepts only `v=2`; v0 (`v=1`) and unknown versions are rejected. |
 | Session file mode | 0600 | Created with `O_EXCL`; resume/fork verify it. |
 | State directory mode | 0700 | Created if needed. |
-| Work directory mode | 0700 | Per session; contains child `HOME` and `TMPDIR`; removed and recreated at every run start. |
+| Work directory mode | 0700 | Per session; contains child `TMPDIR` and command-output spill; removed and recreated at every run start. |
 | Session log total size | no cap | Grows with the session; no rotation or retention policy. |
 | State directory total size | no cap | Bounded by logs and transient work directories. |
 | Task/task-file read size | no cap | Effective transcript text is capped at 64 KiB. |
@@ -144,7 +144,7 @@ Other event payloads:
 | `run_command` | `WaitDelay` | 5 seconds | Unblocks inherited pipes after cancellation. |
 | `run_command` | Process group | whole group killed | On timeout, cancellation, or interactive interrupt. |
 | `run_command` | stdin | nil | Commands cannot wait for interactive input. |
-| `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, harness `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
+| `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
 | Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; an unknown recorded version is a replay error. `PromptVersion` is unchanged. |

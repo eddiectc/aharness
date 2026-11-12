@@ -170,6 +170,14 @@ func commandOutput(stdout, stderr *cappedBuffer) (string, bool) {
 
 // commandEnv returns the explicit child environment allowlist. It never
 // inherits os.Environ wholesale.
+//
+// HOME is inherited rather than replaced: it is where git, ssh, and language
+// toolchains find user identity and configuration, and a harness-owned HOME
+// silently breaks git commits. Replacing it buys no containment, because
+// run_command already runs with the harness's privileges and can read any path
+// by absolute name; the boundary is external isolation (bwrap, container, VM).
+// TMPDIR stays harness-owned because the host /tmp may be noexec, size-limited,
+// or cleaned mid-session.
 func commandEnv(opts Options) []string {
 	env := make([]string, 0, 6)
 	add := func(name, value string) {
@@ -178,13 +186,10 @@ func commandEnv(opts Options) []string {
 		}
 		env = append(env, name+"="+value)
 	}
-	for _, name := range []string{"PATH", "LANG", "LC_ALL", "TERM"} {
+	for _, name := range []string{"PATH", "LANG", "LC_ALL", "TERM", "HOME"} {
 		if value, ok := os.LookupEnv(name); ok {
 			add(name, value)
 		}
-	}
-	if opts.HomeDir != "" {
-		add("HOME", opts.HomeDir)
 	}
 	if opts.TmpDir != "" {
 		add("TMPDIR", opts.TmpDir)

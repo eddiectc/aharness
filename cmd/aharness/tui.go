@@ -309,8 +309,8 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	control := newRunController(cancel)
-	workDir, homeDir, tmpDir := workPaths(h.cfg.StateDir, h.sessionID)
-	if err := resetWorkDirs(workDir, homeDir, tmpDir); err != nil {
+	workDir, tmpDir := workPaths(h.cfg.StateDir, h.sessionID)
+	if err := resetWorkDirs(workDir, tmpDir); err != nil {
 		cancel()
 		h.mu.Unlock()
 		return nil, err
@@ -335,7 +335,7 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 			return display(ev)
 		}
 	}
-	registry := tools.NewRegistry(h.ws, tools.Options{HomeDir: homeDir, TmpDir: tmpDir, WorkDir: workDir})
+	registry := tools.NewRegistry(h.ws, tools.Options{TmpDir: tmpDir, WorkDir: workDir})
 	runner := agent.New(rcfg, newCompleterFor(dialect, h.cfg, h.sessionID), registry, h.store)
 	run := &hostRun{
 		ctx:      runCtx,

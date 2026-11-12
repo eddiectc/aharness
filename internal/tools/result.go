@@ -65,11 +65,11 @@ var (
 	ErrTooLarge         = errors.New("file too large")
 )
 
-// Options configures harness-owned process paths for run_command. WorkDir is
-// the per-run work directory used to spill oversized command output; an empty
-// WorkDir disables spilling.
+// Options configures the harness-owned process paths for run_command. TmpDir is
+// the per-run TMPDIR the child receives; WorkDir is the per-run work directory
+// used to spill oversized command output, and an empty WorkDir disables
+// spilling.
 type Options struct {
-	HomeDir string
 	TmpDir  string
 	WorkDir string
 }

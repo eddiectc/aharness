@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1054,6 +1055,68 @@ func TestBinaryStaleWorkDirRecreated(t *testing.T) {
 	if err := os.WriteFile(junk, []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	second := runHarness(t, bin, workspace, stateDir, "",
+		"-resume", first.id,
+		"-task", "second",
+	)
+	if second.exit != 0 {
+		t.Fatalf("resume exit = %d\nstderr:\n%s", second.exit, second.stderr)
+	}
+	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
+		t.Fatalf("work dir remains after resume: %v", err)
+	}
+}
+
+// TestBinaryReadOnlyWorkDirRecreated covers a stale work tree that a child
+// command left with directories stripped of owner write permission, as an
+// extracted archive or a Go module cache does in TMPDIR. os.RemoveAll cannot
+// unlink entries from such a directory, so clearing the work tree must restore
+// write permission instead of failing the run at start.
+func TestBinaryReadOnlyWorkDirRecreated(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		if call == 1 {
+			writeJSON(w, 200, chatFinalResponse("first"))
+			return
+		}
+		writeJSON(w, 200, chatFinalResponse("second"))
+	})
+	workspace := t.TempDir()
+	stateDir := filepath.Join(t.TempDir(), "state")
+	first := runHarness(t, bin, workspace, stateDir, f.url,
+		"-task", "first",
+		"-model", "deepseek-v4.1-flash",
+		"-max-output-tokens", "1000",
+		"-max-context-tokens", "200000",
+	)
+	if first.exit != 0 {
+		t.Fatalf("first exit = %d", first.exit)
+	}
+	workDir := filepath.Join(stateDir, "work", first.id)
+	tmp := filepath.Join(workDir, "tmp")
+	moduleDir := filepath.Join(tmp, "go", "pkg", "mod", "golang.org", "x", "term@v0.41.0")
+	if err := os.MkdirAll(moduleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(moduleDir, "CONTRIBUTING.md")
+	if err := os.WriteFile(file, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(file, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(moduleDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// Let t.TempDir removal succeed after a failed assertion.
+		_ = filepath.WalkDir(tmp, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				_ = os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
 	second := runHarness(t, bin, workspace, stateDir, "",
 		"-resume", first.id,
 		"-task", "second",

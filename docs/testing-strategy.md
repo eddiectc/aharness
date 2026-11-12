@@ -16,7 +16,9 @@ real timeouts for subprocess and signal tests.
 
 - Workspace and tools: containment (`..`, absolute-path conversion, symlink
   escapes, `.git`), the four tool contracts, result codes, output caps, UTF-8
-  sanitization, process-group cancellation, and the environment allowlist.
+  sanitization, process-group cancellation, and the environment allowlist,
+  including that `HOME` is inherited so git identity and configuration are
+  visible while the token denylist still applies.
 - Provider adapters: Chat Completions and Responses canonical mapping, tool-call
   round trips, finish/usage/error normalization, strict JSON decoding, and
   Responses `store:false` replay.
