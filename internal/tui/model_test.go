@@ -958,6 +958,41 @@ func TestStatusLineKeepsOccupancyWithoutReportedUsage(t *testing.T) {
 	}
 }
 
+func TestStatusLineRefreshesImmediatelyAfterModelSwitch(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	// Widen past the 80-column default so the notice prefix does not clip
+	// the trailing status fields under ANSI truncation.
+	app.setSize(200, 24)
+	if line := app.statusLine(); !strings.Contains(line, "model deepseek-v4.1-flash") {
+		t.Fatalf("initial status = %q, want the current model", line)
+	}
+	if line := app.headerLine(); !strings.Contains(line, "deepseek-v4.1-flash") {
+		t.Fatalf("initial header = %q, want the current model", line)
+	}
+
+	press(t, app, "ctrl+p")
+	press(t, app, "down")
+	press(t, app, "enter")
+	if app.nextModel != "crouton-alpha-free" {
+		t.Fatalf("nextModel = %q, want the picked model", app.nextModel)
+	}
+	// The effective model only lands in info once a run settles, so the
+	// status bar must follow the pending selection, not info.
+	if app.info.Model != "deepseek-v4.1-flash" {
+		t.Fatalf("info.Model = %q, want the previous model until a run settles", app.info.Model)
+	}
+	if line := app.statusLine(); !strings.Contains(line, "model crouton-alpha-free") {
+		t.Fatalf("switched status = %q, want the picked model before any run", line)
+	}
+	if line := app.headerLine(); !strings.Contains(line, "crouton-alpha-free") {
+		t.Fatalf("switched header = %q, want the picked model before any run", line)
+	}
+	if line := app.statusLine(); !strings.Contains(line, "ctx 0/1.0M") {
+		t.Fatalf("switched status = %q, want the picked model's context window", line)
+	}
+}
+
 func TestHeaderLineThinkingEffort(t *testing.T) {
 	host := newManualHost()
 	host.info.ThinkingEffort = "max"

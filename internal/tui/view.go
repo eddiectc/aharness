@@ -122,10 +122,7 @@ func (m *App) baseFrame() string {
 
 func (m *App) headerLine() string {
 	t := newTheme(m.noColor)
-	modelName := SanitizeLine(m.info.Model)
-	if modelName == "" {
-		modelName = SanitizeLine(m.nextModel)
-	}
+	modelName := SanitizeLine(m.currentModelID())
 	session := SanitizeLine(m.info.SessionID)
 	if len(session) > 8 {
 		session = session[:8]
@@ -173,9 +170,9 @@ func (m *App) statusLine() string {
 	if m.run.active && !m.headless {
 		extra = " · " + formatElapsed(time.Since(m.run.started))
 	}
-	modelName := m.info.Model
-	if modelName == "" {
-		modelName = m.nextModel
+	modelName := m.currentModelID()
+	if m.run.active && m.run.model != "" {
+		modelName = m.run.model
 	}
 	runNo := m.run.number
 	if runNo == 0 {
