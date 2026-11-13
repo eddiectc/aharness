@@ -1,6 +1,6 @@
 # aharness configuration
 
-- **Date:** 2026-11-12
+- **Date:** 2026-11-13
 - **Status:** current for v1.
 - **Related:** [architecture](architecture.md), [limits](limits.md),
   [coding standard](coding-standard.md), [documentation map](README.md).
@@ -45,6 +45,7 @@ before the file is read, and a key in the file cannot move its own location.
 {
   "model": "deepseek-v4.1-flash",
   "provider_base_url": "https://opencode.ai/inference/go/v1",
+  "searxng_url": "http://127.0.0.1:8080",
   "max_turns": 40,
   "http_timeout": "10m",
   "thinking_effort": "high"
@@ -63,6 +64,7 @@ number is rejected so a unit typo cannot silently mean nanoseconds.
 | `workspace` | string | `-workspace` / `AHARNESS_WORKSPACE` | Inherited on resume/fork unless explicit. |
 | `provider_base_url` | string | `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` | Validated like the flag. |
 | `models_dev_url` | string | `AHARNESS_MODELS_DEV_URL` | No flag; HTTPS except loopback HTTP. |
+| `searxng_url` | string | `-searxng-url` / `AHARNESS_SEARXNG_URL` | `web_search` base URL; empty disables search. Absolute http(s); http only for loopback hosts; no userinfo, query, or fragment; a path prefix is allowed; trailing slashes are trimmed; at most 8 KiB. |
 | `thinking_effort` | string | `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | `default` clears. |
 | `max_turns` | integer | `-max-turns` / `AHARNESS_MAX_TURNS` | 0 is unlimited; negative is invalid. |
 | `max_total_tokens` | integer | `-max-total-tokens` / `AHARNESS_MAX_TOTAL_TOKENS` | 0 is unlimited; negative is invalid. |
@@ -100,6 +102,7 @@ reported instead of hiding behind a flag.
 | `AHARNESS_PROVIDER_TOKEN` | No flag; in memory only. |
 | `AHARNESS_PROVIDER_BASE_URL` | `-provider-base-url` |
 | `AHARNESS_MODELS_DEV_URL` | No flag. |
+| `AHARNESS_SEARXNG_URL` | `-searxng-url` |
 | `AHARNESS_THINKING_EFFORT` | `-thinking-effort` |
 | `AHARNESS_MAX_TURNS` | `-max-turns` |
 | `AHARNESS_MAX_TOTAL_TOKENS` | `-max-total-tokens` |
@@ -133,6 +136,7 @@ deployment, the provider plan, or the task:
 | **Thinking effort** (unset) | A per-model choice an operator reuses across runs. | flag, env, config |
 | **Catalog request timeout** (15s) | Mirrors and offline/air-gapped setups need a different bound. | flag, env, config |
 | **Catalog URL** (`models.dev`) | Test and mirror override. | env, config |
+| **SearXNG base URL** (unset) | The self-hosted search backend differs per operator; unset disables `web_search`. The URL is validated, and only loopback instances may use HTTP. | flag, env, config |
 | **Model / provider / base URL / workspace** | The everyday selectors. | flag, env, config |
 
 Intentionally **not** configurable. Each is a container-format or protocol
@@ -145,6 +149,9 @@ invariant; changing one changes what the harness means, not how it is deployed:
   results, `run_command` 64 KiB) and the `run_command` 120s default with its
   600s ceiling. These shape the model-visible transcript; an operator-tunable
   transcript cap would change replay semantics.
+- `web_search` response 2 MiB, results default 5 / max 10, output 60 KiB,
+  snippet 1,200 characters, and the fixed 15-second search timeout. One
+  SearXNG request per tool call; no retry, pagination loop, or caching.
 - Session line 4 MiB, session schema version, cache version 3, file modes
   0600/0700, and the retention policy (none).
 - Transport attempt budget (5), retry backoff, `Retry-After` cap, and the
@@ -159,6 +166,7 @@ not.
 ## 5. Inspecting the effective configuration
 
 The batch startup log line records the resolved values, including
-`http_timeout_ms` and `config` (the resolved path, or `none` when disabled).
-The TUI details overlay shows the run timeouts; `aharness -h` lists the
-environment variables and the precedence order.
+`http_timeout_ms`, `search_configured`, the fixed `search_timeout_ms`, and
+`config` (the resolved path, or `none` when disabled). It deliberately does not
+log the SearXNG URL. The TUI details overlay shows the run timeouts;
+`aharness -h` lists the environment variables and the precedence order.

@@ -60,6 +60,8 @@ rewriting its conclusions.
 | [plans/tui-build.md](plans/tui-build.md) | Implemented 2026-11-10 |
 | [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |
 | [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |
+| [plans/web-fetch-build.md](plans/web-fetch-build.md) | Proposed 2026-11-13; not implemented |
+| [plans/web-search-build.md](plans/web-search-build.md) | Implemented 2026-11-13; manual SearXNG smoke passed |
 
 ### Research
 

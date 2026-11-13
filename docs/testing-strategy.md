@@ -1,9 +1,9 @@
 # aharness v1 testing strategy
 
-- **Date:** 2026-11-11
+- **Date:** 2026-11-13
 - **Status:** normative testing strategy for v1, the shipped TUI, model
-  discovery, and thinking effort
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md)
+  discovery, thinking effort, and web search
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md), [web search build plan](plans/web-search-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and
@@ -15,10 +15,15 @@ real timeouts for subprocess and signal tests.
 ## 1. Unit tests
 
 - Workspace and tools: containment (`..`, absolute-path conversion, symlink
-  escapes, `.git`), the four tool contracts, result codes, output caps, UTF-8
+  escapes, `.git`), the five tool contracts, result codes, output caps, UTF-8
   sanitization, process-group cancellation, and the environment allowlist,
   including that `HOME` is inherited so git identity and configuration are
-  visible while the token denylist still applies.
+  visible while the token denylist still applies. Web search additionally tests
+  base-URL validation (schemes, loopback HTTP, userinfo/query/fragment, trailing
+  slash, 8 KiB cap), request parameters and base path, result URL filtering and
+  dedupe, snippet sanitization, results/output caps, details, and the
+  unavailable/403/http_error/transport/malformed/oversized/timeout/canceled
+  mappings against fake `httptest` SearXNG responses.
 - Provider adapters: Chat Completions and Responses canonical mapping, tool-call
   round trips, finish/usage/error normalization, strict JSON decoding, and
   Responses `store:false` replay.
@@ -286,6 +291,13 @@ diagnostic, not a gate.
   Unsupported values and an explicit incompatible model+effort combination exit
   2 before any provider request; `session_start`/`run_start` record the effective
   value, and `-ui-json` `f2` reaches the next request.
+- Web search end to end: a fake provider returns a `web_search` tool call, the
+  registry points at a fake SearXNG `httptest` server, and the binary records
+  exactly one paired `tool_result` with the formatted title/URL/snippet. Repeat
+  without `AHARNESS_SEARXNG_URL` (`unavailable`) and with a 500 (`http_error`):
+  the result reaches the next provider request as data and the run continues by
+  the existing policy. The startup log records `search_configured` and
+  `search_timeout_ms` without the URL.
 - `-refresh-models`: the fake catalog server observes an unconditional request
   with no `If-None-Match` and no provider token; the summary is printed and no
   session file is created. Server-down and invalid-catalog cases exit 3/4 and
@@ -338,7 +350,10 @@ include usage detail objects and malformed subset bounds: no panic, no unbounded
 allocation, deterministic normalization, and invalid subsets rejected as
 `protocol_error`. Seeds live under
 `internal/model/testdata/fuzz` and `internal/session/testdata/fuzz`; the
-TUI/history targets use built-in seeds. The unit test run executes the seeds; a
+TUI/history targets use built-in seeds. `FuzzSearchJSON` decodes arbitrary
+SearXNG JSON through the same filter/sanitize path: no panic, at most ten
+results, http(s)-only URLs with no fragment, snippets within 1,200 runes, and a
+200-rune unresponsive warning. The unit test run executes the seeds; a
 scheduled job MAY run longer fuzzing. The fuzz targets must not make real
 network calls or require writable state.
 
@@ -384,6 +399,14 @@ and confirm `prompt_cache_hit_tokens` or `cached_input_tokens` is positive on
 the second call when the prefix is stable. Re-run with `-require-usage`; if the
 endpoint omits usage, the run must stop with `protocol_error` before a tool
 executes. A `reported=false` response with the default flag must still complete.
+
+For web search: point `-searxng-url` or `AHARNESS_SEARXNG_URL` at a local
+SearXNG instance that includes `json` in `search.formats`, run a task that
+calls `web_search`, and confirm the title/URL/snippet list, entity/tag
+sanitization, and the documented 403 and malformed-JSON outcomes. Record the
+instance version, query, and observed results in the
+[web search plan](plans/web-search-build.md#10-implementation-status-and-deviations).
+A 2026-11-13 smoke against a local instance at `http://localhost:28080` passed.
 
 For the read/search/command contract: read a 1,175-line, roughly 42 KB Go file
 in one default call and confirm the header range; page a file with

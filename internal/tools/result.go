@@ -1,5 +1,5 @@
 // Package tools implements the validated tool registry, workspace
-// containment policy, and the four v0 tools.
+// containment policy, the four v0 tools, and web search.
 package tools
 
 import (
@@ -29,6 +29,9 @@ const (
 	CodeCanceled         Code = "canceled"
 	CodePanic            Code = "panic"
 	CodeSpawnFailed      Code = "spawn_failed"
+	CodeUnavailable      Code = "unavailable"
+	CodeHTTPError        Code = "http_error"
+	CodeFetchFailed      Code = "fetch_failed"
 	CodeInternal         Code = "internal"
 )
 
@@ -65,13 +68,17 @@ var (
 	ErrTooLarge         = errors.New("file too large")
 )
 
-// Options configures the harness-owned process paths for run_command. TmpDir is
-// the per-run TMPDIR the child receives; WorkDir is the per-run work directory
+// Options configures harness-owned tool resources. TmpDir is the per-run
+// TMPDIR the run_command child receives; WorkDir is the per-run work directory
 // used to spill oversized command output, and an empty WorkDir disables
-// spilling.
+// spilling. SearXNGURL is the validated base URL for web_search; an empty value
+// keeps the tool registered but returns an actionable unavailable result.
+// UserAgent identifies the harness on outbound tool requests.
 type Options struct {
-	TmpDir  string
-	WorkDir string
+	TmpDir     string
+	WorkDir    string
+	SearXNGURL string
+	UserAgent  string
 }
 
 // Schema returns the canonical declaration for one tool.

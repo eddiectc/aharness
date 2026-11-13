@@ -8,9 +8,10 @@ opt-in and unlimited by default.
 
 - **Status:** v1 implementation complete. The agent-tooling M0–M3 work is also
   implemented, including usage/cost accounting, the contiguous 2,000-line read
-  contract with `toolset-v1` replay, search/command improvements, and the
-  dev-only eval driver and 30-task suite. The default TUI, provider/model discovery, per-model
-  thinking effort, and display-only thinking text are implemented. The TUI is
+  contract with `toolset-v1` replay, search/command improvements, builtin
+  SearXNG-backed web search, and the dev-only eval driver and 30-task suite. The
+  default TUI, provider/model discovery, per-model thinking effort, and
+  display-only thinking text are implemented. The TUI is
   the default in a terminal;
   `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
   surface. Mock-provider, integration, fuzz, race, and §8 gate checks pass. The
@@ -60,8 +61,14 @@ opt-in and unlimited by default.
   buffered response without provider usage a `protocol_error` before any tool
   executes; the default stays compatible with local OpenAI-compatible
   endpoints.
-- Four tools — `read_file`, `edit_file`, `search`, `run_command` — behind one
-  validated registry with `os.Root` workspace containment.
+- Five tools — `read_file`, `edit_file`, `search`, `run_command`, and
+  `web_search` — behind one validated registry with `os.Root` workspace
+  containment. `web_search` queries an operator-configured SearXNG instance
+  with `format=json` and returns up to ten titles, URLs, and snippets; it does
+  not fetch result pages or call a third-party search API. Set
+  `-searxng-url`, `AHARNESS_SEARXNG_URL`, or `searxng_url` (HTTP is allowed
+  only for loopback instances); unset keeps the tool registered with an
+  actionable `unavailable` result.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
   exclusive/shared `flock`, torn-final-line repair, and a per-run `final`.
 - `-resume <id>` continues a session in place; `-fork <id>` creates a new
@@ -97,8 +104,9 @@ opt-in and unlimited by default.
   typed stop reasons. Run budgets default to unlimited (no deadline).
 - One binary configured by flags, environment, an optional JSON config file
   (`-config` / `AHARNESS_CONFIG`, default `<state-dir>/config.json`), or built-in
-  defaults, in that order; no daemon, provider matrix, or profile system. See
-  [docs/configuration.md](docs/configuration.md).
+  defaults, in that order; no daemon, provider matrix, or profile system. The
+  optional `searxng_url` key configures `web_search`; omitting it disables
+  search. See [docs/configuration.md](docs/configuration.md).
 
 Out of scope: hooks, model-based summarization, subagents, RAG/embeddings,
 MCP/plugins, additional provider dialects, built-in evals, price tracking,

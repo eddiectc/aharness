@@ -58,9 +58,12 @@ catalog with an `Unavailable` reason and omitted from the usable set. A new
 session requires `-model` (or `AHARNESS_MODEL`) naming a usable model; there is
 no hardcoded default model, fallback, routing, or provider matrix.
 
-The harness opens network connections only through the dialect adapters; tools
-may use whatever network the host allows. Provider-specific request and
-response shapes stay behind `model.OpenAIChat` and `model.OpenAIResponses`.
+The harness opens network connections only through the dialect adapters, the
+catalog source, and the configured SearXNG instance. `web_search` contacts only
+the operator-configured base URL; it never fetches a model-supplied URL.
+`run_command` may use whatever network the host allows. Provider-specific
+request and response shapes stay behind `model.OpenAIChat` and
+`model.OpenAIResponses`.
 Provider credentials are read from `AHARNESS_PROVIDER_TOKEN` when set. The token
 is optional: when set, the selected adapter sends it as a Bearer token; when
 unset or empty, it omits `Authorization`, which supports local no-auth endpoints
@@ -348,7 +351,7 @@ adapter fell back to non-streaming, the response text is printed once. Without
 | `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
 | `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, composer slash commands and autocomplete, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
 | `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors; models.dev catalog discovery, cache, and SDK-to-dialect mapping. |
-| `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the four tool implementations. |
+| `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the five tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
 `cmd/aharness-eval/` is development measurement tooling, not shipped runtime.
@@ -405,6 +408,7 @@ internal/tools/
   read.go
   edit.go
   search.go
+  web_search.go  # SearXNG JSON client, base-URL validation, dedupe, sanitization
   command.go
   command_spill.go # per-run oversized-output capture
   command_unix.go
@@ -717,10 +721,11 @@ All tools share these rules:
   command exits are model-visible results, not loop exceptions. Every result
   carries a stable `code`: `ok` on success, and `invalid_args`, `unknown_tool`,
   `not_found`, `ambiguous`, `outside_workspace`, `git_protected`, `binary_file`,
-  `too_large`, `timeout`, `canceled`, `panic`, `spawn_failed`, or `internal` on
-  failure. A non-zero command exit is `ok=true` with an `exit_code`; `ok=false`
-  is reserved for dispatch, validation, timeout, cancellation, panic, spawn
-  failures, and file restrictions such as binary or too large.
+  `too_large`, `timeout`, `canceled`, `panic`, `spawn_failed`, `unavailable`,
+  `http_error`, `fetch_failed`, or `internal` on failure. A non-zero command
+  exit is `ok=true` with an `exit_code`; `ok=false` is reserved for dispatch,
+  validation, timeout, cancellation, panic, spawn failures, network failures,
+  and file restrictions such as binary or too large.
 - Tool results are capped before entering the transcript. File-content results
   are head-only and contiguous: `read_file` never keeps a head and tail that
   hide middle lines, and `search` keeps a head window. Command output keeps head
@@ -760,18 +765,22 @@ func (w *Workspace) rel(p string) (string, error) {
 | `read_file` | `path`, `offset` (1-based, default 1), `limit` (default 2000, max 4000) | Returns one contiguous numbered line window plus a `lines X–Y of Z` header describing the lines actually delivered; line counting splits on `\n` (a trailing newline adds no line, an empty file has zero lines), and bytes are preserved. When `B < Z`, the result ends with `continue with offset=B+1`. A byte-capped page keeps whole lines and sets `truncated`; a single line that cannot fit is delivered as a rune-safe prefix with `[line N truncated at X bytes]` and no misleading continuation. Result cap 60 KiB, chosen so the rendered result and marker stay under the 64 KiB tool-result field cap. Rejects binary/non-UTF-8 files and files over 2 MiB. |
 | `edit_file` | `path`, `old_string`, `new_string`, `replace_all` (default false) | Requires a unique exact byte match unless `replace_all`; zero or multiple matches are actionable errors; `old_string == new_string` is an error. Rejects a symlink anywhere in the path. Writes atomically via an `O_EXCL` temp file in the same directory plus rename; preserves mode with fchmod; preserves bytes, including CRLF. Creates a file only when it does not exist and `old_string` is empty, using mode 0644 and requiring the parent directory to exist; an existing file with an empty `old_string` is an error. Rejects an edit whose resulting file would exceed 2 MiB. Returns a short diff summary. |
 | `search` | `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, symlinks, and files over 1 MiB, and reports skipped counts by reason. Returns `path:line: text`, with long lines clipped. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `**` matches zero or more whole path segments; `*` does not cross `/`. Output is capped at 60 KiB head-only. A result-count cap is marked `[results capped at N]` and does not set `truncated`; dropped bytes do. |
+| `web_search` | `query`, `max_results` (default 5, max 10), `categories`, `language`, `time_range` (`day`/`month`/`year`) | Sends one GET to `<searxng_url>/search?format=json` with a fixed 15-second timeout and a 2 MiB response cap. Filters to absolute http(s) result URLs with no userinfo, strips fragments for deduplication, and sanitizes title/URL/snippet: invalid UTF-8 replaced, entities decoded, tags stripped, control characters removed, whitespace collapsed; snippets are capped at 1,200 characters. Returns title/URL/snippet only and never fetches a result page. Output is capped at 60 KiB head-only; when the cap drops results the header count reflects what was delivered and `truncated` is set. A 403 is `unavailable` with JSON-format guidance, other non-2xx is `http_error`, transport/decode failures are `fetch_failed`, and an oversized body is `too_large`. An unset backend returns `unavailable` with the setting names. `details` records delivered results, truncation, and unresponsive engines. |
 | `run_command` | `command`, `cwd` (default workspace root), `timeout_ms` (default 120000, max 600000) | Runs `/bin/sh -c` in its own process group with `Setpgid`, a `Cancel` that kills the group, and `WaitDelay`; stdin is nil. Captures stdout and stderr separately, sanitizes to valid UTF-8, and caps at 64 KiB combined with head+tail. When combined output exceeds the cap, the full combined stream is written to a unique `<state>/work/<session-id>/tool-output/*.log` file (directory 0700, file 0600, `O_EXCL`, no symlink following); the inline result ends with `full output: <absolute path>` and `details` records `spilled`/`path`. The per-run work cleanup removes the file; after resume the path is historical and its content is gone. Returns `exit_code`, `timed_out`, and labeled streams. Non-zero exit is a normal result (`ok=true`). On timeout or cancellation, kills the whole process group. Rejects `cwd` outside the workspace. |
 
 `search` is implemented with a Go walk; the harness does not shell out to `rg`;
 measure before adding it.
 
 Tool descriptions are versioned prompt material. New sessions record
-`toolset-v1`; the frozen `toolset-v0` declaration set remains available so a
-session that recorded v0 replays with the descriptions it was created under.
-`tools.SchemasFor(version)` selects the set, `agent.Project` carries it in
-`Projection.Schemas`, and the runner sends that set, so resume/fork never
-silently upgrades prompt material. An unknown version is a replay error. The
-system prompt and `PromptVersion` are unchanged.
+`toolset-v1`; v1 was extended in place with `web_search` under the
+no-backward-compatibility decision, so a session that recorded v1 replays the
+current v1 set rather than a four-tool snapshot. The frozen `toolset-v0`
+declaration set remains available so a session that recorded v0 replays with
+the descriptions it was created under. `tools.SchemasFor(version)` selects the
+set, `agent.Project` carries it in `Projection.Schemas`, and the runner sends
+that set. An unknown version is a replay error. The system prompt and
+`PromptVersion` are unchanged; the `web_search` description carries the
+untrusted-snippet warning.
 
 `edit_file` writes atomically: create a temp file in the same directory with
 `O_CREATE|O_EXCL` and a random name, write, call `f.Chmod(existingMode)` through
@@ -1131,6 +1140,13 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   `opencode.ai` and no userinfo, query, or fragment; an explicit override may use
   any valid HTTP(S) host, including loopback test servers. Do not intercept the
   hosted URL with a proxy or a hosts-file override.
+- `-searxng-url` / `AHARNESS_SEARXNG_URL` / `searxng_url` sets the `web_search`
+  backend base URL (not the `/search` endpoint). The value is validated in every
+  layer: absolute http(s), HTTP only for loopback hosts, no userinfo/query/
+  fragment, an optional path prefix, trailing slashes trimmed, and at most
+  8 KiB. Empty disables search while the tool stays registered and returns an
+  actionable `unavailable` result. The startup log records
+  `search_configured` and the fixed `search_timeout_ms`, never the URL.
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
   optional. When set, the selected adapter sends it as a Bearer token; when
   unset or empty, it omits `Authorization`, supporting local no-auth endpoints
@@ -1251,10 +1267,10 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   interrupted 130, internal 1).
 - The optional JSON config file (`-config` / `AHARNESS_CONFIG`, default
   `<state-dir>/config.json`) supplies the subset of settings that are not
-  per-invocation: model, provider, workspace, base URL, catalog URL, thinking
-  effort, the run budgets and timeouts, and the usage/logging switches. It
-  never holds the provider token, the state directory, the task, or a session
-  ID. The TUI owns interactive input and signals; batch is non-interactive and
+  per-invocation: model, provider, workspace, base URL, catalog URL, SearXNG
+  base URL, thinking effort, the run budgets and timeouts, and the usage/logging
+  switches. It never holds the provider token, the state directory, the task, or
+  a session ID. The TUI owns interactive input and signals; batch is non-interactive and
   has no steering. The `-ui-json` v1 protocol is the machine-readable UI
   surface.
 
@@ -1269,6 +1285,7 @@ Defaults are deliberately conservative and easy to change:
 | Catalog cache TTL | 24 hours |
 | Catalog request timeout | 15 seconds (`-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT`) |
 | Catalog response body | 16 MiB |
+| SearXNG base URL | unset (`web_search` returns `unavailable`; `-searxng-url` / `AHARNESS_SEARXNG_URL` / `searxng_url`) |
 | Max turns | 0 (unlimited; `-max-turns`) |
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
 | Max output tokens per call | 0 (unset; the request field is omitted) |
@@ -1283,6 +1300,7 @@ Defaults are deliberately conservative and easy to change:
 | Tool result cap | 60 KiB file tools; 64 KiB command output plus a spill path |
 | `read_file` window | 2,000 lines (max 4,000), contiguous, 60 KiB |
 | `search` results | 100 (max 200); 60 KiB head-only |
+| `web_search` results | 5 (max 10); 60 KiB head-only; fixed 15-second timeout |
 
 ## 10. Limits and timeouts
 
@@ -1299,5 +1317,7 @@ per model, a 5% (minimum 1,000-token) context safety margin; 4 retained turns;
 non-streaming provider response; a 4 MiB SSE event; a 1 MiB assembled response;
 an 8 MiB total stream; 64 KiB partial text; a 1 MiB debug request; a 64 KiB
 model-response event-text cap except for the fully recorded `model_response`;
-a 64 KiB steering line; and a 4 MiB session line.
+a 64 KiB steering line; and a 4 MiB session line. `web_search` adds a fixed
+15-second request timeout, a 2 MiB SearXNG response cap, a 60 KiB head-only
+output, and a 1,200-character snippet cap.
 

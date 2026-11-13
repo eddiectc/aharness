@@ -323,6 +323,8 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		"session_timeout_ms", cfg.SessionTimeout.Milliseconds(),
 		"model_timeout_ms", cfg.ModelTimeout.Milliseconds(),
 		"http_timeout_ms", cfg.HTTPTimeout.Milliseconds(),
+		"search_configured", cfg.SearXNGURL != "",
+		"search_timeout_ms", tools.SearchTimeout.Milliseconds(),
 		"config", configState(cfg.ConfigPath),
 	)
 	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
@@ -340,7 +342,7 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 	if sink != nil {
 		rcfg.Display = textDisplay(sink)
 	}
-	registry := tools.NewRegistry(ws, tools.Options{TmpDir: tmpDir, WorkDir: workDir})
+	registry := tools.NewRegistry(ws, toolOptions(cfg, tmpDir, workDir))
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
 	result, runErr := runner.Run(runCtx, opts)
@@ -380,6 +382,20 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		}
 	}
 	return status.ExitCode()
+}
+
+// toolOptions returns the registry options shared by batch and TUI runs.
+func toolOptions(cfg config, tmpDir, workDir string) tools.Options {
+	version := cfg.HarnessVersion
+	if version == "" {
+		version = "devel"
+	}
+	return tools.Options{
+		TmpDir:     tmpDir,
+		WorkDir:    workDir,
+		SearXNGURL: cfg.SearXNGURL,
+		UserAgent:  "aharness/" + version,
+	}
 }
 
 // runnerConfig converts the CLI configuration into the runner's immutable

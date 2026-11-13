@@ -1,14 +1,15 @@
 # aharness limits and timeouts
 
-- **Date:** 2026-11-11
+- **Date:** 2026-11-13
 - **Status:** current for v1, the shipped TUI, model discovery, thinking
-  effort, and the flag/env/config-file configuration layers.
+  effort, web search, and the flag/env/config-file configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
   [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
   [slash commands](commands.md),
   [model discovery build plan](plans/model-discovery-build.md),
   [thinking effort build plan](plans/thinking-effort-build.md),
+  [web search build plan](plans/web-search-build.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
@@ -139,6 +140,15 @@ Other event payloads:
 | `search` | Result cap | 60 KiB | Head-only combined result text. Dropped bytes set `truncated`; a result-count cap is its own `[results capped at N]` marker and does not. |
 | `search` | Skipped entries | `.git`, symlinks, binaries, files >1 MiB | Search requires a real directory root; skipped counts are reported by reason in one summary line. |
 | `search` | Glob | Go `path.Match` per segment | `**` matches zero or more whole path segments; `*` and `?` do not cross `/`. |
+| `web_search` | Default results | 5 | `max_results` defaults to 5. |
+| `web_search` | Max results | 10 | Larger values are clamped after URL filtering and deduplication. |
+| `web_search` | SearXNG response body | 2 MiB | Larger is `too_large`; no partial parse. |
+| `web_search` | Result cap | 60 KiB | Head-only output. Dropped results or bytes set `truncated` and append `[output truncated at 61440 bytes]`; the header count is the number actually delivered. |
+| `web_search` | Timeout | 15 seconds | Fixed; covers connect, headers, and body. The tool context cancels the request. |
+| `web_search` | Snippet length | 1,200 characters | Mirrors SearXNG's normalized `content` cap; longer snippets are cut on a rune boundary. |
+| `web_search` | Result URL | http/https only | Non-http(s) URLs and URLs with userinfo are skipped; fragments are stripped for deduplication. |
+| `web_search` | Unresponsive warning | 200 characters | One line naming engines; it does not fail the search. |
+| `web_search` | Requests per call | 1 | No automatic retry, pagination loop, or provider fallback. |
 | `run_command` | Default timeout | 120 seconds | Per call. |
 | `run_command` | Max timeout | 600 seconds | Larger values are clamped. |
 | `run_command` | Output cap | 64 KiB combined | Head and tail of stdout and stderr, with a truncation marker. Larger combined output is spilled to a per-run `<state>/work/<session-id>/tool-output/*.log` file (0600, directory 0700) and the absolute path is appended inline. |
@@ -148,7 +158,7 @@ Other event payloads:
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
-| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; an unknown recorded version is a replay error. `PromptVersion` is unchanged. |
+| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration
@@ -180,6 +190,7 @@ variable, and a config-file key.
 | Session selection | UUIDv7 ID | flag | `-resume`/`-fork` resolve under the state directory; no arbitrary paths. |
 | Provider token | no length cap | `AHARNESS_PROVIDER_TOKEN` only | In memory only; never logged or passed to tools; deliberately not a flag or config key. |
 | Provider base URL | no length cap | flag, env, `provider_base_url` | Explicit override must be http(s) with a host; userinfo and query/fragment are rejected. Discovered URLs are HTTPS `opencode.ai`. |
+| SearXNG base URL | 8 KiB | flag, `AHARNESS_SEARXNG_URL`, `searxng_url` | `web_search` backend. Absolute http(s); HTTP only for loopback hosts; userinfo, query, and fragment are rejected; a path prefix is allowed and trailing slashes are trimmed. Empty disables search while the tool remains registered. |
 | Catalog URL | no length cap | env, `models_dev_url` | Default `https://models.dev/api.json`; must be HTTPS except loopback HTTP. |
 | State directory path | OS path limit | flag, `AHARNESS_STATE_DIR` | No explicit application cap. Deliberately not a config key: it locates the default config file. |
 | Session log retention | none | — | No rotation or automatic deletion. |
@@ -192,13 +203,14 @@ same binary:
 
 - **Worth configuring:** the HTTP client timeout, the per-call model timeout,
   the session wall clock, the turn/total-token budgets, the context/output
-  budgets, thinking effort, the catalog timeout and URL, and the model /
-  provider / base-URL / workspace selectors.
-- **Intentionally fixed:** body and stream caps, tool result caps, the session
-  line and schema versions, file modes, retention, the retry policy, UI display
-  caps, and the `-ui-json` protocol caps. Each defines the wire format, the
-  replay contract, or a display-only safety boundary. Nothing in §2, §3, §4, or
-  §6 is configurable.
+  budgets, thinking effort, the catalog timeout and URL, the SearXNG base URL,
+  and the model / provider / base-URL / workspace selectors.
+- **Intentionally fixed:** body and stream caps, tool result caps, the search
+  response/result/output/snippet caps, the 15-second search timeout, the
+  session line and schema versions, file modes, retention, the retry policy,
+  UI display caps, and the `-ui-json` protocol caps. Each defines the wire
+  format, the replay contract, or a display-only safety boundary. Nothing in
+  §2, §3, §4, or §6 is configurable.
 
 ## 6. TUI and `-ui-json`
 

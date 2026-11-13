@@ -17,22 +17,24 @@ import (
 // by the tool implementation into its typed struct.
 type toolFunc func(ctx context.Context, args json.RawMessage) Result
 
-// Registry is the validated tool dispatcher. It owns the workspace and the
-// harness-owned command environment.
+// Registry is the validated tool dispatcher. It owns the workspace, the
+// harness-owned command environment, and the search backend configuration.
 type Registry struct {
-	ws   *Workspace
-	opts Options
-	fs   map[string]toolFunc
+	ws     *Workspace
+	opts   Options
+	fs     map[string]toolFunc
+	search *searchClient
 }
 
 // NewRegistry constructs the tool registry for one workspace.
 func NewRegistry(ws *Workspace, opts Options) *Registry {
-	r := &Registry{ws: ws, opts: opts}
+	r := &Registry{ws: ws, opts: opts, search: newSearchClient(opts)}
 	r.fs = map[string]toolFunc{
 		"read_file":   r.executeRead,
 		"edit_file":   r.executeEdit,
 		"search":      r.executeSearch,
 		"run_command": r.executeRunCommand,
+		"web_search":  r.executeWebSearch,
 	}
 	return r
 }

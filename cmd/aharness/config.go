@@ -62,6 +62,8 @@ type config struct {
 	Dialect   model.Dialect
 	BaseURL   string
 	Token     string
+	// SearXNGURL is the validated web_search base URL. Empty disables search.
+	SearXNGURL string
 
 	MaxTurns         int
 	MaxTotalTokens   int
@@ -140,6 +142,8 @@ type envSettings struct {
 	token             string
 	baseURL           string
 	baseURLSet        bool
+	searxngURL        string
+	searxngURLSet     bool
 	modelsDevURL      string
 	thinkingEffort    string
 	thinkingEffortSet bool
@@ -228,6 +232,7 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		stateDir:       getenv("AHARNESS_STATE_DIR"),
 		token:          getenv("AHARNESS_PROVIDER_TOKEN"),
 		baseURL:        getenv("AHARNESS_PROVIDER_BASE_URL"),
+		searxngURL:     getenv("AHARNESS_SEARXNG_URL"),
 		modelsDevURL:   getenv("AHARNESS_MODELS_DEV_URL"),
 		thinkingEffort: getenv("AHARNESS_THINKING_EFFORT"),
 		config:         getenv("AHARNESS_CONFIG"),
@@ -235,9 +240,16 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 	env.providerSet = env.provider != ""
 	env.workspaceSet = env.workspace != ""
 	env.baseURLSet = env.baseURL != ""
+	env.searxngURLSet = env.searxngURL != ""
 	env.thinkingEffortSet = env.thinkingEffort != ""
 
 	var err error
+	if env.searxngURLSet {
+		env.searxngURL, err = tools.ParseSearXNGURL(env.searxngURL)
+		if err != nil {
+			return envSettings{}, fmt.Errorf("AHARNESS_SEARXNG_URL: %w", err)
+		}
+	}
 	if env.maxTurns, env.maxTurnsSet, err = envInt(getenv, "AHARNESS_MAX_TURNS"); err != nil {
 		return envSettings{}, err
 	}
@@ -320,6 +332,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		httpTimeout      time.Duration
 		catalogTimeout   time.Duration
 		providerBaseURL  string
+		searxngURL       string
 		requireUsage     bool
 		logRequests      bool
 		showVersion      bool
@@ -353,6 +366,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.IntVar(&maxOutputTokens, "max-output-tokens", env.maxOutput, "maximum output tokens per model call (0: no harness cap; negative is invalid)")
 	fs.StringVar(&thinkingEffort, "thinking-effort", env.thinkingEffort, "model-advertised reasoning effort for model calls, or \"default\" to clear (default: AHARNESS_THINKING_EFFORT)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
+	fs.StringVar(&searxngURL, "searxng-url", env.searxngURL, "SearXNG base URL for web_search (default: AHARNESS_SEARXNG_URL, then the config file; empty disables search)")
 	fs.BoolVar(&requireUsage, "require-usage", false, "fail with protocol_error when a completed model response omits provider usage")
 	fs.BoolVar(&logRequests, "log-requests", false, "record each projected model request as a debug event (default: AHARNESS_LOG_REQUESTS)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
@@ -365,6 +379,14 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	}
 	visited := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+	if visited["searxng-url"] {
+		normalized, err := tools.ParseSearXNGURL(searxngURL)
+		if err != nil {
+			return config{}, fmt.Errorf("-searxng-url: %w", err)
+		}
+		searxngURL = normalized
+	}
 
 	if showVersion {
 		return config{ShowVersion: true}, nil
@@ -465,6 +487,16 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	logRequestsLayer := layered(logRequests, visited["log-requests"], env.logRequests, env.logRequestsSet,
 		file.LogRequests, false)
 
+	searxngURL = layered(searxngURL, visited["searxng-url"], env.searxngURL, env.searxngURLSet,
+		file.SearXNGURL, "").value()
+	if searxngURL != "" {
+		normalized, parseErr := tools.ParseSearXNGURL(searxngURL)
+		if parseErr != nil {
+			return config{}, fmt.Errorf("searxng_url: %w", parseErr)
+		}
+		searxngURL = normalized
+	}
+
 	taskText, taskSource, taskSet, err := resolveTask(task, taskFile)
 	if err != nil {
 		return config{}, err
@@ -513,6 +545,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		Model:             modelName,
 		Provider:          provider,
 		Token:             env.token,
+		SearXNGURL:        searxngURL,
 		MaxTurns:          maxTurnsLayer.value(),
 		MaxTotalTokens:    maxTotalTokensLayer.value(),
 		MaxContextTokens:  maxContextLayer.value(),
@@ -666,8 +699,8 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_CONTEXT_TOKENS, AHARNESS_MAX_TURNS, AHARNESS_MAX_TOTAL_TOKENS,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_OUTPUT_TOKENS, AHARNESS_SESSION_TIMEOUT, AHARNESS_MODEL_TIMEOUT,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_HTTP_TIMEOUT, AHARNESS_CATALOG_TIMEOUT, AHARNESS_REQUIRE_USAGE,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_PROVIDER_BASE_URL, AHARNESS_MODELS_DEV_URL,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_THINKING_EFFORT")
+	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_SEARXNG_URL, AHARNESS_PROVIDER_BASE_URL,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_MODELS_DEV_URL, AHARNESS_THINKING_EFFORT")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "precedence: flag > environment > config file > default;")
 	_, _ = fmt.Fprintf(w, "the config file is %s (JSON; see docs/configuration.md)\n", configFileHint)

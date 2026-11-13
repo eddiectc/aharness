@@ -66,6 +66,7 @@ func cfgTestClearEnv(t *testing.T) {
 		"AHARNESS_LOG_REQUESTS",
 		"AHARNESS_PROVIDER_BASE_URL",
 		"AHARNESS_MODELS_DEV_URL",
+		"AHARNESS_SEARXNG_URL",
 	} {
 		t.Setenv(key, "")
 	}

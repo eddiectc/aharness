@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,6 +51,11 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 			name:   "run_command",
 			args:   runCommandArgs{},
 			sample: `{"command":"true","cwd":".","timeout_ms":1000}`,
+		},
+		{
+			name:   "web_search",
+			args:   webSearchArgs{},
+			sample: `{"query":"aharness","max_results":5,"categories":"general","language":"en","time_range":"day"}`,
 		},
 	}
 	for _, tc := range tests {
@@ -99,6 +105,7 @@ func TestSchemaRequiredFields(t *testing.T) {
 		"edit_file":   {"path", "old_string", "new_string"},
 		"search":      {"pattern"},
 		"run_command": {"command"},
+		"web_search":  {"query"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -137,8 +144,14 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	if got := Schemas(); !reflect.DeepEqual(got, v1) {
 		t.Errorf("Schemas() does not return the v1 set")
 	}
-	if names(v0) != names(v1) {
-		t.Errorf("toolset names changed: v0 %q v1 %q", names(v0), names(v1))
+	if got, want := names(v0), "read_file,edit_file,search,run_command"; got != want {
+		t.Errorf("toolset-v0 names = %q, want the frozen %q", got, want)
+	}
+	v1Names := strings.Split(names(v1), ",")
+	for _, want := range []string{"read_file", "edit_file", "search", "run_command", "web_search"} {
+		if !slices.Contains(v1Names, want) {
+			t.Errorf("toolset-v1 is missing %q: %v", want, v1Names)
+		}
 	}
 
 	v0Read := findSchema(t, v0, "read_file")
@@ -169,6 +182,13 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	v1Command := findSchema(t, v1, "run_command")
 	if !strings.Contains(v1Command.Description, "64 KiB") {
 		t.Errorf("toolset-v1 run_command description missing the inline cap")
+	}
+	v1WebSearch := findSchema(t, v1, "web_search")
+	if !strings.Contains(v1WebSearch.Description, "untrusted data") {
+		t.Errorf("toolset-v1 web_search description missing the untrusted-data warning")
+	}
+	if !strings.Contains(string(v1WebSearch.Parameters), `"maximum": 10`) {
+		t.Errorf("toolset-v1 web_search parameters missing the result cap")
 	}
 
 	v0[0].Name = "mutated"

@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"time"
+
+	"aharness/internal/tools"
 )
 
 // maxConfigFileBytes caps one config file. The file only holds a handful of
@@ -30,6 +32,7 @@ type fileConfig struct {
 	Workspace        *string         `json:"workspace"`
 	ProviderBaseURL  *string         `json:"provider_base_url"`
 	ModelsDevURL     *string         `json:"models_dev_url"`
+	SearXNGURL       *string         `json:"searxng_url"`
 	ThinkingEffort   *string         `json:"thinking_effort"`
 	MaxTurns         *int            `json:"max_turns"`
 	MaxTotalTokens   *int            `json:"max_total_tokens"`
@@ -124,6 +127,11 @@ func (c fileConfig) validate(path string) error {
 	// an explicit empty value too.
 	if c.ThinkingEffort != nil && *c.ThinkingEffort == "" {
 		return fail("thinking_effort must not be empty; omit the key or use \"default\"")
+	}
+	if c.SearXNGURL != nil && *c.SearXNGURL != "" {
+		if _, err := tools.ParseSearXNGURL(*c.SearXNGURL); err != nil {
+			return fail("searxng_url: %v", err)
+		}
 	}
 	for _, timeout := range []struct {
 		name        string
