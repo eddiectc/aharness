@@ -56,6 +56,7 @@ rewriting its conclusions.
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
+| [plans/transcript-folding-build.md](plans/transcript-folding-build.md) | Proposed 2026-11-13; not implemented |
 | [plans/tui-build.md](plans/tui-build.md) | Implemented 2026-11-10 |
 | [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |
 | [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |
