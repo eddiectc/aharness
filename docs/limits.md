@@ -149,6 +149,17 @@ Other event payloads:
 | `web_search` | Result URL | http/https only | Non-http(s) URLs and URLs with userinfo are skipped; fragments are stripped for deduplication. |
 | `web_search` | Unresponsive warning | 200 characters | One line naming engines; it does not fail the search. |
 | `web_search` | Requests per call | 1 | No automatic retry, pagination loop, or provider fallback. |
+| `web_fetch` | Response body | 2 MiB | After decompression. A larger declared `Content-Length` is rejected before reading; a streamed body is rejected at the cap. `too_large`. |
+| `web_fetch` | Response header | 64 KiB | `Transport.MaxResponseHeaderBytes`; larger is a transport error (`fetch_failed`). |
+| `web_fetch` | Text output per call | 60 KiB | Byte slice of sanitized UTF-8 text; `offset` continues. A byte-capped page sets `truncated` and appends `[truncated at 61440 bytes; continue with offset=N]`. |
+| `web_fetch` | Redirects | 5 followed | Builtin only. Same-host hops are revalidated and followed; HTTPS-to-HTTP and cross-host hops are returned as successful data, not followed. |
+| `web_fetch` | Request timeout | 30 seconds, max 120 | `-web-timeout` / `AHARNESS_WEB_TIMEOUT` / `web_timeout`; covers connect, redirects, and body reads. |
+| `web_fetch` | URL length | 8 KiB | Larger is `invalid_args`. Scheme, host, userinfo, control, and fragment rules apply to every hop. |
+| `web_fetch` | Provider response | 16 MiB | Crawl4AI envelope; stream-decoded while skipping unused fields. `results[0].html` is capped at 2 MiB. |
+| `web_fetch` | Compression | gzip | Go's transparent gzip handling. An unsupported content encoding is `unsupported_content_type`. |
+| `web_fetch` | Address guard | builtin | Every resolved address must be globally routable unicast; any blocked address refuses the URL. The check repeats at dial time and on every hop. |
+| `web_fetch` | Redirect result | data | A stopped redirect returns success with `redirect: true`, `redirect_url`, and the 3xx status; the model decides whether to fetch it. |
+| `web_fetch` | Requests per call | 1 | No automatic retry against the builtin path after a provider failure. |
 | `run_command` | Default timeout | 120 seconds | Per call. |
 | `run_command` | Max timeout | 600 seconds | Larger values are clamped. |
 | `run_command` | Output cap | 64 KiB combined | Head and tail of stdout and stderr, with a truncation marker. Larger combined output is spilled to a per-run `<state>/work/<session-id>/tool-output/*.log` file (0600, directory 0700) and the absolute path is appended inline. |
@@ -191,6 +202,10 @@ variable, and a config-file key.
 | Provider token | no length cap | `AHARNESS_PROVIDER_TOKEN` only | In memory only; never logged or passed to tools; deliberately not a flag or config key. |
 | Provider base URL | no length cap | flag, env, `provider_base_url` | Explicit override must be http(s) with a host; userinfo and query/fragment are rejected. Discovered URLs are HTTPS `opencode.ai`. |
 | SearXNG base URL | 8 KiB | flag, `AHARNESS_SEARXNG_URL`, `searxng_url` | `web_search` backend. Absolute http(s); HTTP only for loopback hosts; userinfo, query, and fragment are rejected; a path prefix is allowed and trailing slashes are trimmed. Empty disables search while the tool remains registered. |
+| Web request timeout | 30 seconds, max 120 | flag, `AHARNESS_WEB_TIMEOUT`, `web_timeout` | `web_fetch` request bound. Must be positive in every layer; zero, negative, or above 120 seconds is a config error. Independent of `http_timeout`. |
+| `-web-fetch-provider` | `builtin` | flag, `AHARNESS_WEB_FETCH_PROVIDER`, `web_fetch_provider` | One of `builtin` or `crawl4ai`; selected once at startup with no fallback. |
+| Web provider endpoint | 8 KiB | flag, `AHARNESS_WEB_FETCH_URL`, `web_fetch_url` | Empty for builtin; required for crawl4ai. Absolute http(s), no userinfo or fragment; loopback and private hosts are allowed because it is the operator's service. |
+| Web provider key | 4 KiB | flag, `AHARNESS_WEB_FETCH_KEY`, `web_fetch_key` | Optional bearer token, sent only to the provider and never logged. Control characters are rejected. |
 | Catalog URL | no length cap | env, `models_dev_url` | Default `https://models.dev/api.json`; must be HTTPS except loopback HTTP. |
 | State directory path | OS path limit | flag, `AHARNESS_STATE_DIR` | No explicit application cap. Deliberately not a config key: it locates the default config file. |
 | Session log retention | none | — | No rotation or automatic deletion. |

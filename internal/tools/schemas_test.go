@@ -57,6 +57,11 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 			args:   webSearchArgs{},
 			sample: `{"query":"aharness","max_results":5,"categories":"general","language":"en","time_range":"day"}`,
 		},
+		{
+			name:   "web_fetch",
+			args:   webFetchArgs{},
+			sample: `{"url":"https://example.com/","offset":0}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,6 +111,7 @@ func TestSchemaRequiredFields(t *testing.T) {
 		"search":      {"pattern"},
 		"run_command": {"command"},
 		"web_search":  {"query"},
+		"web_fetch":   {"url"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -148,7 +154,7 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 		t.Errorf("toolset-v0 names = %q, want the frozen %q", got, want)
 	}
 	v1Names := strings.Split(names(v1), ",")
-	for _, want := range []string{"read_file", "edit_file", "search", "run_command", "web_search"} {
+	for _, want := range []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch"} {
 		if !slices.Contains(v1Names, want) {
 			t.Errorf("toolset-v1 is missing %q: %v", want, v1Names)
 		}
@@ -189,6 +195,16 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	}
 	if !strings.Contains(string(v1WebSearch.Parameters), `"maximum": 10`) {
 		t.Errorf("toolset-v1 web_search parameters missing the result cap")
+	}
+	v1WebFetch := findSchema(t, v1, "web_fetch")
+	if !strings.Contains(v1WebFetch.Description, "untrusted data") {
+		t.Errorf("toolset-v1 web_fetch description missing the untrusted-data warning")
+	}
+	if !strings.Contains(string(v1WebFetch.Parameters), `"required": ["url"]`) {
+		t.Errorf("toolset-v1 web_fetch parameters missing the required url")
+	}
+	if strings.Contains(string(v1WebFetch.Parameters), "userinfo") {
+		t.Errorf("toolset-v1 web_fetch schema documents provider-only fields")
 	}
 
 	v0[0].Name = "mutated"

@@ -325,6 +325,9 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		"http_timeout_ms", cfg.HTTPTimeout.Milliseconds(),
 		"search_configured", cfg.SearXNGURL != "",
 		"search_timeout_ms", tools.SearchTimeout.Milliseconds(),
+		"web_timeout_ms", cfg.WebTimeout.Milliseconds(),
+		"web_fetch_provider", cfg.WebFetchProvider,
+		"web_fetch_host", webFetchHost(cfg.WebFetchURL),
 		"config", configState(cfg.ConfigPath),
 	)
 	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
@@ -391,10 +394,14 @@ func toolOptions(cfg config, tmpDir, workDir string) tools.Options {
 		version = "devel"
 	}
 	return tools.Options{
-		TmpDir:     tmpDir,
-		WorkDir:    workDir,
-		SearXNGURL: cfg.SearXNGURL,
-		UserAgent:  "aharness/" + version,
+		TmpDir:           tmpDir,
+		WorkDir:          workDir,
+		SearXNGURL:       cfg.SearXNGURL,
+		UserAgent:        "aharness/" + version,
+		WebTimeout:       cfg.WebTimeout,
+		WebFetchProvider: cfg.WebFetchProvider,
+		WebFetchURL:      cfg.WebFetchURL,
+		WebFetchKey:      cfg.WebFetchKey,
 	}
 }
 

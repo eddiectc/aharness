@@ -86,6 +86,18 @@ repository's package structure. The rules below apply to every package.
   11,671,823 bytes at the last stdlib-only v1 revision to 26,127,685 bytes
   with the full TUI stack (+13.8 MiB, +124%), and `go list -m all` has 53
   modules. Re-measure on dependency changes and record the result.
+- `github.com/markusmobius/go-trafilatura/v2` v2.2.6 is the approved
+  main-content extractor for `web_fetch`. It is Apache-2.0, native Go, and
+  CGO-free; v2.2.6 is the current release of a maintained port with published
+  extraction benchmarks. The stdlib gap is content selection: `golang.org/x/net/html` parses
+  a DOM but does not separate an article from page chrome, and a bespoke
+  extractor was rejected. Measured 2026-11-13 on a stripped
+  `-trimpath -ldflags=-s -w` build: 19,009,696 to 37,707,936 bytes (+18.7 MB,
+  +98%); `go list -m all` grew from 53 to 106 modules. `govulncheck ./...`
+  reports no vulnerabilities after the `golang.org/x/net` v0.62.0 upgrade. The
+  approved fallback if this decision is reversed is
+  `codeberg.org/readeck/go-readability/v2` v2.1.3 (MIT, about +5.2 MB); do not
+  ship both.
 - Test-only exception: `github.com/google/go-cmp` MAY be added if struct diffs
   become materially harder to read. It is the only sanctioned test dependency;
   do not add testify.

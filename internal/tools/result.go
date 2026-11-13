@@ -5,6 +5,8 @@ package tools
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"time"
 
 	"aharness/internal/model"
 )
@@ -32,7 +34,16 @@ const (
 	CodeUnavailable      Code = "unavailable"
 	CodeHTTPError        Code = "http_error"
 	CodeFetchFailed      Code = "fetch_failed"
-	CodeInternal         Code = "internal"
+	// CodeBlockedAddress rejects a URL or redirect that resolves to a
+	// non-global unicast or special-purpose address.
+	CodeBlockedAddress Code = "blocked_address"
+	// CodeUnsupportedContentType rejects a non-text media type or an
+	// unsupported content encoding.
+	CodeUnsupportedContentType Code = "unsupported_content_type"
+	// CodeContentUnavailable reports a 2xx response with no usable text, such
+	// as a bot challenge, JavaScript shell, or empty extraction.
+	CodeContentUnavailable Code = "content_unavailable"
+	CodeInternal           Code = "internal"
 )
 
 // Result is the canonical tool result exchanged with the model and logged in
@@ -74,11 +85,28 @@ var (
 // spilling. SearXNGURL is the validated base URL for web_search; an empty value
 // keeps the tool registered but returns an actionable unavailable result.
 // UserAgent identifies the harness on outbound tool requests.
+//
+// WebTimeout bounds one web_fetch request, covering connect, redirects, and
+// body reads; zero selects WebTimeoutDefault. WebFetchProvider selects the
+// compiled-in adapter (WebFetchProviderBuiltin or WebFetchProviderCrawl4AI)
+// once; an empty value selects builtin. WebFetchURL is the Crawl4AI endpoint and
+// WebFetchKey its bearer token, which is never logged. WebClient is a test seam
+// that routes fixture requests; production leaves it nil, and constructors
+// build a dedicated client with the address guard. WebAllowLoopback is the
+// matching test-only seam: it relaxes the address guard so httptest servers are
+// reachable. It is not a flag, environment variable, or config key, and
+// production wiring never sets it.
 type Options struct {
-	TmpDir     string
-	WorkDir    string
-	SearXNGURL string
-	UserAgent  string
+	TmpDir           string
+	WorkDir          string
+	SearXNGURL       string
+	UserAgent        string
+	WebTimeout       time.Duration
+	WebFetchProvider string
+	WebFetchURL      string
+	WebFetchKey      string
+	WebClient        *http.Client
+	WebAllowLoopback bool
 }
 
 // Schema returns the canonical declaration for one tool.

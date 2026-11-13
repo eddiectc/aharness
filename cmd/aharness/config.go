@@ -64,6 +64,15 @@ type config struct {
 	Token     string
 	// SearXNGURL is the validated web_search base URL. Empty disables search.
 	SearXNGURL string
+	// WebTimeout bounds one web_fetch request, covering connect, redirects,
+	// and body reads.
+	WebTimeout time.Duration
+	// WebFetchProvider selects the compiled-in web_fetch adapter.
+	WebFetchProvider string
+	// WebFetchURL is the validated Crawl4AI endpoint and WebFetchKey its
+	// bearer token. The key is never logged.
+	WebFetchURL string
+	WebFetchKey string
 
 	MaxTurns         int
 	MaxTotalTokens   int
@@ -133,41 +142,49 @@ type config struct {
 // value carries a "set" bit because an empty variable means unset, which lets
 // the config-file layer below it apply.
 type envSettings struct {
-	model             string
-	provider          string
-	providerSet       bool
-	workspace         string
-	workspaceSet      bool
-	stateDir          string
-	token             string
-	baseURL           string
-	baseURLSet        bool
-	searxngURL        string
-	searxngURLSet     bool
-	modelsDevURL      string
-	thinkingEffort    string
-	thinkingEffortSet bool
-	maxTurns          int
-	maxTurnsSet       bool
-	maxTotalTokens    int
-	maxTotalTokensSet bool
-	maxContext        int
-	maxContextSet     bool
-	maxOutput         int
-	maxOutputSet      bool
-	sessionTimeout    time.Duration
-	sessionTimeoutSet bool
-	modelTimeout      time.Duration
-	modelTimeoutSet   bool
-	httpTimeout       time.Duration
-	httpTimeoutSet    bool
-	catalogTimeout    time.Duration
-	catalogTimeoutSet bool
-	requireUsage      bool
-	requireUsageSet   bool
-	logRequests       bool
-	logRequestsSet    bool
-	config            string
+	model               string
+	provider            string
+	providerSet         bool
+	workspace           string
+	workspaceSet        bool
+	stateDir            string
+	token               string
+	baseURL             string
+	baseURLSet          bool
+	searxngURL          string
+	searxngURLSet       bool
+	webTimeout          time.Duration
+	webTimeoutSet       bool
+	webFetchProvider    string
+	webFetchProviderSet bool
+	webFetchURL         string
+	webFetchURLSet      bool
+	webFetchKey         string
+	webFetchKeySet      bool
+	modelsDevURL        string
+	thinkingEffort      string
+	thinkingEffortSet   bool
+	maxTurns            int
+	maxTurnsSet         bool
+	maxTotalTokens      int
+	maxTotalTokensSet   bool
+	maxContext          int
+	maxContextSet       bool
+	maxOutput           int
+	maxOutputSet        bool
+	sessionTimeout      time.Duration
+	sessionTimeoutSet   bool
+	modelTimeout        time.Duration
+	modelTimeoutSet     bool
+	httpTimeout         time.Duration
+	httpTimeoutSet      bool
+	catalogTimeout      time.Duration
+	catalogTimeoutSet   bool
+	requireUsage        bool
+	requireUsageSet     bool
+	logRequests         bool
+	logRequestsSet      bool
+	config              string
 }
 
 // envInt reads an optional integer environment variable.
@@ -226,21 +243,27 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		getenv = os.Getenv
 	}
 	env := envSettings{
-		model:          getenv("AHARNESS_MODEL"),
-		provider:       getenv("AHARNESS_PROVIDER"),
-		workspace:      getenv("AHARNESS_WORKSPACE"),
-		stateDir:       getenv("AHARNESS_STATE_DIR"),
-		token:          getenv("AHARNESS_PROVIDER_TOKEN"),
-		baseURL:        getenv("AHARNESS_PROVIDER_BASE_URL"),
-		searxngURL:     getenv("AHARNESS_SEARXNG_URL"),
-		modelsDevURL:   getenv("AHARNESS_MODELS_DEV_URL"),
-		thinkingEffort: getenv("AHARNESS_THINKING_EFFORT"),
-		config:         getenv("AHARNESS_CONFIG"),
+		model:            getenv("AHARNESS_MODEL"),
+		provider:         getenv("AHARNESS_PROVIDER"),
+		workspace:        getenv("AHARNESS_WORKSPACE"),
+		stateDir:         getenv("AHARNESS_STATE_DIR"),
+		token:            getenv("AHARNESS_PROVIDER_TOKEN"),
+		baseURL:          getenv("AHARNESS_PROVIDER_BASE_URL"),
+		searxngURL:       getenv("AHARNESS_SEARXNG_URL"),
+		webFetchProvider: getenv("AHARNESS_WEB_FETCH_PROVIDER"),
+		webFetchURL:      getenv("AHARNESS_WEB_FETCH_URL"),
+		webFetchKey:      getenv("AHARNESS_WEB_FETCH_KEY"),
+		modelsDevURL:     getenv("AHARNESS_MODELS_DEV_URL"),
+		thinkingEffort:   getenv("AHARNESS_THINKING_EFFORT"),
+		config:           getenv("AHARNESS_CONFIG"),
 	}
 	env.providerSet = env.provider != ""
 	env.workspaceSet = env.workspace != ""
 	env.baseURLSet = env.baseURL != ""
 	env.searxngURLSet = env.searxngURL != ""
+	env.webFetchProviderSet = env.webFetchProvider != ""
+	env.webFetchURLSet = env.webFetchURL != ""
+	env.webFetchKeySet = env.webFetchKey != ""
 	env.thinkingEffortSet = env.thinkingEffort != ""
 
 	var err error
@@ -248,6 +271,31 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 		env.searxngURL, err = tools.ParseSearXNGURL(env.searxngURL)
 		if err != nil {
 			return envSettings{}, fmt.Errorf("AHARNESS_SEARXNG_URL: %w", err)
+		}
+	}
+	if env.webFetchProviderSet {
+		env.webFetchProvider, err = tools.ParseWebFetchProvider(env.webFetchProvider)
+		if err != nil {
+			return envSettings{}, fmt.Errorf("AHARNESS_WEB_FETCH_PROVIDER: %w", err)
+		}
+	}
+	if env.webFetchURLSet {
+		env.webFetchURL, err = tools.ParseWebFetchURL(env.webFetchURL)
+		if err != nil {
+			return envSettings{}, fmt.Errorf("AHARNESS_WEB_FETCH_URL: %w", err)
+		}
+	}
+	if env.webFetchKeySet {
+		if err := tools.ValidateWebFetchKey(env.webFetchKey); err != nil {
+			return envSettings{}, fmt.Errorf("AHARNESS_WEB_FETCH_KEY: %w", err)
+		}
+	}
+	if env.webTimeout, env.webTimeoutSet, err = envDuration(getenv, "AHARNESS_WEB_TIMEOUT"); err != nil {
+		return envSettings{}, err
+	}
+	if env.webTimeoutSet {
+		if err := validateWebTimeout(env.webTimeout); err != nil {
+			return envSettings{}, fmt.Errorf("AHARNESS_WEB_TIMEOUT: %w", err)
 		}
 	}
 	if env.maxTurns, env.maxTurnsSet, err = envInt(getenv, "AHARNESS_MAX_TURNS"); err != nil {
@@ -333,6 +381,10 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		catalogTimeout   time.Duration
 		providerBaseURL  string
 		searxngURL       string
+		webTimeout       time.Duration
+		webFetchProvider string
+		webFetchURL      string
+		webFetchKey      string
 		requireUsage     bool
 		logRequests      bool
 		showVersion      bool
@@ -367,6 +419,16 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.StringVar(&thinkingEffort, "thinking-effort", env.thinkingEffort, "model-advertised reasoning effort for model calls, or \"default\" to clear (default: AHARNESS_THINKING_EFFORT)")
 	fs.StringVar(&providerBaseURL, "provider-base-url", env.baseURL, "provider OpenAI-compatible base URL (default: catalog)")
 	fs.StringVar(&searxngURL, "searxng-url", env.searxngURL, "SearXNG base URL for web_search (default: AHARNESS_SEARXNG_URL, then the config file; empty disables search)")
+	fs.DurationVar(&webTimeout, "web-timeout", durationOr(env.webTimeout, env.webTimeoutSet, tools.WebTimeoutDefault), "web_fetch request timeout, including body reads (default: AHARNESS_WEB_TIMEOUT, then "+tools.WebTimeoutDefault.String()+"; maximum "+tools.WebTimeoutMax.String()+")")
+	webFetchProviderDefault := env.webFetchProvider
+	if webFetchProviderDefault == "" {
+		webFetchProviderDefault = tools.WebFetchProviderBuiltin
+	}
+	fs.StringVar(&webFetchProvider, "web-fetch-provider", webFetchProviderDefault, "web_fetch provider: builtin or crawl4ai (default: AHARNESS_WEB_FETCH_PROVIDER, then the config file, then builtin)")
+	fs.StringVar(&webFetchURL, "web-fetch-url", env.webFetchURL, "Crawl4AI endpoint for web_fetch (default: AHARNESS_WEB_FETCH_URL, then the config file; required for crawl4ai)")
+	// The key default stays empty so -h and flag-error text never echo the
+	// environment secret; resolution below still prefers an explicit flag.
+	fs.StringVar(&webFetchKey, "web-fetch-key", "", "Crawl4AI bearer token (default: AHARNESS_WEB_FETCH_KEY, then the config file; never logged)")
 	fs.BoolVar(&requireUsage, "require-usage", false, "fail with protocol_error when a completed model response omits provider usage")
 	fs.BoolVar(&logRequests, "log-requests", false, "record each projected model request as a debug event (default: AHARNESS_LOG_REQUESTS)")
 	fs.BoolVar(&showVersion, "version", false, "print build information and exit")
@@ -386,6 +448,30 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 			return config{}, fmt.Errorf("-searxng-url: %w", err)
 		}
 		searxngURL = normalized
+	}
+	if visited["web-timeout"] {
+		if err := validateWebTimeout(webTimeout); err != nil {
+			return config{}, fmt.Errorf("-web-timeout: %w", err)
+		}
+	}
+	if visited["web-fetch-provider"] {
+		normalized, err := tools.ParseWebFetchProvider(webFetchProvider)
+		if err != nil {
+			return config{}, fmt.Errorf("-web-fetch-provider: %w", err)
+		}
+		webFetchProvider = normalized
+	}
+	if visited["web-fetch-url"] {
+		normalized, err := tools.ParseWebFetchURL(webFetchURL)
+		if err != nil {
+			return config{}, fmt.Errorf("-web-fetch-url: %w", err)
+		}
+		webFetchURL = normalized
+	}
+	if visited["web-fetch-key"] {
+		if err := tools.ValidateWebFetchKey(webFetchKey); err != nil {
+			return config{}, fmt.Errorf("-web-fetch-key: %w", err)
+		}
 	}
 
 	if showVersion {
@@ -497,6 +583,33 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		searxngURL = normalized
 	}
 
+	webTimeoutLayer := durationLayer(webTimeout, visited["web-timeout"], env.webTimeout, env.webTimeoutSet,
+		file.WebTimeout, tools.WebTimeoutDefault)
+	if err := validateWebTimeout(webTimeoutLayer.value()); err != nil {
+		return config{}, fmt.Errorf("web_timeout: %w", err)
+	}
+	webFetchProvider = layered(webFetchProvider, visited["web-fetch-provider"], env.webFetchProvider,
+		env.webFetchProviderSet, file.WebFetchProvider, tools.WebFetchProviderBuiltin).value()
+	normalizedProvider, providerErr := tools.ParseWebFetchProvider(webFetchProvider)
+	if providerErr != nil {
+		return config{}, fmt.Errorf("web_fetch_provider: %w", providerErr)
+	}
+	webFetchProvider = normalizedProvider
+	webFetchURL = layered(webFetchURL, visited["web-fetch-url"], env.webFetchURL, env.webFetchURLSet,
+		file.WebFetchURL, "").value()
+	if webFetchURL != "" {
+		normalized, parseErr := tools.ParseWebFetchURL(webFetchURL)
+		if parseErr != nil {
+			return config{}, fmt.Errorf("web_fetch_url: %w", parseErr)
+		}
+		webFetchURL = normalized
+	}
+	webFetchKey = layered(webFetchKey, visited["web-fetch-key"], env.webFetchKey, env.webFetchKeySet,
+		file.WebFetchKey, "").value()
+	if err := tools.ValidateWebFetchConfig(webFetchProvider, webFetchURL, webFetchKey); err != nil {
+		return config{}, fmt.Errorf("web fetch config: %w", err)
+	}
+
 	taskText, taskSource, taskSet, err := resolveTask(task, taskFile)
 	if err != nil {
 		return config{}, err
@@ -546,6 +659,10 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		Provider:          provider,
 		Token:             env.token,
 		SearXNGURL:        searxngURL,
+		WebTimeout:        webTimeoutLayer.value(),
+		WebFetchProvider:  webFetchProvider,
+		WebFetchURL:       webFetchURL,
+		WebFetchKey:       webFetchKey,
 		MaxTurns:          maxTurnsLayer.value(),
 		MaxTotalTokens:    maxTotalTokensLayer.value(),
 		MaxContextTokens:  maxContextLayer.value(),
@@ -650,6 +767,30 @@ func parseUISize(raw string) (int, int, error) {
 	return width, height, nil
 }
 
+// validateWebTimeout bounds the web_fetch request timeout.
+func validateWebTimeout(value time.Duration) error {
+	if value <= 0 {
+		return fmt.Errorf("must be positive, got %s", value)
+	}
+	if value > tools.WebTimeoutMax {
+		return fmt.Errorf("must be at most %s, got %s", tools.WebTimeoutMax, value)
+	}
+	return nil
+}
+
+// webFetchHost returns the provider endpoint host for startup visibility. It
+// never includes the key or the request path.
+func webFetchHost(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "endpoint"
+	}
+	return u.Host
+}
+
 // validateModeRules applies the task, stream, and presentation rules for the
 // selected mode. It runs again after a TTY check downgrades the default TUI to
 // batch.
@@ -700,7 +841,8 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_OUTPUT_TOKENS, AHARNESS_SESSION_TIMEOUT, AHARNESS_MODEL_TIMEOUT,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_HTTP_TIMEOUT, AHARNESS_CATALOG_TIMEOUT, AHARNESS_REQUIRE_USAGE,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_SEARXNG_URL, AHARNESS_PROVIDER_BASE_URL,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_MODELS_DEV_URL, AHARNESS_THINKING_EFFORT")
+	_, _ = fmt.Fprintln(w, "AHARNESS_WEB_TIMEOUT, AHARNESS_WEB_FETCH_PROVIDER, AHARNESS_WEB_FETCH_URL,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_WEB_FETCH_KEY, AHARNESS_MODELS_DEV_URL, AHARNESS_THINKING_EFFORT")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "precedence: flag > environment > config file > default;")
 	_, _ = fmt.Fprintf(w, "the config file is %s (JSON; see docs/configuration.md)\n", configFileHint)

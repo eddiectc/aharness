@@ -33,6 +33,10 @@ type fileConfig struct {
 	ProviderBaseURL  *string         `json:"provider_base_url"`
 	ModelsDevURL     *string         `json:"models_dev_url"`
 	SearXNGURL       *string         `json:"searxng_url"`
+	WebTimeout       *configDuration `json:"web_timeout"`
+	WebFetchProvider *string         `json:"web_fetch_provider"`
+	WebFetchURL      *string         `json:"web_fetch_url"`
+	WebFetchKey      *string         `json:"web_fetch_key"`
 	ThinkingEffort   *string         `json:"thinking_effort"`
 	MaxTurns         *int            `json:"max_turns"`
 	MaxTotalTokens   *int            `json:"max_total_tokens"`
@@ -131,6 +135,27 @@ func (c fileConfig) validate(path string) error {
 	if c.SearXNGURL != nil && *c.SearXNGURL != "" {
 		if _, err := tools.ParseSearXNGURL(*c.SearXNGURL); err != nil {
 			return fail("searxng_url: %v", err)
+		}
+	}
+	if c.WebFetchProvider != nil {
+		if _, err := tools.ParseWebFetchProvider(*c.WebFetchProvider); err != nil {
+			return fail("web_fetch_provider: %v", err)
+		}
+	}
+	if c.WebFetchURL != nil && *c.WebFetchURL != "" {
+		if _, err := tools.ParseWebFetchURL(*c.WebFetchURL); err != nil {
+			return fail("web_fetch_url: %v", err)
+		}
+	}
+	if c.WebFetchKey != nil {
+		if err := tools.ValidateWebFetchKey(*c.WebFetchKey); err != nil {
+			return fail("web_fetch_key: %v", err)
+		}
+	}
+	if c.WebTimeout != nil {
+		value := time.Duration(*c.WebTimeout)
+		if value <= 0 || value > tools.WebTimeoutMax {
+			return fail("web_timeout must be positive and at most %s, got %s", tools.WebTimeoutMax, value)
 		}
 	}
 	for _, timeout := range []struct {

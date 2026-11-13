@@ -65,6 +65,10 @@ number is rejected so a unit typo cannot silently mean nanoseconds.
 | `provider_base_url` | string | `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL` | Validated like the flag. |
 | `models_dev_url` | string | `AHARNESS_MODELS_DEV_URL` | No flag; HTTPS except loopback HTTP. |
 | `searxng_url` | string | `-searxng-url` / `AHARNESS_SEARXNG_URL` | `web_search` base URL; empty disables search. Absolute http(s); http only for loopback hosts; no userinfo, query, or fragment; a path prefix is allowed; trailing slashes are trimmed; at most 8 KiB. |
+| `web_timeout` | duration | `-web-timeout` / `AHARNESS_WEB_TIMEOUT` | One `web_fetch` request, including connect, redirects, and body reads. Must be positive and at most 120s; default 30s. Independent of `http_timeout`. |
+| `web_fetch_provider` | string | `-web-fetch-provider` / `AHARNESS_WEB_FETCH_PROVIDER` | `builtin` (default) or `crawl4ai`; selected once at startup with no fallback. |
+| `web_fetch_url` | string | `-web-fetch-url` / `AHARNESS_WEB_FETCH_URL` | Provider endpoint; empty for builtin and required for crawl4ai. Absolute http(s), no userinfo or fragment, at most 8 KiB; loopback and private hosts are allowed. |
+| `web_fetch_key` | string | `-web-fetch-key` / `AHARNESS_WEB_FETCH_KEY` | Optional provider bearer token; sent only to the provider and never logged. Prefer the environment. |
 | `thinking_effort` | string | `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | `default` clears. |
 | `max_turns` | integer | `-max-turns` / `AHARNESS_MAX_TURNS` | 0 is unlimited; negative is invalid. |
 | `max_total_tokens` | integer | `-max-total-tokens` / `AHARNESS_MAX_TOTAL_TOKENS` | 0 is unlimited; negative is invalid. |
@@ -103,6 +107,10 @@ reported instead of hiding behind a flag.
 | `AHARNESS_PROVIDER_BASE_URL` | `-provider-base-url` |
 | `AHARNESS_MODELS_DEV_URL` | No flag. |
 | `AHARNESS_SEARXNG_URL` | `-searxng-url` |
+| `AHARNESS_WEB_TIMEOUT` | `-web-timeout` |
+| `AHARNESS_WEB_FETCH_PROVIDER` | `-web-fetch-provider` |
+| `AHARNESS_WEB_FETCH_URL` | `-web-fetch-url` |
+| `AHARNESS_WEB_FETCH_KEY` | `-web-fetch-key` |
 | `AHARNESS_THINKING_EFFORT` | `-thinking-effort` |
 | `AHARNESS_MAX_TURNS` | `-max-turns` |
 | `AHARNESS_MAX_TOTAL_TOKENS` | `-max-total-tokens` |
@@ -137,6 +145,9 @@ deployment, the provider plan, or the task:
 | **Catalog request timeout** (15s) | Mirrors and offline/air-gapped setups need a different bound. | flag, env, config |
 | **Catalog URL** (`models.dev`) | Test and mirror override. | env, config |
 | **SearXNG base URL** (unset) | The self-hosted search backend differs per operator; unset disables `web_search`. The URL is validated, and only loopback instances may use HTTP. | flag, env, config |
+| **Web request timeout** (30s) | A web fetch is not a model generation; the 15-minute provider timeout is wrong for it. The 120s ceiling keeps a single tool call bounded. | flag, env, config |
+| **Web fetch provider** (`builtin`) | A JavaScript-heavy page needs an operator-run renderer. `builtin` keeps everything in-process; `crawl4ai` delegates rendering and moves the target egress boundary to the provider. | flag, env, config |
+| **Web provider endpoint/key** (unset) | The Crawl4AI host and token differ per deployment; the endpoint is required only for that provider, and the key belongs in the environment where possible. | flag, env, config |
 | **Model / provider / base URL / workspace** | The everyday selectors. | flag, env, config |
 
 Intentionally **not** configurable. Each is a container-format or protocol
@@ -152,6 +163,9 @@ invariant; changing one changes what the harness means, not how it is deployed:
 - `web_search` response 2 MiB, results default 5 / max 10, output 60 KiB,
   snippet 1,200 characters, and the fixed 15-second search timeout. One
   SearXNG request per tool call; no retry, pagination loop, or caching.
+- `web_fetch` body 2 MiB, header 64 KiB, 5 redirects, 8 KiB URL, 60 KiB text
+  page, and the 16 MiB Crawl4AI response cap. These are transcript and safety
+  boundaries; `web_timeout` is the configurable part.
 - Session line 4 MiB, session schema version, cache version 3, file modes
   0600/0700, and the retention policy (none).
 - Transport attempt budget (5), retry backoff, `Retry-After` cap, and the

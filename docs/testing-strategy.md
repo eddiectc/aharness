@@ -298,6 +298,32 @@ diagnostic, not a gate.
   the result reaches the next provider request as data and the run continues by
   the existing policy. The startup log records `search_configured` and
   `search_timeout_ms` without the URL.
+- Web fetch unit (`internal/tools/web_fetch_test.go`, `web_extract_test.go`,
+  `web_fetch_crawl4ai_test.go`): URL-shape and address tables (loopback,
+  private, link-local, shared, multicast, documentation, benchmarking,
+  metadata, IPv4-mapped, NAT64, mixed-address hosts); content-type dispatch
+  for HTML/XHTML/plain/Markdown/JSON/XML/CSV/PDF/image/octet-stream and
+  missing-type sniffing; charset decoding with `Content-Type`, meta charset,
+  BOM, and invalid bytes; gzip, unsupported encoding, declared and streamed
+  body caps; 204/403/404/429/500; same-host, cross-host, downgrade, loop, and
+  missing-`Location` redirects; offset boundaries and the continuation footer;
+  sanitization; extraction fixtures for article boilerplate, code/tables,
+  hidden nodes, app shells, challenges, and empty bodies; and the Crawl4AI
+  request shape, streamed field skipping, status/redirect mapping, caps, and
+  error mapping. `httptest` page and provider servers are the only network.
+- Web fetch end to end: a fake model provider returns a `web_fetch` tool call.
+  With `web_fetch_provider=crawl4ai` and a fake `/crawl` endpoint the binary
+  records exactly one paired `tool_result`, extracts the rendered fixture, and
+  the next provider request carries the text; a 500 from the provider is
+  `fetch_failed` with no builtin request. With `builtin`, a loopback target is
+  `blocked_address` before any connection. The startup log records
+  `web_timeout_ms`, `web_fetch_provider`, and the endpoint host, never the key.
+  A `toolset-v1` session resumes with `web_fetch` in the projected set.
+- Web extraction fuzz: arbitrary HTML and content types through the extraction
+  pipeline (no panic, valid UTF-8, no control characters, bounded output), and
+  arbitrary strings through the fetch-target and provider-endpoint validators
+  (only absolute http(s), no userinfo, no fragment, no control characters).
+  The fuzz targets run without network access.
 - `-refresh-models`: the fake catalog server observes an unconditional request
   with no `If-None-Match` and no provider token; the summary is printed and no
   session file is created. Server-down and invalid-catalog cases exit 3/4 and

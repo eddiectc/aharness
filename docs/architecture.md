@@ -59,8 +59,13 @@ session requires `-model` (or `AHARNESS_MODEL`) naming a usable model; there is
 no hardcoded default model, fallback, routing, or provider matrix.
 
 The harness opens network connections only through the dialect adapters, the
-catalog source, and the configured SearXNG instance. `web_search` contacts only
-the operator-configured base URL; it never fetches a model-supplied URL.
+catalog source, the configured SearXNG instance, the builtin `web_fetch`
+client, and the operator-configured `web_fetch` provider endpoint.
+`web_search` contacts only the operator-configured base URL; it never fetches a
+model-supplied URL. `web_fetch` contacts the model-supplied URL through the
+builtin client, whose dial-time address guard refuses private, loopback,
+link-local, metadata, and other special-purpose addresses; with a non-builtin
+provider it contacts only the operator endpoint and moves target egress there.
 `run_command` may use whatever network the host allows. Provider-specific
 request and response shapes stay behind `model.OpenAIChat` and
 `model.OpenAIResponses`.
@@ -409,6 +414,10 @@ internal/tools/
   edit.go
   search.go
   web_search.go  # SearXNG JSON client, base-URL validation, dedupe, sanitization
+  web_fetch.go   # provider dispatch, URL/address guard, redirects, paging, details
+  web_fetch_provider.go  # fetcher interface, provider selection, endpoint validation
+  web_fetch_crawl4ai.go  # Crawl4AI /crawl adapter and streaming decode
+  web_extract.go # trafilatura extraction, DOM fallback, challenge detection, sanitization
   command.go
   command_spill.go # per-run oversized-output capture
   command_unix.go
@@ -766,21 +775,24 @@ func (w *Workspace) rel(p string) (string, error) {
 | `edit_file` | `path`, `old_string`, `new_string`, `replace_all` (default false) | Requires a unique exact byte match unless `replace_all`; zero or multiple matches are actionable errors; `old_string == new_string` is an error. Rejects a symlink anywhere in the path. Writes atomically via an `O_EXCL` temp file in the same directory plus rename; preserves mode with fchmod; preserves bytes, including CRLF. Creates a file only when it does not exist and `old_string` is empty, using mode 0644 and requiring the parent directory to exist; an existing file with an empty `old_string` is an error. Rejects an edit whose resulting file would exceed 2 MiB. Returns a short diff summary. |
 | `search` | `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, symlinks, and files over 1 MiB, and reports skipped counts by reason. Returns `path:line: text`, with long lines clipped. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `**` matches zero or more whole path segments; `*` does not cross `/`. Output is capped at 60 KiB head-only. A result-count cap is marked `[results capped at N]` and does not set `truncated`; dropped bytes do. |
 | `web_search` | `query`, `max_results` (default 5, max 10), `categories`, `language`, `time_range` (`day`/`month`/`year`) | Sends one GET to `<searxng_url>/search?format=json` with a fixed 15-second timeout and a 2 MiB response cap. Filters to absolute http(s) result URLs with no userinfo, strips fragments for deduplication, and sanitizes title/URL/snippet: invalid UTF-8 replaced, entities decoded, tags stripped, control characters removed, whitespace collapsed; snippets are capped at 1,200 characters. Returns title/URL/snippet only and never fetches a result page. Output is capped at 60 KiB head-only; when the cap drops results the header count reflects what was delivered and `truncated` is set. A 403 is `unavailable` with JSON-format guidance, other non-2xx is `http_error`, transport/decode failures are `fetch_failed`, and an oversized body is `too_large`. An unset backend returns `unavailable` with the setting names. `details` records delivered results, truncation, and unresponsive engines. |
+| `web_fetch` | `url`, `offset` (byte offset into the extracted UTF-8 text, default 0) | One GET through the configured provider. Builtin: absolute http(s) only, no userinfo or fragment, max 8 KiB; every address is resolved and checked at dial time and refused when any is not globally routable unicast (loopback, private, link-local, shared, multicast, documentation, benchmarking, metadata, IPv4-mapped, NAT64). At most 5 redirects; same-host hops are revalidated and followed, HTTPS-to-HTTP and cross-host hops stop and return the target as successful data. The request sends `Accept` and `User-Agent: aharness/<version>`, no cookie jar, no `Authorization`, no `Referer`, and no proxy environment. Body 2 MiB after decompression, headers 64 KiB, timeout `web_timeout` (30s default, 120s max). HTML is decoded (Content-Type/meta charset/BOM, UTF-8 default), stripped of script/style/nav/header/footer/aside/form/hidden nodes, and extracted with `go-trafilatura` (conservative DOM fallback); text/markdown/JSON/XML/CSV pass through as text; images, audio, video, PDF, and octet-stream are `unsupported_content_type`; a missing type is sniffed. An app shell, bot challenge, or empty extraction is `content_unavailable`, never empty success. Text is sanitized (valid UTF-8, LF, no controls or ANSI escapes) and capped at 60 KiB per call with `[truncated at 61440 bytes; continue with offset=N]`. `web_fetch_provider=crawl4ai` posts one URL to `<web_fetch_url>/crawl` with `cache_mode: "disabled"` and `check_robots_txt: false`, stream-decodes `results[0].html` (2 MiB cap, 16 MiB response cap), and applies the same extraction, caps, and paging. A provider failure is `fetch_failed` and is never retried against the builtin path. |
+
 | `run_command` | `command`, `cwd` (default workspace root), `timeout_ms` (default 120000, max 600000) | Runs `/bin/sh -c` in its own process group with `Setpgid`, a `Cancel` that kills the group, and `WaitDelay`; stdin is nil. Captures stdout and stderr separately, sanitizes to valid UTF-8, and caps at 64 KiB combined with head+tail. When combined output exceeds the cap, the full combined stream is written to a unique `<state>/work/<session-id>/tool-output/*.log` file (directory 0700, file 0600, `O_EXCL`, no symlink following); the inline result ends with `full output: <absolute path>` and `details` records `spilled`/`path`. The per-run work cleanup removes the file; after resume the path is historical and its content is gone. Returns `exit_code`, `timed_out`, and labeled streams. Non-zero exit is a normal result (`ok=true`). On timeout or cancellation, kills the whole process group. Rejects `cwd` outside the workspace. |
 
 `search` is implemented with a Go walk; the harness does not shell out to `rg`;
 measure before adding it.
 
 Tool descriptions are versioned prompt material. New sessions record
-`toolset-v1`; v1 was extended in place with `web_search` under the
-no-backward-compatibility decision, so a session that recorded v1 replays the
-current v1 set rather than a four-tool snapshot. The frozen `toolset-v0`
-declaration set remains available so a session that recorded v0 replays with
-the descriptions it was created under. `tools.SchemasFor(version)` selects the
-set, `agent.Project` carries it in `Projection.Schemas`, and the runner sends
-that set. An unknown version is a replay error. The system prompt and
-`PromptVersion` are unchanged; the `web_search` description carries the
-untrusted-snippet warning.
+`toolset-v1`; v1 was extended in place, first with `web_search` and then with
+`web_fetch`, under the no-backward-compatibility decision, so a session that
+recorded v1 replays the current v1 set rather than a four-tool snapshot. The
+frozen `toolset-v0` declaration set remains available so a session that recorded
+v0 replays with the descriptions it was created under.
+`tools.SchemasFor(version)` selects the set, `agent.Project` carries it in
+`Projection.Schemas`, and the runner sends that set. An unknown version is a
+replay error. The system prompt and `PromptVersion` are unchanged; the
+`web_search` description carries the untrusted-snippet warning and the
+`web_fetch` description labels fetched content as untrusted data.
 
 `edit_file` writes atomically: create a temp file in the same directory with
 `O_CREATE|O_EXCL` and a random name, write, call `f.Chmod(existingMode)` through
@@ -1147,6 +1159,20 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   8 KiB. Empty disables search while the tool stays registered and returns an
   actionable `unavailable` result. The startup log records
   `search_configured` and the fixed `search_timeout_ms`, never the URL.
+- `-web-timeout` / `AHARNESS_WEB_TIMEOUT` / `web_timeout` bounds one
+  `web_fetch` request, including connect, redirects, and body reads. The default
+  is 30 seconds and the maximum is 120 seconds; a non-positive or larger value
+  is a config error in every layer. It is independent of the provider
+  `http_timeout`. The startup log records `web_timeout_ms`.
+- `-web-fetch-provider` / `AHARNESS_WEB_FETCH_PROVIDER` / `web_fetch_provider`
+  selects `builtin` (default) or `crawl4ai` once at startup. There is no
+  per-call choice and no fallback. `-web-fetch-url` / `AHARNESS_WEB_FETCH_URL` /
+  `web_fetch_url` must be empty for `builtin` and is required for `crawl4ai`;
+  it is an absolute http(s) endpoint with no userinfo or fragment, max 8 KiB,
+  and may be loopback or private because it is the operator's service.
+  `-web-fetch-key` / `AHARNESS_WEB_FETCH_KEY` / `web_fetch_key` is the optional
+  bearer token, sent only to the provider and never logged. The startup log
+  records `web_fetch_provider` and the endpoint host, never the key.
 - Provider auth: `AHARNESS_PROVIDER_TOKEN`, read once at startup when set; it is
   optional. When set, the selected adapter sends it as a Bearer token; when
   unset or empty, it omits `Authorization`, supporting local no-auth endpoints
@@ -1286,6 +1312,9 @@ Defaults are deliberately conservative and easy to change:
 | Catalog request timeout | 15 seconds (`-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT`) |
 | Catalog response body | 16 MiB |
 | SearXNG base URL | unset (`web_search` returns `unavailable`; `-searxng-url` / `AHARNESS_SEARXNG_URL` / `searxng_url`) |
+| Web fetch provider | `builtin` (`-web-fetch-provider` / `AHARNESS_WEB_FETCH_PROVIDER` / `web_fetch_provider`; `crawl4ai` requires `web_fetch_url`) |
+| Web request timeout | 30 seconds, maximum 120 seconds (`-web-timeout` / `AHARNESS_WEB_TIMEOUT` / `web_timeout`) |
+| Web provider endpoint | unset for builtin; required for crawl4ai (`-web-fetch-url` / `AHARNESS_WEB_FETCH_URL` / `web_fetch_url`) |
 | Max turns | 0 (unlimited; `-max-turns`) |
 | Max context tokens | catalog `limit.context`; `-max-context-tokens` default 0 (unset), explicit values clamped to the model ceiling |
 | Max output tokens per call | 0 (unset; the request field is omitted) |
@@ -1301,6 +1330,8 @@ Defaults are deliberately conservative and easy to change:
 | `read_file` window | 2,000 lines (max 4,000), contiguous, 60 KiB |
 | `search` results | 100 (max 200); 60 KiB head-only |
 | `web_search` results | 5 (max 10); 60 KiB head-only; fixed 15-second timeout |
+| `web_fetch` response | 2 MiB body; 64 KiB header; 5 redirects; 8 KiB URL; 30-second timeout (max 120) |
+| `web_fetch` output | 60 KiB per call with offset continuation; text sanitized to valid UTF-8 |
 
 ## 10. Limits and timeouts
 
@@ -1319,5 +1350,9 @@ an 8 MiB total stream; 64 KiB partial text; a 1 MiB debug request; a 64 KiB
 model-response event-text cap except for the fully recorded `model_response`;
 a 64 KiB steering line; and a 4 MiB session line. `web_search` adds a fixed
 15-second request timeout, a 2 MiB SearXNG response cap, a 60 KiB head-only
-output, and a 1,200-character snippet cap.
+output, and a 1,200-character snippet cap. `web_fetch` adds a 2 MiB response
+body cap after decompression, a 64 KiB response header cap, 5 followed
+redirects, an 8 KiB URL cap, a 60 KiB text page with offset continuation, a
+30-second default timeout with a 120-second maximum, and a 16 MiB Crawl4AI
+response cap.
 
