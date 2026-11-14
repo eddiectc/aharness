@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"aharness/internal/agent"
@@ -52,6 +51,11 @@ type transcriptItem struct {
 	renderedWidth int
 	renderedRich  bool
 	renderedSet   bool
+
+	// lines is the finished, prewrapped transcript rendering. It is rebuilt
+	// only when the item changes, not when another item streams.
+	lines    []string
+	linesSet bool
 
 	// Run header.
 	model    string
@@ -141,7 +145,9 @@ type App struct {
 	textSize  int
 	imageRefs []imageRef
 
-	viewport          viewport.Model
+	viewport          transcriptView
+	lineBuf           []string
+	imagesDirty       bool
 	composer          textarea.Model
 	follow            bool
 	dirty             bool
@@ -209,16 +215,10 @@ func New(opts Options) *App {
 	ta.Placeholder = "Send a task or steering message (Enter)"
 	ta.Focus()
 
-	vp := viewport.New()
-	vp.SoftWrap = true
-	vp.FillHeight = true
-	vp.KeyMap = viewport.KeyMap{}
-
 	app := &App{
 		opts:          opts,
 		host:          opts.Host,
 		composer:      ta,
-		viewport:      vp,
 		follow:        true,
 		rich:          true,
 		headless:      opts.Headless,
@@ -317,6 +317,7 @@ func (m *App) loadHistory(items []agent.HistoryItem) {
 
 func (m *App) addItem(it *transcriptItem) {
 	m.dirty = true
+	m.imagesDirty = true
 	m.items = append(m.items, it)
 	m.textSize += itemTextBytes(it)
 	m.trimItems()
@@ -332,6 +333,7 @@ func (m *App) insertItemBefore(it, target *transcriptItem) {
 	for i, existing := range m.items {
 		if existing == target {
 			m.dirty = true
+			m.imagesDirty = true
 			m.items = append(m.items, nil)
 			copy(m.items[i+1:], m.items[i:])
 			m.items[i] = it

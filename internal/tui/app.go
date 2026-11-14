@@ -266,7 +266,11 @@ type (
 
 const (
 	headlessSettle = 30 * time.Millisecond
-	coalesceDelay  = 16 * time.Millisecond
+	// coalesceDelay bounds transcript rebuilds while tokens stream. Streaming
+	// deltas arrive far faster than a terminal can usefully repaint, and each
+	// rebuild re-renders the growing block; ~30 fps keeps the display smooth
+	// without spending a core on it.
+	coalesceDelay = 33 * time.Millisecond
 )
 
 // Init starts the optional seeded-task timer. Headless drivers submit the seed
@@ -457,8 +461,7 @@ func (m *App) layout() {
 	}
 	header, composerH, status := 1, m.composerHeight(), 1
 	transcript := max(1, m.height-header-composerH-status)
-	m.viewport.SetWidth(m.width)
-	m.viewport.SetHeight(transcript)
+	m.viewport.SetSize(m.width, transcript)
 	m.composer.SetWidth(max(1, m.width-2))
 	m.composer.SetHeight(m.editorHeight())
 }
@@ -836,6 +839,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		if header := m.runItem(); header != nil {
 			header.model = ev.Model
 			header.dialect = ev.Dialect
+			header.linesSet = false
 		}
 	case agent.ModelStarted:
 		m.run.state = StateRunning
@@ -845,7 +849,9 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		// to a stale block.
 		if m.run.thinking != nil {
 			m.run.thinking.thinking = false
+			m.run.thinking.linesSet = false
 			m.run.thinking = nil
+			m.dirty = true
 		}
 	case agent.ReasoningDelta:
 		if ev.Text == "" {
@@ -856,6 +862,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 			m.run.thinking = m.appendThinking(m.run.turn, "")
 		}
 		m.run.thinking.text = CapText(m.run.thinking.text+Sanitize(ev.Text), maxThinkingItemText)
+		m.run.thinking.linesSet = false
 		m.dirty = true
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
@@ -872,6 +879,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		// Assistant text means thinking is over; settle the block header.
 		if m.run.thinking != nil {
 			m.run.thinking.thinking = false
+			m.run.thinking.linesSet = false
 		}
 		if m.run.streamed == nil {
 			m.run.streamed = m.appendAssistant(m.run.turn, "")
@@ -879,6 +887,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.run.streamed.text = CapText(m.run.streamed.text+Sanitize(ev.Text), maxTranscriptItemText)
 		m.dirty = true
 		m.run.streamed.renderedSet = false
+		m.run.streamed.linesSet = false
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
 		}
@@ -903,8 +912,12 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		} else {
 			streamed.text = text
 			streamed.renderedSet = false
+			streamed.linesSet = false
 		}
 		m.run.streamed = nil
+		// Completion can reveal markdown image links that streaming withheld
+		// from the image scan.
+		m.imagesDirty = true
 		// The completed reasoning is authoritative for the settled thinking
 		// block; a streamed block already holds the deltas. Reasoning that was
 		// never streamed is inserted above this response's assistant text so a
@@ -915,6 +928,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 				m.dirty = true
 			}
 			thinking.thinking = false
+			thinking.linesSet = false
 			m.run.thinking = nil
 		} else if reasoning := CapText(Sanitize(ev.Reasoning), maxThinkingItemText); reasoning != "" {
 			it := &transcriptItem{
@@ -956,6 +970,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.running = true
 		m.dirty = true
 		it.args = CapText(SanitizeLine(string(ev.Call.Arguments)), 2<<10)
+		it.linesSet = false
 		m.emit(EventToolStarted{CallID: it.callID, Name: it.name, Arguments: it.args})
 		m.dirty = true
 		m.ensureContent()
@@ -983,6 +998,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.truncated = ev.Truncated
 		it.timedOut = ev.TimedOut
 		it.toolTime = ev.Duration
+		it.linesSet = false
 		delete(m.run.pending, it.callID)
 		m.dirty = true
 		m.emit(EventToolFinished{
@@ -1074,6 +1090,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 		header.duration = duration
 		header.turns = result.RunTurns
 		header.usage = result.RunUsage
+		header.linesSet = false
 	}
 	m.info.Turns = result.CumulativeTurns
 	m.info.Usage = result.CumulativeUsage
@@ -1108,6 +1125,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	m.run.streamed = nil
 	if thinking := m.run.thinking; thinking != nil {
 		thinking.thinking = false
+		thinking.linesSet = false
 		m.run.thinking = nil
 	}
 	m.run.ctrlArmed = false
@@ -1156,6 +1174,8 @@ func (m *App) ackMessage(ev agent.MessageRecorded) {
 				if m.steer[i].item != nil {
 					m.steer[i].item.queued = false
 					m.steer[i].item.acked = true
+					m.steer[i].item.linesSet = false
+					m.dirty = true
 				}
 				m.notice = "steering sent"
 				return
@@ -1178,6 +1198,8 @@ func (m *App) removeItem(target *transcriptItem) {
 	}
 	for i, it := range m.items {
 		if it == target {
+			m.dirty = true
+			m.imagesDirty = true
 			m.textSize -= itemTextBytes(it)
 			m.items = append(m.items[:i], m.items[i+1:]...)
 			return
@@ -1187,7 +1209,9 @@ func (m *App) removeItem(target *transcriptItem) {
 
 func (m *App) invalidateRenders() {
 	m.dirty = true
+	m.imagesDirty = true
 	for _, it := range m.items {
 		it.renderedSet = false
+		it.linesSet = false
 	}
 }

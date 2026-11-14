@@ -265,67 +265,96 @@ func (m *App) cursor() *tea.Cursor {
 	return c
 }
 
-// ensureContent lazily rebuilds the transcript viewport when an item, width,
-// or rendering mode changed.
+// ensureContent lazily rebuilds the transcript window when an item, width, or
+// rendering mode changed. Unchanged items keep their rendered lines, so a
+// streaming delta only re-renders the item it touched.
 func (m *App) ensureContent() {
 	if m.width <= 0 {
 		return
 	}
-	if !m.dirty && m.contentWidth == m.width {
-		if m.follow && !m.viewport.AtBottom() {
+	if m.contentWidth != m.width {
+		m.contentWidth = m.width
+		m.invalidateRenders()
+	}
+	if !m.dirty {
+		if m.follow {
 			m.viewport.GotoBottom()
 		}
 		return
 	}
 	m.dirty = false
-	m.contentWidth = m.width
-	m.rebuildImages()
+	if m.imagesDirty {
+		m.imagesDirty = false
+		m.rebuildImages()
+	}
 	m.imageRefs = nil
-	lines := m.transcriptLines()
-	m.viewport.SetContentLines(lines)
+	m.lineBuf = m.transcriptLinesInto(m.lineBuf[:0])
+	m.viewport.SetLines(m.lineBuf)
 	if m.follow {
 		m.viewport.GotoBottom()
 	}
 }
 
+// transcriptLines renders the transcript into a fresh slice. The app's hot
+// path uses transcriptLinesInto to reuse its buffer.
 func (m *App) transcriptLines() []string {
+	return m.transcriptLinesInto(nil)
+}
+
+func (m *App) transcriptLinesInto(buf []string) []string {
 	t := newTheme(m.noColor)
-	var lines []string
 	for _, it := range m.items {
-		switch it.kind {
-		case itemRun:
-			lines = append(lines, m.renderRunLine(t, it))
-		case itemUser:
-			lines = append(lines, renderTextBlock(t, "user", t.user, it.text, m.width)...)
-			if it.queued {
-				lines = append(lines, t.dim.Render("  steering queued…"))
-			}
-		case itemAssistant:
-			lines = append(lines, m.renderAssistant(t, it)...)
-		case itemThinking:
-			lines = append(lines, m.renderThinking(t, it)...)
-		case itemTool:
-			lines = append(lines, m.renderTool(t, it)...)
-		case itemNotice:
-			style := t.notice
-			if it.noticeKind == agent.NoticeError {
-				style = t.errorSty
-			}
-			lines = append(lines, renderTextBlock(t, "notice", style, it.text, m.width)...)
-		case itemImage:
-			start := len(lines) + 1
+		if it.kind == itemImage {
+			start := len(buf) + 1
 			imgLines := m.renderImage(t, it)
 			if len(imgLines) > 1 && len(m.imageRefs) > 0 {
 				m.imageRefs[len(m.imageRefs)-1].line = start
 			}
-			lines = append(lines, imgLines...)
+			buf = append(buf, imgLines...)
+			buf = append(buf, "")
+			continue
 		}
-		lines = append(lines, "")
+		if !it.linesSet {
+			it.lines = wrapLines(m.renderItem(t, it), m.width)
+			it.linesSet = true
+		}
+		buf = append(buf, it.lines...)
+		buf = append(buf, "")
 	}
-	if len(lines) == 0 {
-		lines = m.emptyTranscriptLines(t)
+	if len(buf) == 0 {
+		return m.emptyTranscriptLines(t)
 	}
-	return lines
+	return buf
+}
+
+// renderItem renders one non-image transcript entry. The result is cached on
+// the item and must not depend on anything but the item and the global render
+// mode; width changes invalidate the cache.
+func (m *App) renderItem(t uiTheme, it *transcriptItem) []string {
+	switch it.kind {
+	case itemRun:
+		return []string{m.renderRunLine(t, it)}
+	case itemUser:
+		lines := renderTextBlock(t, "user", t.user, it.text, m.width)
+		if it.queued {
+			lines = append(lines, t.dim.Render("  steering queued…"))
+		}
+		return lines
+	case itemAssistant:
+		return m.renderAssistant(t, it)
+	case itemThinking:
+		return m.renderThinking(t, it)
+	case itemTool:
+		return m.renderTool(t, it)
+	case itemNotice:
+		style := t.notice
+		if it.noticeKind == agent.NoticeError {
+			style = t.errorSty
+		}
+		return renderTextBlock(t, "notice", style, it.text, m.width)
+	default:
+		return nil
+	}
 }
 
 // emptyTranscriptLines renders the tips block that fills an empty transcript.
@@ -433,9 +462,10 @@ func (m *App) renderAssistant(t uiTheme, it *transcriptItem) []string {
 	return lines
 }
 
-// renderThinking renders one thinking block as preformatted, wrapped text. The
-// header shows whether the model is still thinking; the body is never parsed
-// as markdown because it is provider prose, not assistant output.
+// renderThinking renders one thinking block as preformatted text. The header
+// shows whether the model is still thinking; the body is never parsed as
+// markdown because it is provider prose, not assistant output. Width wrapping
+// happens once in wrapLines when the item's lines are cached.
 func (m *App) renderThinking(t uiTheme, it *transcriptItem) []string {
 	header := "thinking"
 	if it.thinking {
@@ -443,7 +473,6 @@ func (m *App) renderThinking(t uiTheme, it *transcriptItem) []string {
 	}
 	label := t.label.Render(header + " ")
 	labelWidth := lipgloss.Width(label)
-	width := max(1, m.width-labelWidth)
 	// Sanitize again at the render boundary: terminal safety must not depend on
 	// every future producer of a thinking item remembering to sanitize.
 	body := strings.Split(strings.TrimRight(Sanitize(it.text), "\n"), "\n")
@@ -451,20 +480,12 @@ func (m *App) renderThinking(t uiTheme, it *transcriptItem) []string {
 		body = []string{"…"}
 	}
 	indent := strings.Repeat(" ", labelWidth)
-	// Long thinking lines wrap so reasoning stays readable instead of being
-	// cut at the right edge like a status line.
-	wrapped := make([]string, 0, len(body))
-	for _, line := range body {
-		for _, part := range strings.Split(ansi.Wrap(line, width, " "), "\n") {
-			wrapped = append(wrapped, t.think.Render(part))
-		}
-	}
-	lines := make([]string, 0, len(wrapped)+1)
-	for i, line := range wrapped {
+	lines := make([]string, 0, len(body))
+	for i, line := range body {
 		if i == 0 {
-			lines = append(lines, label+line)
+			lines = append(lines, label+t.think.Render(line))
 		} else {
-			lines = append(lines, indent+line)
+			lines = append(lines, indent+t.think.Render(line))
 		}
 	}
 	return lines

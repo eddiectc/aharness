@@ -94,6 +94,7 @@ func TestImageRejectsSymlinkAndUnsupportedAndOversized(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "link.png")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
+	app.invalidateRenders()
 	app.ensureContent()
 	if len(app.images) != 1 || app.images[0].errText == "" {
 		t.Fatalf("symlink accepted: %+v", app.images)
@@ -103,7 +104,7 @@ func TestImageRejectsSymlinkAndUnsupportedAndOversized(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir2, "bad.svg"), []byte("<svg/>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app2.dirty = true
+	app2.invalidateRenders()
 	app2.ensureContent()
 	if len(app2.images) != 1 || !strings.Contains(app2.images[0].errText, "unsupported") {
 		t.Fatalf("SVG accepted: %+v", app2.images)
@@ -111,7 +112,7 @@ func TestImageRejectsSymlinkAndUnsupportedAndOversized(t *testing.T) {
 
 	app3, _, dir3 := imageTestApp(t, "![x](huge.png)")
 	writeTestPNG(t, filepath.Join(dir3, "huge.png"), maxImageDimension+1, 1, color.Black)
-	app3.dirty = true
+	app3.invalidateRenders()
 	app3.ensureContent()
 	if len(app3.images) != 1 || !strings.Contains(app3.images[0].errText, "cap") {
 		t.Fatalf("oversized image accepted: %+v", app3.images)
@@ -121,6 +122,7 @@ func TestImageRejectsSymlinkAndUnsupportedAndOversized(t *testing.T) {
 func TestImageViewerOpensAndCloses(t *testing.T) {
 	app, _, dir := imageTestApp(t, "![chart](chart.png)")
 	writeTestPNG(t, filepath.Join(dir, "chart.png"), 16, 16, color.RGBA{G: 255, A: 255})
+	app.invalidateRenders()
 	app.ensureContent()
 	press(t, app, "ctrl+g")
 	if app.overlay.kind != OverlayImage {
@@ -161,6 +163,7 @@ func TestImageProtocolNoneUsesPlaceholder(t *testing.T) {
 func TestFrameProtocolContainsNoRawImageBytes(t *testing.T) {
 	app, _, dir := imageTestApp(t, "![chart](chart.png)")
 	writeTestPNG(t, filepath.Join(dir, "chart.png"), 8, 8, color.RGBA{R: 1, G: 2, B: 3, A: 255})
+	app.invalidateRenders()
 	app.ensureContent()
 	data, err := os.ReadFile(filepath.Join(dir, "chart.png"))
 	if err != nil {

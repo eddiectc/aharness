@@ -78,7 +78,7 @@ func TestEmptyTranscriptTipsFitTheMinimumTerminal(t *testing.T) {
 func TestEmptyTranscriptTipsDropWhenTheTranscriptIsShort(t *testing.T) {
 	for _, height := range []int{2, 4, 5, 21} {
 		app := newTestApp(t, newManualHost())
-		app.viewport.SetHeight(height)
+		app.viewport.SetSize(app.width, height)
 		lines := app.transcriptLines()
 		text := ansi.Strip(strings.Join(lines, "\n"))
 		if !strings.Contains(text, "No messages yet") {
