@@ -131,6 +131,8 @@ func protocolKey(name string) (tea.KeyPressMsg, error) {
 		code = tea.KeyF1
 	case "f2":
 		code = tea.KeyF2
+	case "f3":
+		code = tea.KeyF3
 	case "ctrl-c", "ctrl-d", "ctrl-l", "ctrl-u", "ctrl-w", "ctrl-a", "ctrl-e",
 		"ctrl-k", "ctrl-p", "ctrl-o", "ctrl-r", "ctrl-t", "ctrl-g", "ctrl-x":
 		code = rune(name[len(name)-1])

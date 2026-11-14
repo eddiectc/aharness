@@ -10,13 +10,14 @@ opt-in and unlimited by default.
   implemented, including usage/cost accounting, the contiguous 2,000-line read
   contract with `toolset-v1` replay, search/command improvements, builtin
   SearXNG-backed web search, and the dev-only eval driver and 30-task suite. The
-  default TUI, provider/model discovery, per-model thinking effort, and
-  display-only thinking text are implemented. The TUI is
+  default TUI, provider/model discovery, per-model thinking effort,
+  display-only thinking text, and folded thinking/tool output are implemented.
+  The TUI is
   the default in a terminal;
   `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
   surface. Mock-provider, integration, fuzz, race, and §8 gate checks pass. The
-  real-provider TUI, thinking-effort, thinking-display, and eval baseline/A-B
-  runs remain pending
+  real-provider TUI, thinking-effort, thinking-display, transcript-folding, and
+  eval baseline/A-B runs remain pending
   provider credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
   environment); they are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
@@ -52,6 +53,13 @@ opt-in and unlimited by default.
   a `thinking` transcript block. It is never logged, projected, replayed, or
   printed in batch mode, so the session log and the one-shot stdout contract are
   unchanged.
+- Folded transcript blocks: thinking and tool output are collapsed by default to
+  their header, an elision row with the hidden rendered-row count, and the last
+  three rendered rows. The tail keeps the conclusion, failure, or test verdict
+  visible. `F3` expands every block, and `F3` again collapses them; the mode is
+  sticky across turns and runs, inert in overlays, and not persisted. Expanded
+  tool output stays bounded to 40 lines / 4 KiB, and the 64 KiB safety caps and
+  truncation markers are unchanged.
 - Provider usage detail and an observational cost estimate. `model.Usage`
   keeps input/output totals plus cached-input, cache-write, and
   reasoning-output subsets and a `reported` flag; `run_start` records the
@@ -89,7 +97,8 @@ opt-in and unlimited by default.
   The TUI and `-ui-json` always stream. The canonical response is the only
   transcript record; deltas are display-only.
 - The default interactive TUI: a full-screen transcript, streaming text, a
-  display-only `thinking` block for model reasoning, tool
+  display-only `thinking` block for model reasoning, folded thinking/tool
+  blocks (`F3`), tool
   activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
   a workspace file picker, catalog-backed next-run model and thinking-effort
   pickers, details and help overlays, workspace-contained images, and mouse

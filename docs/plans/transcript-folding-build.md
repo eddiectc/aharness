@@ -1,10 +1,9 @@
 # aharness transcript folding build plan
 
 - **Date:** 2026-11-13
-- **Status:** proposed. Nothing in this plan is implemented. The shipped
-  behavior it replaces is documented in [tui.md](../tui.md) and
-  [limits.md](../limits.md); those documents stay normative until this work
-  lands and updates them.
+- **Status:** implemented 2026-11-14. The shipped behavior is documented in
+  [tui.md](../tui.md) and [limits.md](../limits.md); §1.4 records verification
+  and §10 records deviations.
 - **Source:** UX review of the `thinking` transcript block introduced by
   [thinking display](../tui.md#thinking) and the tool-output fold in
   `internal/tui/view.go`. Model reasoning is capped at 64 KiB but rendered
@@ -95,34 +94,34 @@
 In addition to the [project definition of done](../definition-of-done.md), the
 feature is complete when every item below holds.
 
-- [ ] Thinking and tool blocks render collapsed by default: header, elision
+- [x] Thinking and tool blocks render collapsed by default: header, elision
       row with a hidden-line count, and exactly the last three rendered rows.
-- [ ] `F3` expands every fold, and `F3` again collapses every fold, while idle
+- [x] `F3` expands every fold, and `F3` again collapses every fold, while idle
       and during a run, with a `expanded blocks` / `collapsed blocks` notice.
-- [ ] The mode is sticky across turns, runs, streaming deltas, retries, and
+- [x] The mode is sticky across turns, runs, streaming deltas, retries, and
       item trimming, and persists until `F3` is pressed again.
-- [ ] There is no slash command, no per-block binding, and no mouse binding for
+- [x] There is no slash command, no per-block binding, and no mouse binding for
       folding; `MouseClickMsg` handling is unchanged.
-- [ ] Tool blocks always show the command header with name, args, status,
+- [x] Tool blocks always show the command header with name, args, status,
       reason code, truncation, timeout, and duration regardless of fold state.
-- [ ] Collapsed thinking shows the tail of the reasoning, so a settled block
+- [x] Collapsed thinking shows the tail of the reasoning, so a settled block
       ends on the model's conclusion rather than its opening restatement.
-- [ ] Toggling while following the live tail leaves the viewport on the newest
+- [x] Toggling while following the live tail leaves the viewport on the newest
       row, during streaming and when idle.
-- [ ] Toggling while scrolled back preserves the anchored item on screen; the
+- [x] Toggling while scrolled back preserves the anchored item on screen; the
       only exception that sets `follow` is a collapse that lands the viewport
       at the bottom.
-- [ ] Expanded rendering is bounded; over-cap text still shows the `CapText`
+- [x] Expanded rendering is bounded; over-cap text still shows the `CapText`
       truncation marker, and thinking never claims to be in the session log.
-- [ ] `-ui-json` accepts `f3`, existing protocol 1 clients parse frames, and
+- [x] `-ui-json` accepts `f3`, existing protocol 1 clients parse frames, and
       `docs/tui.md` states that collapsed rows are absent from frame lines.
-- [ ] Frames and snapshots stay within their line and size caps with a
+- [x] Frames and snapshots stay within their line and size caps with a
       maximally populated transcript.
-- [ ] Unit, TUI, headless, race, lint, build, and vulnerability gates pass, and
+- [x] Unit, TUI, headless, race, lint, build, and vulnerability gates pass, and
       `docs/tui.md`, `docs/limits.md`, and `README.md` are updated.
 - [ ] A real-provider smoke with at least one reasoning-capable model confirms
-      the fold against live thinking text. If credentials are unavailable,
-      record it as a release prerequisite rather than claiming it.
+      the fold against live thinking text. Credentials are unavailable in the
+      implementation environment; this is a release prerequisite, not a claim.
 
 ## 2. Current state
 
@@ -412,3 +411,35 @@ package, event, or wire contract moves.
   they collapse.
 - **Reasoning duplication** in `openai_responses.go` remains; preferring
   `summary` over `content` is the recommended follow-up.
+
+## 10. Deviations from the plan
+
+- **Thinking header text.** The illustrative collapsed shape in §3.2 showed
+  `thinking 3 · 14s · 1.2k chars`. The implementation keeps the shipped
+  `thinking` / `thinking…` header and does not add per-block timing or size
+  counters: no definition-of-done criterion asks for them, timing would make
+  headless frames nondeterministic, and §3.2's binding rule is only that the
+  header is identical in both fold states.
+- **Tips.** `F3` was not added to the empty-transcript tips block. At the 40×10
+  minimum the block already drops its last tip to fit, so `F3` is documented in
+  the `F1` key list and `docs/tui.md` instead, as §3.5 permits.
+- **Body indent.** Thinking body rows are indented two spaces, matching the
+  collapsed shape in §3.2 and the tool body, instead of aligning under the
+  header label. The elision row and the tail therefore share one left edge, and
+  wrapped-row counting does not depend on the header width.
+- **Elision wording.** The row renders `… N earlier lines` with `N` counted in
+  wrapped rows, matching the §3.2 shape while keeping the count's unit in the
+  rendered-line vocabulary used by frames.
+- **Tool body wrapping.** Tool output rows now wrap at the transcript width
+  rather than being clipped at the right edge. This is what makes the three-row
+  tail a count of rendered rows for both block kinds and keeps failures visible
+  instead of cutting their text.
+- **CapText marker in expanded tools.** When the 64 KiB safety cap appended its
+  marker beyond the 40-line inline window, the expanded view appends the marker
+  explicitly before the inline-cap sentence, so the marker is visible in both
+  fold states.
+- **Fold cache shape.** The per-item cache stores the unfolded, wrapped body
+  keyed by width, fold mode, and source text, and the existing `lines` cache
+  stores the final folded rows. A toggle therefore re-folds a body without
+  re-splitting or re-wrapping it; streaming content invalidates the body by
+  source identity.

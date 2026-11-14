@@ -1,8 +1,9 @@
 # aharness limits and timeouts
 
 - **Date:** 2026-11-13
-- **Status:** current for v1, the shipped TUI, model discovery, thinking
-  effort, web search, and the flag/env/config-file configuration layers.
+- **Status:** current for v1, the shipped TUI (including transcript folding),
+  model discovery, thinking effort, web search, and the flag/env/config-file
+  configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
   [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
@@ -251,7 +252,8 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Decoded image pixels | 16 Mi (4096×4096 max) | Larger images are rejected before full decode. |
 | Images per transcript | 32 | Oldest displayed thumbnails are dropped; the transcript item remains. |
 | Image thumbnail | 60×20 cells or available width | Half-block glyph preview; Kitty only in the viewer. |
-| Tool output | 4 KiB or 40 lines folded | Expanded output never exceeds the logged tool-result cap. |
+| Tool output | 4 KiB or 40 lines expanded | Collapsed shows the last three rendered rows of the full result; expanded output never exceeds the logged tool-result cap. |
+| Transcript fold | 3 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky, display-only, and not persisted. |
 | Tool arguments preview | 2 KiB or 8 lines | Full arguments remain in `model_response`/the log. |
 | Input history | 100 entries | In-memory only; not persisted. |
 | Minimum terminal size | 40×10 | Below shows a resize message; quit/resize keys still work. |

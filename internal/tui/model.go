@@ -39,7 +39,7 @@ const (
 
 // transcriptItem is one display-only transcript entry. Assistant text is
 // markdown source; thinking text is preformatted provider reasoning. Rendered
-// caches are keyed by width and rich/raw mode.
+// caches are keyed by width, rich/raw mode, and fold state.
 type transcriptItem struct {
 	kind   itemKind
 	run    int
@@ -56,6 +56,15 @@ type transcriptItem struct {
 	// only when the item changes, not when another item streams.
 	lines    []string
 	linesSet bool
+
+	// folded caches the unfolded body of a thinking or tool item, keyed by
+	// width, fold mode, and source text. Toggling only re-folds this cache
+	// instead of re-splitting and re-wrapping the body.
+	folded         []string
+	foldedWidth    int
+	foldedExpanded bool
+	foldedSource   string
+	foldedSet      bool
 
 	// Run header.
 	model    string
@@ -144,6 +153,10 @@ type App struct {
 	items     []*transcriptItem
 	textSize  int
 	imageRefs []imageRef
+	// rowOf is parallel to items and holds each item's first transcript row,
+	// rebuilt with the lines. It lets a fold toggle restore the item the
+	// operator was reading instead of a numeric offset that no longer maps.
+	rowOf []int
 
 	viewport     transcriptView
 	lineBuf      []string
@@ -157,8 +170,9 @@ type App struct {
 	// until that tick runs.
 	coalesceScheduled bool
 
-	rich     bool
-	headless bool
+	rich      bool
+	expandAll bool
+	headless  bool
 
 	run         liveRun
 	nextRun     int
@@ -371,6 +385,13 @@ func (m *App) trimItems() {
 // itemTextBytes is the capped display weight of one item.
 func itemTextBytes(it *transcriptItem) int {
 	return len(it.text) + len(it.output) + len(it.errText) + len(it.args)
+}
+
+// invalidateLines drops the item's finished rendering. The folded body cache
+// is dropped too because the source text or width-dependent rendering changed.
+func (it *transcriptItem) invalidateLines() {
+	it.linesSet = false
+	it.foldedSet = false
 }
 
 func (m *App) hasOmittedMarker() bool {

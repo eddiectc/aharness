@@ -1,18 +1,21 @@
 # aharness TUI (shipped)
 
-- **Date:** 2026-11-11
+- **Date:** 2026-11-14
 - **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
-  picker from [model discovery](plans/model-discovery-build.md) and the thinking
-  effort controls from [thinking effort](plans/thinking-effort-build.md). The full
-  contract and milestone rationale are in [tui-build.md](plans/tui-build.md); this
-  document records the shipped surface and verification status.
+  picker from [model discovery](plans/model-discovery-build.md), the thinking
+  effort controls from [thinking effort](plans/thinking-effort-build.md), and
+  the transcript folding from [transcript folding](plans/transcript-folding-build.md).
+  The full contract and milestone rationale are in
+  [tui-build.md](plans/tui-build.md); this document records the shipped surface
+  and verification status.
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
-  steering, interrupts, resume, fork, signals), headless `x/vt` frames and SVG
-  snapshots, race tests, and a manual PTY smoke under `script(1)` at 80x24.
-  The real-provider TUI smoke remains pending provider credentials.
+  steering, interrupts, resume, fork, signals, and `F3` folding), headless
+  `x/vt` frames and SVG snapshots, race tests, and a manual PTY smoke under
+  `script(1)` at 80x24. The real-provider TUI smoke with a reasoning-capable
+  model remains pending provider credentials.
 - **Not verified:** Kitty graphics and the real-terminal 200x60/tmux matrix
-  (manual, needs a Kitty-capable terminal and tmux); real-provider streaming
-  against the hosted endpoint.
+  (manual, needs a Kitty-capable terminal and tmux); real-provider streaming and
+  transcript folding against the hosted endpoint.
 
 ## Modes
 
@@ -32,7 +35,7 @@ TUI and `-ui-json`:
 - create a new session eagerly and allow an omitted task;
 - always stream assistant text; `-stream=false` is a config error;
 - show model thinking as a separate, display-only `thinking` transcript block
-  under the run it belongs to (see [Thinking](#thinking));
+  under the run it belongs to, folded by default (see [Thinking](#thinking));
 - auto-submit `-task`/`-task-file` after the first frame;
 - allow new/resume/fork, with `-fork` optionally having no task;
 - never print final assistant text to stdout;
@@ -67,6 +70,7 @@ submitted message while idle starts one run.
 | `Ctrl-O` | workspace file picker (Bubbles list; see note) | disabled with a notice |
 | `F1` | help overlay | help overlay |
 | `F2` | thinking-effort picker for the next run | disabled with a notice |
+| `F3` | expand/collapse all thinking and tool blocks; the mode is sticky | same |
 | `Ctrl-X` | details overlay | details overlay |
 | `Tab` | composer tab (four spaces) | composer tab (four spaces) |
 | Overlay `Tab`/`Shift-Tab` | move focus | move focus |
@@ -75,9 +79,9 @@ submitted message while idle starts one run.
 A bare `Esc` is recognized only after the 50 ms escape timeout. Option/Alt
 sequences, including Option-`[` and Option-`]`, are decoded as modified keys
 and never interrupt; `Ctrl-C` remains the authoritative global interrupt. The
-help overlay (`F1`) lists the shipped keys and slash commands, including `F2`
-and the overlay keys. While the slash-command menu is open, `Up`/`Down` move
-its selection, `Tab` completes, `Enter` runs the highlighted command, and
+help overlay (`F1`) lists the shipped keys and slash commands, including `F2`,
+`F3`, and the overlay keys. While the slash-command menu is open, `Up`/`Down`
+move its selection, `Tab` completes, `Enter` runs the highlighted command, and
 `Esc` dismisses the menu before the normal `Esc` action.
 
 An empty transcript shows a short tips block (`F1`, `Shift`+drag,
@@ -176,21 +180,37 @@ thinking.
 
 - While the model is still thinking the block header is `thinking…`; it becomes
   `thinking` when assistant text arrives or the response completes.
+- Thinking blocks are folded by default. A collapsed block shows its header,
+  one elision row with the number of hidden rendered rows, and the last three
+  rendered rows of the body. The three-row tail is a count of wrapped rows, so
+  a long provider line can contribute several of them and the collapsed height
+  stays constant while text streams. The tail means a settled block ends on the
+  model's conclusion rather than its opening restatement.
+- `F3` expands every thinking block, and `F3` again collapses them, while idle
+  or during a run. The mode is sticky across turns, runs, retries, streaming
+  deltas, and item trimming; it is not persisted to the config file and does not
+  survive a restart, matching `Ctrl-R`. There is no per-block or mouse binding.
+  `F3` is inert while an overlay is open.
+- Expanded thinking is bounded by the 64 KiB per-item display cap. The `CapText`
+  `[truncated N bytes]` marker is part of the body and remains visible in both
+  states. Thinking has no session-log sentence in its elision row because it is
+  never logged; the hidden text exists only in memory.
 - DeepSeek-compatible Chat endpoints stream `reasoning_content`;
   OpenAI-compatible endpoints may use `reasoning`. The Responses adapter streams
   `response.reasoning_summary_text.delta` and `response.reasoning_text.delta`,
   and uses the terminal reasoning item's summary/content as authoritative.
 - A buffered response, or a provider that only reports reasoning on its
   completed response, is displayed once before the assistant text.
-- Thinking is capped at 64 KiB per response. Long lines wrap; the block is
-  preformatted and never parsed as markdown.
+- Long lines wrap; the block is preformatted and never parsed as markdown.
 - Models and providers that expose no thinking produce no block; nothing
   changes for them. `Ctrl-R` rich/raw applies only to assistant markdown, so a
   thinking block renders the same in both modes.
 - The block is not part of `-ui-json` semantic events; it appears in `frame`
   lines and snapshots like any other transcript text, so the protocol version
   stays 1. A client that waits for a frame during streaming does not see
-  thinking deltas until it requests `frame`.
+  thinking deltas until it requests `frame`. A collapsed block contributes only
+  its header, elision row, and tail to `lines`, so a client scraping frames for
+  reasoning text sees the tail only until it sends `key` `f3`.
 - Batch mode never prints thinking: `-batch`/`-stream` stdout remains assistant
   text only, so the one-shot stdout contract is unchanged. Thinking is also not
   part of `-ui-json` events.
@@ -248,7 +268,7 @@ ordinary composer text: send `text` followed by `key` `enter` (or `tab`,
 shipped key table plus `enter`, `esc`, `up`, `down`, `left`, `right`, `home`,
 `end`, `pgup`, `pgdown`, `backspace`, `delete`, `tab`, `shift-tab`, `ctrl-c`,
 `ctrl-d`, `ctrl-l`, `ctrl-u`, `ctrl-w`, `ctrl-a`, `ctrl-e`, `ctrl-k`, `ctrl-p`,
-`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, and `f2`.
+`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, `f2`, and `f3`.
 
 Output lines:
 
@@ -275,6 +295,9 @@ Output lines:
 Frames are emitted after every view-changing command, after a completed
 `wait`, and after each non-text semantic transition. Text deltas update the
 model but do not emit a frame; request `frame` to snapshot streaming text.
+Collapsed thinking and tool blocks contribute fewer `lines` to a frame; send
+`key` `f3` to expand them. This is a display-only content change, not a new
+event or protocol version.
 Frames and snapshots are deterministic for a fixed provider/tool response,
 size, color profile, and image protocol: `-ui-json` hides the session ID,
 elapsed time, and durations. `-ui-json` always uses glyph image mode.
@@ -289,7 +312,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Task/steering message | 64 KiB | Longer is rejected with a notice; the run continues. |
 | Transcript items / text | 20,000 / 16 MiB | Oldest UI items are dropped with an "older history omitted" marker; the log is unchanged. |
 | Assistant text per item | 64 KiB | Truncation marker; the canonical response remains in the log. |
-| Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. |
+| Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. Collapsed blocks show the last three rendered rows; expanded blocks show the full text up to this cap. |
 | Markdown source / blocks / nesting | 64 KiB / 4,000 / 16 | Over-cap input falls back to plain text with a notice. |
 | Table columns / rows | 12 / 500 | Column width cap 40 cells; the overlay scrolls horizontally. |
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
@@ -297,7 +320,8 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |
 | Images per transcript / thumbnail | 32 / 60×20 cells | Older images fall off; thumbnails are half-block glyphs. |
-| Tool output | 4 KiB or 40 lines folded | Expanded output remains in the log, up to the logged cap. |
+| Tool output | 4 KiB or 40 lines expanded | Collapsed tool blocks show the last three rendered rows of the full result; expanded output is bounded to the first 40 lines / 4 KiB, and the remainder stays in the log. |
+| Transcript fold | 3 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last three wrapped rows. `F3` expands all folds; the mode is sticky and not persisted. |
 | Tool arguments preview | 2 KiB | Full arguments remain in `model_response`. |
 | Input history | 100 entries | In-memory only. |
 | Minimum terminal | 40×10 | Smaller shows a resize message and keeps quit/resize keys. |

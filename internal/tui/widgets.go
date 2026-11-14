@@ -290,6 +290,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"Ctrl-O           file picker (idle)",
 		"F1               help; Ctrl-X details",
 		"F2               thinking effort picker (idle)",
+		"F3               expand/collapse thinking and tool blocks",
 		"",
 		t.dim.Render("Slash commands: Up/Down select, Tab complete, Enter run."),
 		t.dim.Render("Esc dismisses the menu; unknown /text is sent as a message."),

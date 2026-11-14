@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -302,6 +304,60 @@ func (m *App) ensureContent() {
 	}
 }
 
+// captureAnchor records the transcript item at the top of a detached viewport
+// and the row offset inside it. It must run before the rebuild that discards
+// the current lines; a numeric viewport offset is not stable across a fold
+// toggle because every item's row count can change.
+func (m *App) captureAnchor() (*transcriptItem, int, bool) {
+	if m.follow || len(m.items) == 0 || len(m.rowOf) != len(m.items) {
+		return nil, 0, false
+	}
+	offset := m.viewport.YOffset()
+	index := sort.Search(len(m.rowOf), func(i int) bool { return m.rowOf[i] > offset }) - 1
+	if index < 0 {
+		index = 0
+	}
+	return m.items[index], max(0, offset-m.rowOf[index]), true
+}
+
+// restoreAnchor puts the captured item back at the top of the viewport after a
+// rebuild. Collapsing can shrink the item below the saved intra-item offset or
+// shrink the whole transcript below the target, so the target is clamped to
+// the item's last row and then to the new maximum. A collapse that lands at
+// the bottom re-attaches the live tail; no other toggle changes follow.
+func (m *App) restoreAnchor(item *transcriptItem, delta int, collapse bool) {
+	if item == nil {
+		return
+	}
+	index := slices.Index(m.items, item)
+	if index < 0 || index >= len(m.rowOf) {
+		m.viewport.GotoBottom()
+		if collapse {
+			m.follow = true
+		}
+		return
+	}
+	start := m.rowOf[index]
+	end := len(m.viewport.lines)
+	if index+1 < len(m.rowOf) {
+		end = m.rowOf[index+1]
+	}
+	height := max(1, end-start)
+	target := start + min(max(0, delta), height-1)
+	limit := m.viewport.maxOffset()
+	exceeded := target > limit
+	if exceeded {
+		target = limit
+	}
+	m.viewport.offset = target
+	// Only a collapse that had to clamp because the target no longer exists
+	// re-attaches the tail. A collapse whose target is still valid leaves a
+	// detached operator detached, even when the whole transcript fits.
+	if collapse && exceeded {
+		m.follow = true
+	}
+}
+
 // transcriptLines renders the transcript into a fresh slice. The app's hot
 // path uses transcriptLinesInto to reuse its buffer.
 func (m *App) transcriptLines() []string {
@@ -310,7 +366,9 @@ func (m *App) transcriptLines() []string {
 
 func (m *App) transcriptLinesInto(buf []string) []string {
 	t := newTheme(m.noColor)
+	m.rowOf = m.rowOf[:0]
 	for _, it := range m.items {
+		m.rowOf = append(m.rowOf, len(buf))
 		if it.kind == itemImage {
 			start := len(buf) + 1
 			imgLines := m.renderImage(t, it)
@@ -469,33 +527,86 @@ func (m *App) renderAssistant(t uiTheme, it *transcriptItem) []string {
 	return lines
 }
 
+const (
+	// foldedTailRows is the number of rendered body rows a collapsed block
+	// keeps. It is a count of wrapped rows, not provider source lines, so the
+	// collapsed height stays constant while text streams.
+	foldedTailRows = 3
+
+	toolBodyLines = 40
+	toolBodyBytes = 4 << 10
+)
+
+// renderFolded renders a header plus a body that is either full or a tail.
+// Collapsed keeps the last tailRows rendered rows and puts an elision row
+// above them; a body no longer than the tail is complete and gets no elision.
+// The header is byte-identical in both states so the operator's eye anchor
+// does not move.
+func renderFolded(t uiTheme, header string, body []string, tailRows int, collapsed bool) []string {
+	if !collapsed || tailRows < 1 || len(body) <= tailRows {
+		lines := make([]string, 0, len(body)+1)
+		lines = append(lines, header)
+		lines = append(lines, body...)
+		return lines
+	}
+	hidden := len(body) - tailRows
+	lines := make([]string, 0, tailRows+2)
+	lines = append(lines, header, t.dim.Render(fmt.Sprintf("  … %d earlier lines", hidden)))
+	lines = append(lines, body[len(body)-tailRows:]...)
+	return lines
+}
+
+// foldedBody returns the cached unfolded body for a thinking or tool item,
+// rebuilding it only when the width, fold mode, or source text changed.
+func (m *App) foldedBody(it *transcriptItem, expanded bool, source string, build func() []string) []string {
+	if it.foldedSet && it.foldedWidth == m.width && it.foldedExpanded == expanded && it.foldedSource == source {
+		return it.folded
+	}
+	body := build()
+	it.folded = body
+	it.foldedWidth = m.width
+	it.foldedExpanded = expanded
+	it.foldedSource = source
+	it.foldedSet = true
+	return body
+}
+
+// indentRows wraps one source row to the width left after prefix and styles
+// every wrapped row, so a long provider or tool line remains indented instead
+// of being cut at the right edge.
+func indentRows(prefix string, style lipgloss.Style, text string, width int) []string {
+	available := max(1, width-lipgloss.Width(prefix))
+	parts := strings.Split(ansi.Wrap(text, available, " "), "\n")
+	rows := make([]string, 0, len(parts))
+	for _, part := range parts {
+		rows = append(rows, prefix+style.Render(part))
+	}
+	return rows
+}
+
 // renderThinking renders one thinking block as preformatted text. The header
 // shows whether the model is still thinking; the body is never parsed as
-// markdown because it is provider prose, not assistant output. Width wrapping
-// happens once in wrapLines when the item's lines are cached.
+// markdown because it is provider prose, not assistant output. Collapsed shows
+// only the tail of the reasoning, so a settled block ends on its conclusion.
 func (m *App) renderThinking(t uiTheme, it *transcriptItem) []string {
 	header := "thinking"
 	if it.thinking {
 		header = "thinking…"
 	}
-	label := t.label.Render(header + " ")
-	labelWidth := lipgloss.Width(label)
-	// Sanitize again at the render boundary: terminal safety must not depend on
-	// every future producer of a thinking item remembering to sanitize.
-	body := strings.Split(strings.TrimRight(Sanitize(it.text), "\n"), "\n")
-	if len(body) == 1 && body[0] == "" {
-		body = []string{"…"}
-	}
-	indent := strings.Repeat(" ", labelWidth)
-	lines := make([]string, 0, len(body))
-	for i, line := range body {
-		if i == 0 {
-			lines = append(lines, label+t.think.Render(line))
-		} else {
-			lines = append(lines, indent+t.think.Render(line))
+	body := m.foldedBody(it, false, it.text, func() []string {
+		// Sanitize again at the render boundary: terminal safety must not depend
+		// on every future producer of a thinking item remembering to sanitize.
+		text := strings.TrimRight(Sanitize(it.text), "\n")
+		if text == "" {
+			return []string{"  " + t.think.Render("…")}
 		}
-	}
-	return lines
+		var rows []string
+		for line := range strings.SplitSeq(text, "\n") {
+			rows = append(rows, indentRows("  ", t.think, line, m.width)...)
+		}
+		return rows
+	})
+	return renderFolded(t, t.label.Render(ansi.Truncate(header, m.width, "")), body, foldedTailRows, !m.expandAll)
 }
 
 func (m *App) renderTool(t uiTheme, it *transcriptItem) []string {
@@ -529,38 +640,66 @@ func (m *App) renderTool(t uiTheme, it *transcriptItem) []string {
 	if !it.ok && !it.pending {
 		tstyle = t.errorSty
 	}
-	lines := []string{tstyle.Render(ansi.Truncate(head, m.width, ""))}
 	body := it.output
 	if body == "" {
 		body = it.errText
 	}
-	if body != "" {
-		bodyLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-		const foldedLines = 40
-		const foldedBytes = 4 << 10
-		truncated := false
-		if len(bodyLines) > foldedLines {
-			bodyLines = bodyLines[:foldedLines]
-			truncated = true
+	expanded := m.expandAll
+	rows := m.foldedBody(it, expanded, body, func() []string {
+		return m.toolBodyRows(t, body, expanded)
+	})
+	return renderFolded(t, tstyle.Render(ansi.Truncate(head, m.width, "")), rows, foldedTailRows, !expanded)
+}
+
+// toolBodyRows renders a tool result body. Expanded applies the inline display
+// cap; collapsed keeps the whole body so the elision row and tail reflect the
+// actual end of the output, where failures and test verdicts live.
+func (m *App) toolBodyRows(t uiTheme, body string, expanded bool) []string {
+	body = strings.TrimRight(body, "\n")
+	if body == "" {
+		return nil
+	}
+	bodyLines := strings.Split(body, "\n")
+	marker := ""
+	if isCapTextMarker(bodyLines[len(bodyLines)-1]) {
+		marker = bodyLines[len(bodyLines)-1]
+	}
+	folded := false
+	if expanded {
+		if len(bodyLines) > toolBodyLines {
+			bodyLines = bodyLines[:toolBodyLines]
+			folded = true
 		}
-		if size := 0; true {
-			for i, line := range bodyLines {
-				size += len(line)
-				if size > foldedBytes {
-					bodyLines = bodyLines[:i]
-					truncated = true
-					break
-				}
+		size := 0
+		for i, line := range bodyLines {
+			size += len(line)
+			if size > toolBodyBytes {
+				bodyLines = bodyLines[:i]
+				folded = true
+				break
 			}
 		}
-		for _, line := range bodyLines {
-			lines = append(lines, "  "+t.dim.Render(ansi.Truncate(line, max(1, m.width-2), "")))
-		}
-		if truncated {
-			lines = append(lines, "  "+t.dim.Render("[output folded; the full result is in the session log]"))
-		}
 	}
-	return lines
+	rows := make([]string, 0, len(bodyLines)+2)
+	for _, line := range bodyLines {
+		rows = append(rows, indentRows("  ", t.dim, line, m.width)...)
+	}
+	if expanded && folded {
+		// The CapText marker describes the safe display cap, not the inline
+		// 40-line cap, so it survives even when the inline window ends before it.
+		if marker != "" && (len(bodyLines) == 0 || bodyLines[len(bodyLines)-1] != marker) {
+			rows = append(rows, indentRows("  ", t.dim, marker, m.width)...)
+		}
+		rows = append(rows, "  "+t.dim.Render("[output folded; the full result is in the session log]"))
+	}
+	return rows
+}
+
+// isCapTextMarker reports whether the final body row is CapText's truncation
+// marker. Tool output uses several different truncation markers; only this
+// one signals that the safety cap hid bytes from the item itself.
+func isCapTextMarker(line string) bool {
+	return strings.HasPrefix(line, "[truncated ") && strings.HasSuffix(line, " bytes]")
 }
 
 func renderTextBlock(t uiTheme, label string, style lipgloss.Style, text string, width int) []string {

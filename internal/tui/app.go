@@ -624,6 +624,9 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgdown":
 		m.scrollTranscript(false, m.viewport.Height())
 		return nil
+	case "f3":
+		m.setExpandAll(!m.expandAll)
+		return nil
 	case "ctrl+u":
 		m.clearComposer()
 		m.layout()
@@ -688,6 +691,24 @@ func (m *App) setRich(rich bool) {
 		m.notice = "rich rendering"
 	} else {
 		m.notice = "raw rendering"
+	}
+}
+
+// setExpandAll selects the global fold mode. The transcript keeps the item the
+// operator was reading: following stays pinned to the newest row, while a
+// detached viewport is restored from the captured item and intra-item offset.
+func (m *App) setExpandAll(expanded bool) {
+	anchor, delta, detached := m.captureAnchor()
+	m.expandAll = expanded
+	m.invalidateFolds()
+	m.ensureContent()
+	if detached {
+		m.restoreAnchor(anchor, delta, !expanded)
+	}
+	if expanded {
+		m.notice = "expanded blocks"
+	} else {
+		m.notice = "collapsed blocks"
 	}
 }
 
@@ -839,7 +860,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		if header := m.runItem(); header != nil {
 			header.model = ev.Model
 			header.dialect = ev.Dialect
-			header.linesSet = false
+			header.invalidateLines()
 		}
 	case agent.ModelStarted:
 		m.run.state = StateRunning
@@ -849,7 +870,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		// to a stale block.
 		if m.run.thinking != nil {
 			m.run.thinking.thinking = false
-			m.run.thinking.linesSet = false
+			m.run.thinking.invalidateLines()
 			m.run.thinking = nil
 			m.dirty = true
 		}
@@ -862,7 +883,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 			m.run.thinking = m.appendThinking(m.run.turn, "")
 		}
 		m.run.thinking.text = CapText(m.run.thinking.text+Sanitize(ev.Text), maxThinkingItemText)
-		m.run.thinking.linesSet = false
+		m.run.thinking.invalidateLines()
 		m.dirty = true
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
@@ -879,7 +900,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		// Assistant text means thinking is over; settle the block header.
 		if m.run.thinking != nil {
 			m.run.thinking.thinking = false
-			m.run.thinking.linesSet = false
+			m.run.thinking.invalidateLines()
 		}
 		if m.run.streamed == nil {
 			m.run.streamed = m.appendAssistant(m.run.turn, "")
@@ -887,7 +908,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.run.streamed.text = CapText(m.run.streamed.text+Sanitize(ev.Text), maxTranscriptItemText)
 		m.dirty = true
 		m.run.streamed.renderedSet = false
-		m.run.streamed.linesSet = false
+		m.run.streamed.invalidateLines()
 		if m.coalesceScheduled {
 			return m.waitDisplayCmd()
 		}
@@ -912,7 +933,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		} else {
 			streamed.text = text
 			streamed.renderedSet = false
-			streamed.linesSet = false
+			streamed.invalidateLines()
 		}
 		m.run.streamed = nil
 		// Completion can reveal markdown image links that streaming withheld
@@ -928,7 +949,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 				m.dirty = true
 			}
 			thinking.thinking = false
-			thinking.linesSet = false
+			thinking.invalidateLines()
 			m.run.thinking = nil
 		} else if reasoning := CapText(Sanitize(ev.Reasoning), maxThinkingItemText); reasoning != "" {
 			it := &transcriptItem{
@@ -970,7 +991,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.running = true
 		m.dirty = true
 		it.args = CapText(SanitizeLine(string(ev.Call.Arguments)), 2<<10)
-		it.linesSet = false
+		it.invalidateLines()
 		m.emit(EventToolStarted{CallID: it.callID, Name: it.name, Arguments: it.args})
 		m.dirty = true
 		m.ensureContent()
@@ -998,7 +1019,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.truncated = ev.Truncated
 		it.timedOut = ev.TimedOut
 		it.toolTime = ev.Duration
-		it.linesSet = false
+		it.invalidateLines()
 		delete(m.run.pending, it.callID)
 		m.dirty = true
 		m.emit(EventToolFinished{
@@ -1090,7 +1111,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 		header.duration = duration
 		header.turns = result.RunTurns
 		header.usage = result.RunUsage
-		header.linesSet = false
+		header.invalidateLines()
 	}
 	m.info.Turns = result.CumulativeTurns
 	m.info.Usage = result.CumulativeUsage
@@ -1125,7 +1146,7 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	m.run.streamed = nil
 	if thinking := m.run.thinking; thinking != nil {
 		thinking.thinking = false
-		thinking.linesSet = false
+		thinking.invalidateLines()
 		m.run.thinking = nil
 	}
 	m.run.ctrlArmed = false
@@ -1174,7 +1195,7 @@ func (m *App) ackMessage(ev agent.MessageRecorded) {
 				if m.steer[i].item != nil {
 					m.steer[i].item.queued = false
 					m.steer[i].item.acked = true
-					m.steer[i].item.linesSet = false
+					m.steer[i].item.invalidateLines()
 					m.dirty = true
 				}
 				m.notice = "steering sent"
@@ -1212,6 +1233,18 @@ func (m *App) invalidateRenders() {
 	m.imagesDirty = true
 	for _, it := range m.items {
 		it.renderedSet = false
-		it.linesSet = false
+		it.invalidateLines()
+	}
+}
+
+// invalidateFolds drops the finished rows of foldable items so the next
+// rebuild applies the new expandAll state. The unfolded body cache survives,
+// so a toggle re-folds instead of re-splitting and re-wrapping 64 KiB bodies.
+func (m *App) invalidateFolds() {
+	m.dirty = true
+	for _, it := range m.items {
+		if it.kind == itemThinking || it.kind == itemTool {
+			it.linesSet = false
+		}
 	}
 }
