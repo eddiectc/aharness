@@ -93,7 +93,14 @@ func (m *App) View() tea.View {
 		view.SetContent(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg))
 		return view
 	}
-	m.ensureContent()
+	// A streaming delta marks the transcript dirty and schedules a coalesced
+	// rebuild. Bubble Tea calls View after every message, including every
+	// token, so rebuilding here would defeat that throttle and re-render the
+	// growing block once per token. Keep painting the last frame until the
+	// scheduled rebuild runs; all other mutations rebuild immediately.
+	if !m.coalesceScheduled {
+		m.ensureContent()
+	}
 	base := m.baseFrame()
 	if m.overlay.kind != OverlayNone {
 		overlay := m.overlay.view(m)

@@ -160,6 +160,40 @@ func TestThinkingStreamsIntoTheTranscript(t *testing.T) {
 	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
 }
 
+func TestStreamingViewDefersTranscriptRebuildsToTheCoalesceTick(t *testing.T) {
+	host := newManualHost()
+	app := newTestApp(t, host)
+	run, _ := startTestRun(t, app, "stream fast")
+
+	deliver(app, agent.ModelStarted{Turn: 1, Attempt: 1})
+	deliver(app, agent.ReasoningDelta{Text: "first "})
+	// Bubble Tea calls View after every message. While a coalesced rebuild is
+	// pending, View must paint the previous frame instead of re-rendering the
+	// growing thinking block once per token.
+	app.View()
+	if !app.dirty {
+		t.Fatal("View rebuilt the transcript before the coalesce tick")
+	}
+	deliver(app, agent.ReasoningDelta{Text: "second"})
+	app.View()
+	if !app.dirty {
+		t.Fatal("View rebuilt the transcript before the coalesce tick")
+	}
+
+	updateApp(t, app, coalesceMsg{})
+	if app.dirty {
+		t.Fatal("coalesce tick did not rebuild the transcript")
+	}
+	rendered := strings.Join(app.transcriptLines(), "\n")
+	if !strings.Contains(rendered, "first second") {
+		t.Fatalf("transcript lacks the streamed thinking text:\n%s", rendered)
+	}
+
+	run.done <- agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1}
+	close(run.done)
+	finishRun(t, app, agent.Result{Status: agent.StopCompleted, CumulativeTurns: 1})
+}
+
 func TestThinkingShownForABufferedResponse(t *testing.T) {
 	host := newManualHost()
 	app := newTestApp(t, host)

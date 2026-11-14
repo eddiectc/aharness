@@ -145,13 +145,16 @@ type App struct {
 	textSize  int
 	imageRefs []imageRef
 
-	viewport          transcriptView
-	lineBuf           []string
-	imagesDirty       bool
-	composer          textarea.Model
-	follow            bool
-	dirty             bool
-	contentWidth      int
+	viewport     transcriptView
+	lineBuf      []string
+	imagesDirty  bool
+	composer     textarea.Model
+	follow       bool
+	dirty        bool
+	contentWidth int
+	// coalesceScheduled reports that a streaming delta deferred its transcript
+	// rebuild to a coalesceMsg tick. View must leave the last frame in place
+	// until that tick runs.
 	coalesceScheduled bool
 
 	rich     bool
