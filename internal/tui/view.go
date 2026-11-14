@@ -499,7 +499,13 @@ func (m *App) renderRunLine(t uiTheme, it *transcriptItem) string {
 }
 
 func (m *App) renderAssistant(t uiTheme, it *transcriptItem) []string {
-	width := max(10, m.width-2)
+	label := t.label.Render("assistant ")
+	indent := strings.Repeat(" ", lipgloss.Width(label))
+	// Glamour must wrap to the space left after the label indent. Wrapping to
+	// m.width-2 and then prepending the indent leaves every body row over the
+	// terminal width, so wrapLines re-wraps it and can strand a short final
+	// word on a line of its own.
+	width := max(10, m.width-lipgloss.Width(label))
 	if !it.renderedSet || it.renderedWidth != width || it.renderedRich != m.rich {
 		rendered, _, err := renderMarkdown(it.text, width, m.rich, m.noColor)
 		if err != nil {
@@ -514,8 +520,6 @@ func (m *App) renderAssistant(t uiTheme, it *transcriptItem) []string {
 	if len(body) == 0 {
 		body = []string{""}
 	}
-	label := t.label.Render("assistant ")
-	indent := strings.Repeat(" ", lipgloss.Width(label))
 	lines := make([]string, 0, len(body)+1)
 	for i, line := range body {
 		if i == 0 {
