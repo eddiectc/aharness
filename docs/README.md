@@ -68,7 +68,6 @@ rewriting its conclusions.
 | Document | Snapshot |
 |---|---|
 | [research/agent-harness-minimum.md](research/agent-harness-minimum.md) | 2026-11-09; minimum harness and primary sources |
-| [research/agent-prompt-research.md](research/agent-prompt-research.md) | 2026-11-11; exploration budget, prompt guidance, and measurement |
 | [research/agent-tooling-research.md](research/agent-tooling-research.md) | 2026-11-11; tool set, limits, usage, and evaluation methodology |
 
 ## Link check
