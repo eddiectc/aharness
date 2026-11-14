@@ -1,6 +1,7 @@
 package agent
 
 import (
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"slices"
 	"time"
@@ -172,6 +173,35 @@ func Inspect(events []session.Event) (State, error) {
 	state.CostComplete = costComplete
 	state.Pending = pending
 	return state, nil
+}
+
+// RestoreTodo returns the checklist recorded by the last successful todo tool
+// result in the log, so a resumed, forked, or follow-up run starts with the
+// list the model last set instead of an empty one. The rendered tool output is
+// not parsed; the structured details written by the todo tool are used. A log
+// with no usable todo result, or with malformed details, yields nil.
+func RestoreTodo(events []session.Event) []tools.TodoItem {
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Type != session.TypeToolResult {
+			continue
+		}
+		var data toolResultData
+		if err := decodeEventData(ev, &data); err != nil {
+			continue
+		}
+		if data.Name != "todo" || !data.OK || len(data.Details) == 0 {
+			continue
+		}
+		var details struct {
+			Items []tools.TodoItem `json:"items"`
+		}
+		if err := jsonv2.Unmarshal(data.Details, &details); err != nil {
+			continue
+		}
+		return details.Items
+	}
+	return nil
 }
 
 // removePending removes the most recent unpaired call with id.

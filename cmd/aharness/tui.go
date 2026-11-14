@@ -337,6 +337,7 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 		}
 	}
 	registry := tools.NewRegistry(h.ws, toolOptions(h.cfg, tmpDir, workDir))
+	registry.SeedTodo(agent.RestoreTodo(h.store.Events()))
 	runner := agent.New(rcfg, newCompleterFor(dialect, h.cfg, h.sessionID), registry, h.store)
 	run := &hostRun{
 		ctx:      runCtx,

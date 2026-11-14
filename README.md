@@ -75,11 +75,12 @@ opt-in and unlimited by default.
   buffered response without provider usage a `protocol_error` before any tool
   executes; the default stays compatible with local OpenAI-compatible
   endpoints.
-- Six tools — `read_file`, `edit_file`, `search`, `run_command`, `web_search`,
-  and `web_fetch` — behind one validated registry with `os.Root` workspace
-  containment. `web_search` queries an operator-configured SearXNG instance
-  with `format=json` and returns up to ten titles, URLs, and snippets; it does
-  not fetch result pages or call a third-party search API. Set
+- Seven tools — `read_file`, `edit_file`, `search`, `run_command`,
+  `web_search`, `web_fetch`, and `todo` — behind one validated registry with
+  `os.Root` workspace containment. `web_search` queries an
+  operator-configured SearXNG instance with `format=json` and returns up to ten
+  titles, URLs, and snippets; it does not fetch result pages or call a
+  third-party search API. Set
   `-searxng-url`, `AHARNESS_SEARXNG_URL`, or `searxng_url` (HTTP is allowed
   only for loopback instances); unset keeps the tool registered with an
   actionable `unavailable` result. `web_fetch` retrieves one absolute http(s)
@@ -93,7 +94,11 @@ opt-in and unlimited by default.
   credentials or cookies. JavaScript-heavy pages can use an operator-run
   Crawl4AI endpoint via `-web-fetch-provider crawl4ai` (implied
   `-web-fetch-url`, optional `-web-fetch-key`); `web_timeout` defaults to 30
-  seconds (max 120).
+  seconds (max 120). `todo` maintains a checklist for multi-step work: send
+  items to replace it, omit items to read it, or send an empty list to clear
+  it. At most one item may be `in_progress`; the list is returned after every
+  call, recorded with the tool result, and restored at run start, so a resumed
+  or follow-up run keeps it.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
   exclusive/shared `flock`, torn-final-line repair, and a per-run `final`.
 - `-resume <id>` continues a session in place; `-fork <id>` creates a new

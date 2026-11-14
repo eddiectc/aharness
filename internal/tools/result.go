@@ -1,5 +1,5 @@
 // Package tools implements the validated tool registry, workspace
-// containment policy, the four v0 tools, and web search.
+// containment policy, the v0 tools, web tools, and the per-run todo list.
 package tools
 
 import (

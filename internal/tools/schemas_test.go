@@ -62,6 +62,11 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 			args:   webFetchArgs{},
 			sample: `{"intent":"fetch a page","url":"https://example.com/","offset":0}`,
 		},
+		{
+			name:   "todo",
+			args:   todoArgs{},
+			sample: `{"intent":"plan the work","items":[{"content":"read the docs","status":"pending"},{"content":"write the tool","status":"in_progress"}]}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,6 +117,7 @@ func TestSchemaRequiredFields(t *testing.T) {
 		"run_command": {"intent", "command"},
 		"web_search":  {"intent", "query"},
 		"web_fetch":   {"intent", "url"},
+		"todo":        {"intent"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -188,7 +194,7 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 		t.Errorf("toolset-v0 names = %q, want the frozen %q", got, want)
 	}
 	v1Names := strings.Split(names(v1), ",")
-	for _, want := range []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch"} {
+	for _, want := range []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch", "todo"} {
 		if !slices.Contains(v1Names, want) {
 			t.Errorf("toolset-v1 is missing %q: %v", want, v1Names)
 		}
@@ -239,6 +245,17 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	}
 	if strings.Contains(string(v1WebFetch.Parameters), "userinfo") {
 		t.Errorf("toolset-v1 web_fetch schema documents provider-only fields")
+	}
+	v1Todo := findSchema(t, v1, "todo")
+	for _, want := range []string{"replace the whole list", "omit items", "in_progress"} {
+		if !strings.Contains(v1Todo.Description, want) {
+			t.Errorf("toolset-v1 todo description missing %q: %q", want, v1Todo.Description)
+		}
+	}
+	for _, want := range []string{`"maxItems": 50`, `"required": ["intent"]`, `"enum": ["pending", "in_progress", "completed"]`} {
+		if !strings.Contains(string(v1Todo.Parameters), want) {
+			t.Errorf("toolset-v1 todo parameters missing %s", want)
+		}
 	}
 
 	v0[0].Name = "mutated"

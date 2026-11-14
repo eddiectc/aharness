@@ -715,6 +715,11 @@ When implemented, update:
 
 The implementation follows §1–§10 with these recorded choices:
 
+- **Todo tool added later (2026-11-14).** The decision-summary and §1.3
+  exclusion of `todo` describe this plan's original scope. The shipped
+  `toolset-v1` set now includes `todo`; see
+  [architecture §5](../architecture.md#5-tools). The measurement conclusions
+  here are unchanged.
 - **Eval tooling removed (2026-11-14).** `cmd/aharness-eval` and the top-level
   `eval/` tree were deleted. They were dev-only, sat outside the runtime
   package graph, and never produced a measured baseline (`eval/baseline.json`

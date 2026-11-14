@@ -346,6 +346,7 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		rcfg.Display = textDisplay(sink)
 	}
 	registry := tools.NewRegistry(ws, toolOptions(cfg, tmpDir, workDir))
+	registry.SeedTodo(agent.RestoreTodo(store.Events()))
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
 	result, runErr := runner.Run(runCtx, opts)

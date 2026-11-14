@@ -785,9 +785,11 @@ func TestBinaryContextOverflowCompactsAndRetries(t *testing.T) {
 		}
 	})
 	stateDir := filepath.Join(t.TempDir(), "state")
+	// The input budget leaves one eligible tool result after ordinary
+	// compaction, so the provider-overflow retry has something to elide.
 	run := runHarness(t, bin, t.TempDir(), stateDir, f.url,
 		"-task", "overflow", "-model", "deepseek-v4.1-flash",
-		"-max-context-tokens", "12000", "-max-turns", "30")
+		"-max-context-tokens", "13000", "-max-turns", "30")
 	if run.exit != 0 {
 		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", run.exit, run.stdout, run.stderr)
 	}

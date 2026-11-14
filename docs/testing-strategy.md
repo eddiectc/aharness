@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-13
 - **Status:** normative testing strategy for v1, the shipped TUI, model
-  discovery, thinking effort, and web search
+  discovery, thinking effort, and the builtin tool set
 - **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md), [web search build plan](plans/web-search-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
@@ -15,7 +15,7 @@ real timeouts for subprocess and signal tests.
 ## 1. Unit tests
 
 - Workspace and tools: containment (`..`, absolute-path conversion, symlink
-  escapes, `.git`), the five tool contracts, result codes, output caps, UTF-8
+  escapes, `.git`), the tool contracts, result codes, output caps, UTF-8
   sanitization, process-group cancellation, and the environment allowlist,
   including that `HOME` is inherited so git identity and configuration are
   visible while the token denylist still applies. Web search additionally tests
@@ -23,7 +23,13 @@ real timeouts for subprocess and signal tests.
   slash, 8 KiB cap), request parameters and base path, result URL filtering and
   dedupe, snippet sanitization, results/output caps, details, and the
   unavailable/403/http_error/transport/malformed/oversized/timeout/canceled
-  mappings against fake `httptest` SearXNG responses.
+  mappings against fake `httptest` SearXNG responses. The todo tool tests
+  set/read/clear lifecycle, per-registry isolation, normalization, the item and
+  content caps, the status enum, the single-`in_progress` rule, strict argument
+  decoding, cancellation, the structured `details` round trip, and seeding from
+  a recorded list (including a rejected seed). `agent.RestoreTodo` tests the
+  last-write-wins restore, ignored failed and foreign results, a clear, and
+  malformed details.
 - Provider adapters: Chat Completions and Responses canonical mapping, tool-call
   round trips, finish/usage/error normalization, strict JSON decoding, and
   Responses `store:false` replay.
@@ -327,6 +333,11 @@ diagnostic, not a gate.
   `blocked_address` before any connection. The startup log records
   `web_timeout_ms`, `web_fetch_provider`, and the endpoint host, never the key.
   A `toolset-v1` session resumes with `web_fetch` in the projected set.
+- Todo end to end: a fake provider returns a `todo` tool call with two
+  statuses; the binary records exactly one paired `tool_result` with the
+  rendered checklist, the next provider request carries that list, and the
+  workspace stays empty. A resume in a new process issues a `todo` read and
+  receives the list recorded by the earlier run.
 - Web extraction fuzz: arbitrary HTML and content types through the extraction
   pipeline (no panic, valid UTF-8, no control characters, bounded output), and
   arbitrary strings through the fetch-target and provider-endpoint validators

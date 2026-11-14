@@ -127,6 +127,10 @@ Other event payloads:
 | Tool | Limit | Value | Behavior |
 |---|---|---|---|
 | All tools | Intent argument | 200 bytes displayed | Shared `intent` string: one short sentence naming why the call is needed. Required by every current schema, accepted but never acted on by the tools, trimmed and cut on a rune boundary for the TUI title. A missing intent never fails the call. |
+| `todo` | Items per list | 50 | A larger `items` array is `invalid_args`; items are never silently dropped. |
+| `todo` | Item content | 500 bytes | Measured after trimming, control replacement, and whitespace collapse. A longer item is `invalid_args`. |
+| `todo` | In-progress items | 1 | A second `in_progress` item is `invalid_args`. |
+| `todo` | State lifetime | session | In-memory during a run, seeded at run start from the last successful `todo` result's `details` in the session log, so resume, fork, and follow-up runs keep the list. Not a workspace file and not a durable event of its own. The full list is returned after every call. |
 | `read_file` | Default lines | 2,000 | `offset` is 1-based. |
 | `read_file` | Max lines per call | 4,000 | Larger `limit` values are clamped. |
 | `read_file` | Max file size | 2 MiB | Larger files are `too_large`. |
@@ -172,7 +176,7 @@ Other event payloads:
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
-| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`, `web_fetch`, and the shared `intent` argument. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
+| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`, `web_fetch`, `todo`, and the shared `intent` argument. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration

@@ -65,8 +65,8 @@ var v0Schemas = []model.ToolSchema{
 
 // v1Schemas is the current toolset-v1 declaration set. It describes the
 // contiguous read window, the 60 KiB file-result cap, the search ** glob and
-// skip summary, command output spilling, web search, and the shared
-// display-only intent argument.
+// skip summary, command output spilling, web search, web fetch, the per-run
+// todo checklist, and the shared display-only intent argument.
 var v1Schemas = []model.ToolSchema{
 	schema("read_file",
 		"Read a UTF-8 text file from the workspace. Returns one contiguous window of numbered lines with a 'lines X-Y of Z' header describing the lines actually delivered. offset is 1-based; limit defaults to 2000 and is capped at 4000. The result is capped at 60 KiB. When more lines remain, the result ends with 'continue with offset=N'; a line cut by the byte cap is marked instead. Rejects binary files and files over 2 MiB.",
@@ -175,6 +175,30 @@ var v1Schemas = []model.ToolSchema{
     }
   },
   "required": ["intent", "url"],
+  "additionalProperties": false
+}`),
+	schema("todo",
+		"Maintain a checklist for multi-step work. Send items to replace the whole list; omit items to read the current list; send [] to clear it. The full list is returned after every call. At most one item may be in_progress. The list is harness state, not a workspace file; it is restored from the session log at run start, so a resumed or follow-up run keeps it.",
+		`{
+  "type": "object",
+  "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
+    "items": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "Complete replacement list. Omit to read the current list; [] clears it.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {"type": "string", "maxLength": 500, "description": "Short imperative task description; one line."},
+          "status": {"type": "string", "enum": ["pending", "in_progress", "completed"], "description": "Current task status; at most one item may be in_progress."}
+        },
+        "required": ["content", "status"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["intent"],
   "additionalProperties": false
 }`),
 }
