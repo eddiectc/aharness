@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -158,10 +159,13 @@ type App struct {
 	// operator was reading instead of a numeric offset that no longer maps.
 	rowOf []int
 
-	viewport     transcriptView
-	lineBuf      []string
-	imagesDirty  bool
-	composer     textarea.Model
+	viewport    transcriptView
+	lineBuf     []string
+	imagesDirty bool
+	composer    textarea.Model
+	// execEditor runs the external editor in the terminal. Tests replace it so
+	// the composer round trip is exercised without starting a real editor.
+	execEditor   func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 	follow       bool
 	dirty        bool
 	contentWidth int
@@ -229,13 +233,14 @@ func New(opts Options) *App {
 	ta.CharLimit = 0
 	ta.SetWidth(80)
 	ta.SetHeight(1)
-	ta.Placeholder = "Send a task or steering message (Enter)"
+	ta.Placeholder = "Task or steering · Enter sends · Shift-Enter newline · F4 editor"
 	ta.Focus()
 
 	app := &App{
 		opts:          opts,
 		host:          opts.Host,
 		composer:      ta,
+		execEditor:    tea.ExecProcess,
 		follow:        true,
 		rich:          true,
 		headless:      opts.Headless,

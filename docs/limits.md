@@ -238,6 +238,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Cap | Value | Behavior |
 |---|---|---|
 | Task/steering message | 64 KiB | Longer is rejected with a notice; the run continues. |
+| External editor draft | 64 KiB | `F4` reads the edited temp file under the composer cap; an over-cap or failed edit leaves the composer unchanged. Idle only. |
 | Transcript items | 20,000 | Oldest UI items are dropped with an "older history omitted" marker. |
 | Transcript text | 16 MiB | Oldest UI items are dropped; the log is unchanged. |
 | Assistant text per item | 64 KiB displayed | Truncation marker; the full response stays in the log. |

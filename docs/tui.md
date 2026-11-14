@@ -52,6 +52,7 @@ submitted message while idle starts one run.
 | Key | Idle | Run active |
 |---|---|---|
 | `Enter` | submit a new run | submit steering |
+| `Shift-Enter`/`Alt-Enter` | insert a composer newline | insert a composer newline |
 | `Esc` | close overlay, then clear a non-empty composer; never quits | close overlay; otherwise interrupt the in-flight operation |
 | `Ctrl-C` | clear a non-empty composer; otherwise show a quit hint | first: interrupt the operation; second: cancel the run |
 | `Ctrl-D` | quit 0 | cancel the run and quit 130 |
@@ -71,6 +72,7 @@ submitted message while idle starts one run.
 | `F1` | help overlay | help overlay |
 | `F2` | thinking-effort picker for the next run | disabled with a notice |
 | `F3` | expand/collapse all thinking and tool blocks; the mode is sticky | same |
+| `F4` | edit the composer in `$VISUAL`/`$EDITOR` | disabled with a notice |
 | `Ctrl-X` | details overlay | details overlay |
 | `Tab` | composer tab (four spaces) | composer tab (four spaces) |
 | Overlay `Tab`/`Shift-Tab` | move focus | move focus |
@@ -80,9 +82,19 @@ A bare `Esc` is recognized only after the 50 ms escape timeout. Option/Alt
 sequences, including Option-`[` and Option-`]`, are decoded as modified keys
 and never interrupt; `Ctrl-C` remains the authoritative global interrupt. The
 help overlay (`F1`) lists the shipped keys and slash commands, including `F2`,
-`F3`, and the overlay keys. While the slash-command menu is open, `Up`/`Down`
-move its selection, `Tab` completes, `Enter` runs the highlighted command, and
-`Esc` dismisses the menu before the normal `Esc` action.
+`F3`, `F4`, and the overlay keys. While the slash-command menu is open,
+`Up`/`Down` move its selection, `Tab` completes, `Enter` runs the highlighted
+command, and `Esc` dismisses the menu before the normal `Esc` action.
+
+The composer is a multi-line text area. It grows with the draft up to six
+rows, and past the sixth row it scrolls internally. `Shift-Enter` and
+`Alt-Enter` insert a newline; plain `Enter` submits or steers. `F4` writes the
+current draft to a temporary Markdown file, runs `$VISUAL` (or `$EDITOR` when
+`$VISUAL` is unset) in the terminal, and replaces the composer with the edited
+text when the editor exits successfully. A failed editor leaves the draft
+unchanged. The editor is idle-only so a blocking process cannot stall display
+events from an active run, and the result is read back under the normal 64 KiB
+composer cap.
 
 An empty transcript shows a short tips block (`F1`, `Shift`+drag,
 `Ctrl+Shift+V`, the wheel, and the pickers). It disappears with the first
@@ -268,7 +280,9 @@ ordinary composer text: send `text` followed by `key` `enter` (or `tab`,
 shipped key table plus `enter`, `esc`, `up`, `down`, `left`, `right`, `home`,
 `end`, `pgup`, `pgdown`, `backspace`, `delete`, `tab`, `shift-tab`, `ctrl-c`,
 `ctrl-d`, `ctrl-l`, `ctrl-u`, `ctrl-w`, `ctrl-a`, `ctrl-e`, `ctrl-k`, `ctrl-p`,
-`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, `f2`, and `f3`.
+`ctrl-o`, `ctrl-r`, `ctrl-t`, `ctrl-g`, `ctrl-x`, `f1`, `f2`, `f3`, `f4`,
+`shift-enter`, and `alt-enter`. The external editor (`f4`) is unavailable in
+`-ui-json` and reports a notice; it needs a real terminal.
 
 Output lines:
 
@@ -310,6 +324,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Cap | Value | Behavior |
 |---|---|---|
 | Task/steering message | 64 KiB | Longer is rejected with a notice; the run continues. |
+| External editor draft | 64 KiB | `F4` reads the edited temp file under the composer cap; an over-cap or failed edit leaves the composer unchanged. Available while idle only. |
 | Transcript items / text | 20,000 / 16 MiB | Oldest UI items are dropped with an "older history omitted" marker; the log is unchanged. |
 | Assistant text per item | 64 KiB | Truncation marker; the canonical response remains in the log. |
 | Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. Collapsed blocks show the last three rendered rows; expanded blocks show the full text up to this cap. |

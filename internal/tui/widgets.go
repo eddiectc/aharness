@@ -291,6 +291,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"F1               help; Ctrl-X details",
 		"F2               thinking effort picker (idle)",
 		"F3               expand/collapse thinking and tool blocks",
+		"F4               edit the composer in $VISUAL/$EDITOR (idle)",
 		"",
 		t.dim.Render("Slash commands: Up/Down select, Tab complete, Enter run."),
 		t.dim.Render("Esc dismisses the menu; unknown /text is sent as a message."),

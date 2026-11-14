@@ -256,6 +256,10 @@ type (
 		choices []ModelChoice
 		err     error
 	}
+	editorDoneMsg struct {
+		text string
+		err  error
+	}
 	runDoneMsg struct {
 		run    int
 		result agent.Result
@@ -309,6 +313,17 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleImageRender(msg)
 	case inputPasteMsg:
 		m.insertInput(Sanitize(msg.text))
+		return m, nil
+	case editorDoneMsg:
+		if msg.err != nil {
+			m.notice = "editor: " + SanitizeLine(msg.err.Error())
+			return m, nil
+		}
+		m.notice = ""
+		m.composer.SetValue(msg.text)
+		m.composer.MoveToEnd()
+		m.updateSuggestions()
+		m.layout()
 		return m, nil
 	case syncMsg:
 		id := msg.id
@@ -555,6 +570,10 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if keystroke == "f4" {
+		return m.openExternalEditor()
+	}
+
 	m.updateSuggestions()
 	if m.suggestionsVisible() {
 		switch keystroke {
@@ -570,10 +589,9 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.dismissSuggestions()
 			m.layout()
 			return nil
-		case "enter", "ctrl+m":
-			if !msg.Mod.Contains(tea.ModShift) && !msg.Mod.Contains(tea.ModAlt) {
-				return m.runSuggestion()
-			}
+		}
+		if isEnterKey(msg) && !enterAddsNewline(msg) {
+			return m.runSuggestion()
 		}
 	}
 
@@ -591,6 +609,17 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 
+	if isEnterKey(msg) {
+		if enterAddsNewline(msg) {
+			m.insertInput("\n")
+			return nil
+		}
+		text := m.composer.Value()
+		m.clearComposer()
+		m.layout()
+		return m.submit(text, "tui")
+	}
+
 	switch keystroke {
 	case "esc":
 		if m.composer.Value() != "" {
@@ -600,15 +629,6 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.interruptOperation()
 		return nil
-	case "enter", "ctrl+m":
-		if msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt) {
-			m.insertInput("\n")
-			return nil
-		}
-		text := m.composer.Value()
-		m.clearComposer()
-		m.layout()
-		return m.submit(text, "tui")
 	case "tab":
 		m.insertInput("    ")
 		return nil
@@ -655,6 +675,22 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	m.layout()
 	return cmd
+}
+
+// isEnterKey includes plain Enter and Ctrl-M, plus the modified forms a
+// terminal reports with the Kitty keyboard protocol or modifyOtherKeys.
+func isEnterKey(msg tea.KeyPressMsg) bool {
+	if msg.Code == tea.KeyEnter || msg.Code == tea.KeyKpEnter {
+		return true
+	}
+	keystroke := msg.Keystroke()
+	return keystroke == "ctrl+m" || strings.HasSuffix(keystroke, "enter")
+}
+
+// enterAddsNewline keeps Shift-Enter and Alt-Enter as composer newlines while
+// plain Enter submits.
+func enterAddsNewline(msg tea.KeyPressMsg) bool {
+	return msg.Mod.Contains(tea.ModShift) || msg.Mod.Contains(tea.ModAlt)
 }
 
 // handleCtrlC interrupts an operation, then cancels the run on a second press.

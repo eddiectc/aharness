@@ -95,11 +95,18 @@ func decodeCommand(line []byte) (Command, error) {
 var errUnknownKey = errors.New("unknown key")
 
 func protocolKey(name string) (tea.KeyPressMsg, error) {
+	name = strings.ReplaceAll(name, "+", "-")
 	code := rune(0)
 	mod := tea.KeyMod(0)
 	switch name {
 	case "enter":
 		code = tea.KeyEnter
+	case "shift-enter":
+		code = tea.KeyEnter
+		mod = tea.ModShift
+	case "alt-enter":
+		code = tea.KeyEnter
+		mod = tea.ModAlt
 	case "esc":
 		code = tea.KeyEscape
 	case "tab":
@@ -133,6 +140,8 @@ func protocolKey(name string) (tea.KeyPressMsg, error) {
 		code = tea.KeyF2
 	case "f3":
 		code = tea.KeyF3
+	case "f4":
+		code = tea.KeyF4
 	case "ctrl-c", "ctrl-d", "ctrl-l", "ctrl-u", "ctrl-w", "ctrl-a", "ctrl-e",
 		"ctrl-k", "ctrl-p", "ctrl-o", "ctrl-r", "ctrl-t", "ctrl-g", "ctrl-x":
 		code = rune(name[len(name)-1])

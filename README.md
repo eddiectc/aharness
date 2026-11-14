@@ -96,10 +96,11 @@ opt-in and unlimited by default.
 - Opt-in `-stream` assistant-text streaming for both dialects in batch mode.
   The TUI and `-ui-json` always stream. The canonical response is the only
   transcript record; deltas are display-only.
-- The default interactive TUI: a full-screen transcript, streaming text, a
-  display-only `thinking` block for model reasoning, folded thinking/tool
-  blocks (`F3`), tool
-  activity, steering, interrupt/cancel, rich/raw markdown with table overlays,
+- The default interactive TUI: a full-screen transcript, a growing multi-line
+  composer (`Shift-Enter`/`Alt-Enter` inserts a newline, `F4` opens
+  `$VISUAL`/`$EDITOR`), streaming text, a display-only `thinking` block for
+  model reasoning, folded thinking/tool blocks (`F3`), tool activity,
+  steering, interrupt/cancel, rich/raw markdown with table overlays,
   a workspace file picker, catalog-backed next-run model and thinking-effort
   pickers, details and help overlays, workspace-contained images, and mouse
   wheel scrolling. The wheel capture also takes the terminal's own selection,
