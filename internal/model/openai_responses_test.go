@@ -20,8 +20,9 @@ type responsesRequestWire struct {
 		Description string          `json:"description"`
 		Parameters  json.RawMessage `json:"parameters"`
 	} `json:"tools"`
-	MaxOutputTokens int   `json:"max_output_tokens"`
-	Store           *bool `json:"store"`
+	MaxOutputTokens int      `json:"max_output_tokens"`
+	Include         []string `json:"include"`
+	Store           *bool    `json:"store"`
 }
 
 type responsesInputWire struct {
@@ -150,6 +151,9 @@ func checkResponsesRequest(t *testing.T, got responsesRequestWire) {
 	}
 	if got.Store == nil || *got.Store {
 		t.Errorf("store = %v, want false", got.Store)
+	}
+	if len(got.Include) != 1 || got.Include[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %#v, want reasoning.encrypted_content", got.Include)
 	}
 	if len(got.Input) != 4 {
 		t.Errorf("len(input) = %d, want 4", len(got.Input))

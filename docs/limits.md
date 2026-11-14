@@ -78,6 +78,7 @@ when that flag is set and against total usage, and they add no separate cap.
 | Assembled canonical response | 1 MiB | Text plus tool calls; larger is `protocol_error` before any tool executes. |
 | Total stream | 8 MiB | Bounds deltas, keepalives, and the terminal event. |
 | Thinking text | 64 KiB per response | Display-only reasoning retained for the TUI; larger text is dropped from the display and never logged. |
+| Reasoning continuation | 4 MiB per response; 16 MiB per adapter | Adapter-owned, in-memory, never logged. Chat replays thinking as `reasoning_content`; Responses replays raw reasoning output items (encrypted content or plaintext `reasoning_text`). Dropped when the adapter (one run) is discarded. |
 | Partial text on interrupt or failed stream | 64 KiB | Diagnostics only; never projected. |
 | Model request debug event | 1 MiB | Only when `AHARNESS_LOG_REQUESTS=1`; over-cap is replaced by a truncation marker. |
 | Error event message | 2 KiB | Fatal error class and message; no secrets. |
@@ -239,7 +240,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Transcript items | 20,000 | Oldest UI items are dropped with an "older history omitted" marker. |
 | Transcript text | 16 MiB | Oldest UI items are dropped; the log is unchanged. |
 | Assistant text per item | 64 KiB displayed | Truncation marker; the full response stays in the log. |
-| Thinking text per item | 64 KiB displayed | Display-only; truncation marker. Never logged, so a resumed session shows no prior thinking. |
+| Thinking text per item | 64 KiB displayed | Display-only; truncation marker. Never logged, so a resumed session shows no prior thinking. The active adapter keeps a separate bounded in-memory copy for tool-round continuation. |
 | Markdown source per item | 64 KiB | Longer is rendered as plain text with a marker. |
 | Markdown blocks per item | 4,000 | Excess input falls back to plain text with a notice. |
 | Markdown nesting | 16 levels | Deeper input falls back to plain text with a notice. |

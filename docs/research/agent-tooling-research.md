@@ -3,6 +3,9 @@
 - **Date:** 2026-11-11
 - **Status:** research complete; no code changed. Input to
   [agent tooling and measurement build plan](../plans/agent-tooling-build.md).
+  **Superseded (reasoning continuation, 2026-11-14):** both adapters now
+  retain and replay provider-native continuation material in memory; see
+  [architecture §2.4](../architecture.md#24-continuation-for-a-new-dialect).
 - **Snapshot:** repository `450dec3`; live catalog queried 2026-11-11.
   `deepseek-v4.1-flash` is 1,000,000 context / 384,000 advertised output,
   Chat Completions, efforts `low,high,max`.

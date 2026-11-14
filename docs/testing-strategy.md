@@ -27,6 +27,12 @@ real timeouts for subprocess and signal tests.
 - Provider adapters: Chat Completions and Responses canonical mapping, tool-call
   round trips, finish/usage/error normalization, strict JSON decoding, and
   Responses `store:false` replay.
+- Reasoning continuation: both adapters retain and replay native material in a
+  second tool-round request. Chat sends `reasoning_content`; Responses sends
+  `include: ["reasoning.encrypted_content"]` and replays the raw reasoning item
+  before the matching function call. Buffered and streamed paths; encrypted and
+  plaintext reasoning; summary-only or ID-only items are not replayed; the
+  replayed item is unchanged and ordered before the call.
 - Catalog: models.dev fixture decoding and normalization; SDK-to-dialect mapping
   for supported, translated, and unknown packages; eligibility (tools, text
   output, missing/invalid context, missing output ceiling, deprecated/alpha/beta,
@@ -96,14 +102,16 @@ real timeouts for subprocess and signal tests.
   tools.
 - Thinking: both adapters map buffered and streamed `reasoning_content`/
   `reasoning` and Responses reasoning summary/content into display-only
-  `Response.Reasoning`; encrypted reasoning content is dropped; the 64 KiB cap
-  clamps streamed and settled text at a rune boundary; thinking never counts
-  toward `responseContentBytes`; the runner emits `ReasoningDelta` before
-  `ResponseCompleted`, reprints buffered reasoning once (and only once), and
-  never writes thinking into any session event; the TUI streams it into a
-  `thinking` block, sanitizes control bytes, settles the header on assistant
-  text, and caps the item. `-ui-json` end to end: frames show the thinking
-  block for both dialects and the session log contains none of it.
+  `Response.Reasoning`; encrypted reasoning content is not rendered and
+  Responses raw reasoning items are retained only in the adapter continuation
+  cache; the 64 KiB cap clamps streamed and settled text at a rune boundary;
+  thinking never counts toward `responseContentBytes`; the runner emits
+  `ReasoningDelta` before `ResponseCompleted`, reprints buffered reasoning once
+  (and only once), and never writes thinking into any session event; the TUI
+  streams it into a `thinking` block, sanitizes control bytes, settles the
+  header on assistant text, and caps the item. `-ui-json` end to end: frames
+  show the thinking block for both dialects and the session log contains none
+  of it.
 - TUI/display: display-event order for streamed, fallback, tool, retry, and
   error paths; `RunStarted` model/dialect/resume sequence and effective
   thinking effort; display failure maps to `internal_error` and pairs tool
@@ -469,6 +477,23 @@ screen), that resume shows no prior thinking, and that `Enter` on a long
 thinking block does not corrupt the transcript. Confirm a model or effort with
 no thinking produces no block, and that `Ctrl-R` toggles only assistant
 markdown.
+
+For reasoning continuation: run a task that needs at least two tool rounds with
+thinking enabled, once on a Chat model and once on a Responses model. Inspect
+the session's request logging or a local proxy and confirm the second request
+carries the native material — `reasoning_content` for Chat, and the raw
+`reasoning` item before the matching `function_call` for Responses, together
+with `include: ["reasoning.encrypted_content"]`. Confirm the model continues
+its prior reasoning instead of restating it, and that no reasoning material
+appears in the session log. If a provider rejects the echo, record the exact
+model, request, and error; do not silently retry without it. When a native
+Anthropic or Gemini adapter replaces the Chat translation, repeat this with
+signed thinking blocks or `thoughtSignature` parts and confirm they are
+replayed unmodified.
+
+This real-provider continuation smoke has **not** been run: provider
+credentials (`AHARNESS_PROVIDER_TOKEN`) are unavailable in the implementation
+environment. It remains an explicit release prerequisite.
 
 This real-provider thinking-effort and thinking-display smoke has **not** been
 run: provider credentials (`AHARNESS_PROVIDER_TOKEN`) are unavailable in the

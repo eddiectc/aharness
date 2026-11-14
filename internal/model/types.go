@@ -123,9 +123,11 @@ func validateUsage(u Usage) error {
 // response was assembled from an SSE stream; it is display/provenance metadata,
 // not transcript content. The completed response remains authoritative.
 //
-// Reasoning is provider thinking text. It is display-only: it is never logged,
-// projected, replayed to the provider, or counted against the canonical
-// response cap, and it may be absent when a provider does not expose thinking.
+// Reasoning is provider thinking text. It is display-only: it is never logged
+// or projected, and a dialect adapter may retain the provider's own bounded
+// continuation material to satisfy a tool-round continuation. It is not
+// counted against the canonical response cap, and it may be absent when a
+// provider does not expose thinking.
 type Response struct {
 	Text         string       `json:"text,omitempty"`
 	ToolCalls    []ToolCall   `json:"tool_calls,omitempty"`
@@ -136,7 +138,9 @@ type Response struct {
 }
 
 // Completer is the provider-facing contract. Both dialect adapters implement
-// it; the agent loop sees only canonical types.
+// it; the agent loop sees only canonical types. An adapter that serves a
+// reasoning model owns any provider-native continuation material; see
+// continuation.go and docs/architecture.md §2.4.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
@@ -184,7 +188,13 @@ const MaxReasoningText = 64 << 10
 // after used bytes, at a rune boundary. An empty result means the budget is
 // exhausted.
 func acceptReasoning(used int, delta string) string {
-	room := MaxReasoningText - used
+	return acceptText(used, MaxReasoningText, delta)
+}
+
+// acceptText returns the prefix of delta that fits limit bytes after used, at
+// a rune boundary.
+func acceptText(used, limit int, delta string) string {
+	room := limit - used
 	if room <= 0 {
 		return ""
 	}

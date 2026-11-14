@@ -119,7 +119,8 @@ func chatToolCallResponse() map[string]any {
 		"choices": []any{map[string]any{
 			"index": 0,
 			"message": map[string]any{
-				"role": "assistant",
+				"role":              "assistant",
+				"reasoning_content": "check hello.txt before answering",
 				"tool_calls": []any{map[string]any{
 					"id": "call_1", "type": "function",
 					"function": map[string]any{"name": "read_file", "arguments": `{"path":"hello.txt"}`},
@@ -141,13 +142,89 @@ func chatFinalResponse(text string) map[string]any {
 	}
 }
 
+// checkResponsesReasoningEcho verifies that the raw reasoning item returned
+// with the first function call is replayed before that call, and that the
+// stateless request asked for encrypted reasoning.
+func checkResponsesReasoningEcho(t *testing.T, body []byte) {
+	t.Helper()
+	var request struct {
+		Include []string `json:"include"`
+		Input   []struct {
+			Type             string `json:"type"`
+			CallID           string `json:"call_id"`
+			EncryptedContent string `json:"encrypted_content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil {
+		t.Errorf("decode replayed responses request: %v", err)
+		return
+	}
+	if len(request.Include) != 1 || request.Include[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %#v, want reasoning.encrypted_content", request.Include)
+	}
+	reasoningIndex, callIndex := -1, -1
+	for i, item := range request.Input {
+		switch {
+		case item.Type == "reasoning" && item.EncryptedContent == "responses-cipher" && reasoningIndex < 0:
+			reasoningIndex = i
+		case item.Type == "function_call" && item.CallID == "call_1":
+			callIndex = i
+		}
+	}
+	if reasoningIndex < 0 {
+		t.Errorf("replayed request has no encrypted reasoning item: %s", body)
+		return
+	}
+	if callIndex < 0 || reasoningIndex >= callIndex {
+		t.Errorf("reasoning index %d must precede call_1 index %d: %s", reasoningIndex, callIndex, body)
+	}
+}
+
+// checkChatReasoningEcho verifies that the runner and Chat adapter replayed the
+// thinking that accompanied the first tool call, as DeepSeek-compatible
+// endpoints require.
+func checkChatReasoningEcho(t *testing.T, body []byte) {
+	t.Helper()
+	var request struct {
+		Messages []struct {
+			Role             string `json:"role"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil {
+		t.Errorf("decode replayed request: %v", err)
+		return
+	}
+	for _, message := range request.Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		if len(message.ToolCalls) == 1 && message.ToolCalls[0].ID == "call_1" {
+			if got, want := message.ReasoningContent, "check hello.txt before answering"; got != want {
+				t.Errorf("replayed reasoning_content = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Errorf("replayed request has no assistant message for call_1: %s", body)
+}
+
 func responsesToolCallResponse() map[string]any {
 	return map[string]any{
 		"id": "resp-1", "object": "response", "status": "completed",
-		"output": []any{map[string]any{
-			"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file",
-			"arguments": `{"path":"hello.txt"}`,
-		}},
+		"output": []any{
+			map[string]any{
+				"type": "reasoning", "id": "rs_1", "summary": []any{},
+				"encrypted_content": "responses-cipher",
+			},
+			map[string]any{
+				"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file",
+				"arguments": `{"path":"hello.txt"}`,
+			},
+		},
 		"usage": map[string]any{"input_tokens": 11, "output_tokens": 7},
 	}
 }
@@ -199,6 +276,11 @@ func TestBinaryRunsBothDialects(t *testing.T) {
 				}
 				if !bytes.Contains(body, []byte("hello from file")) {
 					t.Errorf("second request missing tool result: %s", body)
+				}
+				if tc.dialect == "openai-chat" {
+					checkChatReasoningEcho(t, body)
+				} else {
+					checkResponsesReasoningEcho(t, body)
 				}
 				writeJSON(w, 200, tc.final)
 			})

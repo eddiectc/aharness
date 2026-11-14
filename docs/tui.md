@@ -167,9 +167,12 @@ next-run value and clears an unsupported one with a notice, as described under
 Model thinking (provider reasoning) is shown in the transcript as a separate
 `thinking` block, indented under the assistant text it precedes. It is
 display-only and never durable: it is not written to the session log, not
-replayed on resume or fork, not counted against the response cap, and never
-echoed back to the provider. A resumed or forked session therefore shows only
-new thinking.
+replayed on resume or fork, and not counted against the response cap. The
+active adapter keeps a bounded in-memory copy of its native continuation
+material (thinking text for Chat, raw reasoning items for Responses) so the
+model can continue a tool round; that copy is not part of the transcript and
+disappears with the run. A resumed or forked session therefore shows only new
+thinking.
 
 - While the model is still thinking the block header is `thinking…`; it becomes
   `thinking` when assistant text arrives or the response completes.

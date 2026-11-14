@@ -111,8 +111,9 @@ gate tests; see §12 for the two environment-blocked measurement items.
 - [ ] A manual multi-round tool smoke in thinking mode (`-thinking-effort
       high`) against `deepseek-v4.1-flash` passes, or the failure is recorded
       and the reasoning-continuation contingency is opened. **Not run:**
-      `AHARNESS_PROVIDER_TOKEN` is unset in this environment. The contingency
-      stays open in §8; fixture tests do not claim provider acceptance.
+      `AHARNESS_PROVIDER_TOKEN` is unset in this environment. The adapter-owned
+      Chat and Responses continuations are implemented and fixture-tested
+      (§12); live gateway acceptance remains unverified.
 - [x] `read_file` never returns head+tail file content; the header describes
       the delivered range; a non-final page ends with
       `continue with offset=<next>`; a truncated line is marked.
@@ -634,10 +635,14 @@ tool-result field, 4 MiB session line, and 16 MiB catalog body stay.
 - **Missing usage.** Some local OpenAI-compatible endpoints omit usage. The
   default remains permissive; eval runs use `-require-usage`. Never average a
   silent zero into an experiment.
-- **Reasoning continuation.** If the gateway requires `reasoning_content`
-  echo, the adapter needs a bounded continuation. That design must be decided
-  with the smoke result and must not leak raw provider shapes into the loop.
-  This is a prerequisite, not an assumed implementation.
+- **Reasoning continuation.** DeepSeek-compatible thinking endpoints require
+  the `reasoning_content` of earlier assistant messages to be echoed when the
+  request carries tools, and Responses reasoning models require their reasoning
+  items to be replayed in a stateless tool round. Both adapters now retain a
+  bounded in-memory copy per response and replay it with the matching message;
+  the copy is never logged and dies with the adapter. The live `opencode-go`
+  smoke still needs to confirm each gateway accepts the echo; the design does
+  not leak raw provider shapes into the loop.
 - **Eval overfitting.** A small suite can be tuned accidentally. Hold out
   tasks, vary seeds, and refresh. Terminal-Bench is an anchor, not a substitute
   for the internal suite.
@@ -694,7 +699,9 @@ When implemented, update:
 - Confirm that models.dev exposes `cost` for every usable model; if not, the
   runtime omits cost and the eval price file must cover the experiment models.
 - Confirm the `opencode-go` gateway’s reasoning-continuation behavior before
-  designing a canonical or adapter-owned continuation.
+  designing a canonical or adapter-owned continuation. The adapter-owned Chat
+  continuation is implemented from the DeepSeek contract; the live gateway
+  check remains pending.
 - Decide whether the internal task fixtures can use this repository’s history
   or need small vendored repos. Licensing and size must be settled before the
   30-task suite is authored.
@@ -726,6 +733,17 @@ The implementation follows §1–§10 with these recorded choices:
 - **`-require-usage` timing.** The response is recorded and displayed, and the
   turn/usage counters advance, before the runner stops with `protocol_error`.
   No tool executes. The default remains permissive.
+- **Reasoning continuation.** The Chat adapter retains up to 4 MiB of thinking
+  per response and 16 MiB per adapter, keyed by the canonical assistant message
+  (content plus tool-call IDs), and sends it as `reasoning_content` when the
+  runner replays that message in a tool round. The Responses adapter uses the
+  same key and bounds to retain the raw `reasoning` output items, sets
+  `include: ["reasoning.encrypted_content"]` for stateless replay, and inserts
+  them before the matching assistant message/function calls. Summary-only or
+  ID-only Responses items are not replayable and stay display-only. The display
+  copy remains capped at 64 KiB and the continuation copy is never logged.
+  Future native adapters follow the same pattern; see
+  [architecture §2.4](../architecture.md#24-continuation-for-a-new-dialect).
 - **Eval baseline.** The 30-task suite and driver are complete and tested with
   fake arms; `eval/baseline.json` honestly records `status=unmeasured` with the
   credential reason. No solve rate, token delta, or cost delta is claimed

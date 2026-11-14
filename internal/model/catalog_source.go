@@ -752,6 +752,10 @@ func compareReasoningEfforts(a, b string) int {
 	}
 }
 
+// catalogSDK maps a models.dev SDK package to the effective dialect. Anthropic
+// and Google models are translated through Chat today. A native adapter for
+// either must add its own continuation cache and two-round conformance test;
+// see docs/architecture.md §2.4.
 func catalogSDK(sdk string) (dialect Dialect, nativeDialect string, translated, supported bool) {
 	switch sdk {
 	case "@ai-sdk/openai-compatible":

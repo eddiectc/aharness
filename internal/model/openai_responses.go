@@ -14,7 +14,8 @@ import (
 
 // OpenAIResponses is the dialect adapter for the OpenAI Responses API.
 type OpenAIResponses struct {
-	transport *httpTransport
+	transport    *httpTransport
+	continuation continuationCache[[]jsontext.Value]
 }
 
 // NewOpenAIResponses constructs a Responses adapter. An empty baseURL uses
@@ -22,7 +23,8 @@ type OpenAIResponses struct {
 // non-positive timeout selects DefaultHTTPTimeout.
 func NewOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIResponses {
 	return &OpenAIResponses{
-		transport: newHTTPTransport(baseURL, "/responses", token, sessionID, version, timeout),
+		transport:    newHTTPTransport(baseURL, "/responses", token, sessionID, version, timeout),
+		continuation: newContinuationCache(responsesReasoningBytes),
 	}
 }
 
@@ -33,6 +35,7 @@ type responsesRequest struct {
 	Tools           []responsesTool     `json:"tools,omitempty"`
 	MaxOutputTokens int                 `json:"max_output_tokens,omitzero"`
 	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Include         []string            `json:"include,omitempty"`
 	Store           bool                `json:"store"`
 	Stream          bool                `json:"stream,omitempty"`
 }
@@ -172,7 +175,12 @@ func (a *OpenAIResponses) Complete(ctx context.Context, req Request) (Response, 
 	if err != nil {
 		return Response{}, err
 	}
-	return decodeResponsesResponse(body, a.transport.token)
+	completion, err := decodeResponsesCompletion(body, a.transport.token)
+	if err != nil {
+		return Response{}, err
+	}
+	a.rememberContinuation(completion.Response, completion.reasoningItems)
+	return completion.Response, nil
 }
 
 // CompleteStream sends a streaming Responses request. Text and reasoning
@@ -190,12 +198,22 @@ func (a *OpenAIResponses) CompleteStream(ctx context.Context, req Request, strea
 		if err != nil {
 			return Response{}, err
 		}
-		return decodeResponsesResponse(body, a.transport.token)
+		completion, err := decodeResponsesCompletion(body, a.transport.token)
+		if err != nil {
+			return Response{}, err
+		}
+		a.rememberContinuation(completion.Response, completion.reasoningItems)
+		return completion.Response, nil
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	return consumeResponsesStream(resp.Body, stream, a.transport.token)
+	completion, err := consumeResponsesStreamFull(resp.Body, stream, a.transport.token)
+	if err != nil {
+		return Response{}, err
+	}
+	a.rememberContinuation(completion.Response, completion.reasoningItems)
+	return completion.Response, nil
 }
 
 func (a *OpenAIResponses) payload(req Request) responsesRequest {
@@ -204,6 +222,10 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 		Input:           make([]any, 0, len(req.Messages)),
 		Tools:           make([]responsesTool, 0, len(req.Tools)),
 		MaxOutputTokens: req.MaxOutputTokens,
+		// Stateless replay cannot resolve reasoning item IDs. Ask OpenAI-
+		// compatible endpoints for encrypted reasoning so the items can be
+		// replayed; servers that return plaintext reasoning ignore this field.
+		Include: []string{"reasoning.encrypted_content"},
 	}
 	if req.ThinkingEffort != "" {
 		payload.Reasoning = &responsesReasoning{Effort: req.ThinkingEffort}
@@ -223,6 +245,15 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 				}},
 			})
 		case RoleAssistant:
+			if msg.Content != "" || len(msg.ToolCalls) > 0 {
+				// A continuation item must precede the assistant output it
+				// explains; a trailing reasoning item is not a valid input.
+				if items, ok := a.continuation.lookup(continuationKey(msg.Content, msg.ToolCalls)); ok {
+					for _, item := range items {
+						payload.Input = append(payload.Input, item)
+					}
+				}
+			}
 			if msg.Content != "" {
 				payload.Input = append(payload.Input, responsesInputMessage{
 					Type:    "message",
@@ -257,26 +288,72 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 	return payload
 }
 
+// responsesCompletion is one decoded Responses response plus the raw reasoning
+// items that a stateless tool round must replay. Response.Reasoning is the
+// display text.
+type responsesCompletion struct {
+	Response       Response
+	reasoningItems []jsontext.Value
+}
+
+// rememberContinuation retains one response's reasoning items for the next
+// tool round.
+func (a *OpenAIResponses) rememberContinuation(resp Response, items []jsontext.Value) {
+	if len(items) == 0 {
+		return
+	}
+	a.continuation.remember(continuationKey(resp.Text, resp.ToolCalls), items)
+}
+
+// responsesReasoningBytes is the cache weight of one response's raw items.
+func responsesReasoningBytes(items []jsontext.Value) int {
+	n := 0
+	for _, item := range items {
+		n += len(item)
+	}
+	return n
+}
+
 func decodeResponsesResponse(body []byte, token string) (Response, error) {
+	completion, err := decodeResponsesCompletion(body, token)
+	if err != nil {
+		return Response{}, err
+	}
+	return completion.Response, nil
+}
+
+func decodeResponsesCompletion(body []byte, token string) (responsesCompletion, error) {
 	var decoded responsesResponse
 	if err := jsonv2.Unmarshal(body, &decoded); err != nil {
-		return Response{}, &ProtocolError{Err: fmt.Errorf("decode responses completion: %w", err)}
+		return responsesCompletion{}, &ProtocolError{Err: fmt.Errorf("decode responses completion: %w", err)}
 	}
-	return decoded.canonical(token)
+	resp, items, err := decoded.canonical(token)
+	if err != nil {
+		return responsesCompletion{}, err
+	}
+	return responsesCompletion{Response: resp, reasoningItems: items}, nil
 }
 
 func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Response, error) {
+	completion, err := consumeResponsesStreamFull(r, stream, token)
+	if err != nil {
+		return Response{}, err
+	}
+	return completion.Response, nil
+}
+
+func consumeResponsesStreamFull(r io.Reader, stream StreamHandler, token string) (responsesCompletion, error) {
 	dec := newSSEDecoder(r)
 	var (
 		emittedText  strings.Builder
 		emittedBytes int
 		reasoning    strings.Builder
 	)
-	fail := func(err error) (Response, error) {
+	fail := func(err error) (responsesCompletion, error) {
 		if emittedBytes > 0 {
-			return Response{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
+			return responsesCompletion{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
 		}
-		return Response{}, err
+		return responsesCompletion{}, err
 	}
 
 	for {
@@ -308,7 +385,7 @@ func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Re
 			emittedText.WriteString(decoded.Delta)
 			emittedBytes += len(decoded.Delta)
 			if err := stream.text(decoded.Delta); err != nil {
-				return Response{}, err
+				return responsesCompletion{}, err
 			}
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			// Thinking summaries and raw reasoning text are display-only.
@@ -325,7 +402,7 @@ func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Re
 			}
 			reasoning.WriteString(delta)
 			if err := stream.reasoning(delta); err != nil {
-				return Response{}, err
+				return responsesCompletion{}, err
 			}
 		case "response.function_call_arguments.delta":
 			// Tool calls are assembled from the terminal response event; the
@@ -343,7 +420,7 @@ func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Re
 			if decoded.Response.Usage == nil {
 				return fail(&ProtocolError{Err: fmt.Errorf("%s event has no usage", head.Type)})
 			}
-			resp, err := decoded.Response.canonical(token)
+			resp, items, err := decoded.Response.canonical(token)
 			if err != nil {
 				return fail(err)
 			}
@@ -356,7 +433,7 @@ func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Re
 				return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
 			}
 			resp.Streamed = true
-			return resp, nil
+			return responsesCompletion{Response: resp, reasoningItems: items}, nil
 		case "response.failed":
 			if err := jsonv2.Unmarshal(event.Data, &decoded); err != nil {
 				return fail(&ProtocolError{Err: fmt.Errorf("decode failed response event: %w", err)})
@@ -392,12 +469,13 @@ func consumeResponsesStream(r io.Reader, stream StreamHandler, token string) (Re
 // items contribute output_text in order; reasoning items contribute thinking
 // text for display only; function_call items are correlated by call_id, never
 // by the provider item id.
-func (r responsesResponse) canonical(token string) (Response, error) {
+func (r responsesResponse) canonical(token string) (Response, []jsontext.Value, error) {
 	var out Response
+	var reasoningItems []jsontext.Value
 	if r.Usage != nil {
 		out.Usage = r.Usage.canonical()
 		if err := validateUsage(out.Usage); err != nil {
-			return Response{}, err
+			return Response{}, nil, err
 		}
 	}
 
@@ -406,13 +484,13 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 	for _, raw := range r.Output {
 		var kind responsesOutputKind
 		if err := jsonv2.Unmarshal([]byte(raw), &kind); err != nil {
-			return Response{}, &ProtocolError{Err: fmt.Errorf("decode response output item: %w", err)}
+			return Response{}, nil, &ProtocolError{Err: fmt.Errorf("decode response output item: %w", err)}
 		}
 		switch kind.Type {
 		case "message":
 			var item responsesMessageItem
 			if err := jsonv2.Unmarshal([]byte(raw), &item); err != nil {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("decode response message item: %w", err)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("decode response message item: %w", err)}
 			}
 			for _, part := range item.Content {
 				if part.Type == "output_text" {
@@ -422,7 +500,7 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 		case "reasoning":
 			var item responsesReasoningItem
 			if err := jsonv2.Unmarshal([]byte(raw), &item); err != nil {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("decode response reasoning item: %w", err)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("decode response reasoning item: %w", err)}
 			}
 			for _, part := range item.Summary {
 				appendReasoningPart(&reasoning, part)
@@ -430,22 +508,25 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 			for _, part := range item.Content {
 				appendReasoningPart(&reasoning, part)
 			}
+			if replayableReasoningItem(raw) {
+				reasoningItems = append(reasoningItems, raw)
+			}
 		case "function_call":
 			var item responsesFunctionCallItem
 			if err := jsonv2.Unmarshal([]byte(raw), &item); err != nil {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("decode response function call item: %w", err)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("decode response function call item: %w", err)}
 			}
 			if item.CallID == "" {
-				return Response{}, &ProtocolError{Err: errors.New("function call is missing a call_id")}
+				return Response{}, nil, &ProtocolError{Err: errors.New("function call is missing a call_id")}
 			}
 			if _, ok := seen[item.CallID]; ok {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("duplicate function call id %q", item.CallID)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("duplicate function call id %q", item.CallID)}
 			}
 			if item.Name == "" {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("function call %q is missing a name", item.CallID)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("function call %q is missing a name", item.CallID)}
 			}
 			if !jsontext.Value(item.Arguments).IsValid() {
-				return Response{}, &ProtocolError{Err: fmt.Errorf("function call %q has invalid json arguments", item.CallID)}
+				return Response{}, nil, &ProtocolError{Err: fmt.Errorf("function call %q has invalid json arguments", item.CallID)}
 			}
 			seen[item.CallID] = struct{}{}
 			out.ToolCalls = append(out.ToolCalls, ToolCall{
@@ -460,10 +541,33 @@ func (r responsesResponse) canonical(token string) (Response, error) {
 
 	finish, err := r.finishReason(len(out.ToolCalls) > 0, token)
 	if err != nil {
-		return Response{}, err
+		return Response{}, nil, err
 	}
 	out.FinishReason = finish
-	return out, nil
+	return out, reasoningItems, nil
+}
+
+// replayableReasoningItem reports whether a reasoning item carries material a
+// stateless request can replay. OpenAI requires encrypted content; DeepSeek
+// returns plaintext reasoning_text content. A summary alone is display-only and
+// cannot restore the model's reasoning.
+func replayableReasoningItem(raw jsontext.Value) bool {
+	var item struct {
+		EncryptedContent string                 `json:"encrypted_content"`
+		Content          []responsesSummaryPart `json:"content"`
+	}
+	if err := jsonv2.Unmarshal([]byte(raw), &item); err != nil {
+		return false
+	}
+	if item.EncryptedContent != "" {
+		return true
+	}
+	for _, part := range item.Content {
+		if part.Text != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // appendReasoningPart adds one reasoning summary or content part under the

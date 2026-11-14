@@ -138,12 +138,13 @@ This is the resolution of
 Production runs use the catalog URL.
 
 Both adapters send the full projected input on every call and keep no
-server-side conversation state. The Responses adapter sets `store: false` and
-never uses `previous_response_id`. If a future Responses model requires
-reasoning items or encrypted content across tool rounds, that continuation is
-adapter-owned; the v0 Responses smoke did not require one
-([v0-build.md §4.3](plans/v0-build.md#43-prerequisites-and-resolutions)). The
-canonical model never carries raw provider shapes.
+server-side conversation state. The Responses adapter sets `store: false`,
+never uses `previous_response_id`, and asks for
+`reasoning.encrypted_content` so a stateless tool round can replay reasoning;
+servers that return plaintext reasoning (DeepSeek's Responses API) ignore the
+include field and are covered by the same raw-item replay. Continuation is
+adapter-owned in both dialects; the canonical model never carries raw provider
+shapes.
 
 ### 2.2 Canonical model and dialect adapters
 
@@ -160,13 +161,15 @@ reasoning items, reasoning identifiers, citations, safety metadata, cache
 controls, opaque options, and streaming events — stays in the adapter and is
 dropped unless the loop or the dialect's continuation needs it. Thinking text is
 the one exception: it is mapped into the typed display-only
-`model.Response.Reasoning` field so the TUI can show it, and it is never logged,
-projected, or replayed. If a future feature needs another provider field, add a
-typed canonical field when the loop consumes it; do not add a raw
-provider-shaped field. A lossless union schema for OpenAI Responses, OpenAI
-Chat, Anthropic, and Gemini would push provider-specific optional fields and
-invalid states into the loop; that is the thing to avoid. OpenAI Chat is a
-dialect, not a neutral standard, so it is not the canonical model either.
+`model.Response.Reasoning` field so the TUI can show it, and it is never logged
+or projected. A dialect adapter may separately retain the provider's own
+continuation material in memory; that is adapter state, not a canonical field.
+If a future feature needs another provider field, add a typed canonical field
+when the loop consumes it; do not add a raw provider-shaped field. A lossless
+union schema for OpenAI Responses, OpenAI Chat, Anthropic, and Gemini would push
+provider-specific optional fields and invalid states into the loop; that is the
+thing to avoid. OpenAI Chat is a dialect, not a neutral standard, so it is not
+the canonical model either.
 
 Each adapter owns the wire format, authentication, tool-schema translation, and
 the mapping of finish reasons, usage, and errors. It uses one `http.Client` with
@@ -178,8 +181,8 @@ to 15 minutes and is selectable with `-http-timeout` / `AHARNESS_HTTP_TIMEOUT` /
 | Layer | Owns |
 |---|---|
 | Canonical `model` types | System/text messages, display-only thinking text, tool calls/results, optional request-side thinking effort, normalized finish reason, usage, normalized errors. |
-| `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, `reasoning_content`/`reasoning` thinking text, prompt/completion usage. |
-| `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, reasoning item summaries, input/output usage, `store: false` full replay. |
+| `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, `reasoning_content`/`reasoning` thinking text and tool-round continuation, prompt/completion usage. |
+| `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, reasoning summaries and raw reasoning-item continuation, input/output usage, `store: false` full replay. |
 | Shared `model` HTTP helper | Request execution, auth/session headers, 1 MiB body cap, typed error decoding. |
 
 Normalization rules:
@@ -209,9 +212,10 @@ Normalization rules:
 - Canonical errors are typed (`HTTPError`, `TransportError`, `ProtocolError`,
   and context overflow); adapters map HTTP statuses and provider error bodies.
 - Both adapters replay the canonical projection; the Responses adapter sets
-  `store: false` and never uses `previous_response_id`. A bounded
-  adapter-owned continuation for reasoning items remains a future-model
-  concern, not a canonical message; the v0 Responses smoke did not need one.
+  `store: false` and never uses `previous_response_id`. Each adapter also keeps
+  a bounded, adapter-owned copy of its native reasoning continuation material
+  and replays that material with the matching assistant output; it is not a
+  canonical message and is not projected from the log.
 
 **Thinking effort.** The public name is *thinking effort*; the provider and
 catalog call the same control *reasoning effort*. `model.Request` carries one
@@ -250,12 +254,19 @@ type Request struct {
 - Thinking text is display-only. `model.Response.Reasoning` carries the
   provider's thinking: Chat reads `reasoning_content` (DeepSeek-compatible) and
   falls back to `reasoning`; Responses concatenates `reasoning` item summary
-  and content text and ignores encrypted content. It is capped at 64 KiB, never
-  counted against the canonical response cap, never written to the log, and
-  never replayed to the provider. Usage already counts reasoning tokens as
-  output tokens, so no accounting change is needed. When a provider requires
-  reasoning continuation across tool rounds, that remains adapter-owned and
-  unimplemented; the harness does not echo thinking text back.
+  and content text and ignores encrypted content for display. It is capped at
+  64 KiB, never counted against the canonical response cap, and never written
+  to the log or projected. Usage already counts reasoning tokens as output
+  tokens, so no accounting change is needed. Both adapters additionally retain
+  the provider's own continuation material in a bounded in-memory cache (4 MiB
+  per response, 16 MiB per adapter) and replay it before the matching assistant
+  output when the loop sends a tool result. Chat replays thinking text as
+  `reasoning_content`; Responses replays the raw `reasoning` output items,
+  including encrypted content or plaintext `reasoning_text`. A Responses
+  summary without encrypted content or plaintext reasoning is display-only and
+  is not replayed. The cache is keyed by the canonical assistant message, is
+  never logged, lives only as long as the adapter (one run), and is not a
+  reason to add a canonical reasoning message shape.
 - A provider rejection of a value the catalog advertised (for example 400 or
   422) is a normal typed `provider_error`. The harness does not retry without
   the field or fall back to the provider default.
@@ -345,6 +356,43 @@ response's final text is not reprinted if any delta for it was emitted. If the
 adapter fell back to non-streaming, the response text is printed once. Without
 `-stream`, stdout remains the final assistant text printed at the end.
 
+### 2.4 Continuation for a new dialect
+
+Reasoning continuation is an adapter obligation, not a loop or log feature.
+When adding a dialect adapter that serves reasoning models, or enabling a
+native provider that already has one, the adapter MUST:
+
+- Retain the provider's exact continuation material — thinking text, raw
+  reasoning items, signed thinking blocks, or whatever opaque state the
+  provider requires — never the display summary and never a reconstructed
+  string.
+- Request the dialect-specific switch that exposes replayable material:
+  Responses sets `include: ["reasoning.encrypted_content"]` for `store: false`;
+  Anthropic enables thinking and receives signed `thinking` /
+  `redacted_thinking` blocks; Gemini returns `thought` parts with
+  `thoughtSignature`. Chat needs no request-side switch.
+- Key the material with `continuationKey` (assistant content or tool-call IDs)
+  and replay it in provider order, immediately before the assistant output it
+  explains. Never append it at the end of the input: DeepSeek's Responses API
+  rejects input that ends with an assistant or reasoning item, and OpenAI
+  expects the item to precede the corresponding output.
+- Bound the cache (4 MiB per response, 16 MiB per adapter), never log it or add
+  it to `model.Message`, and drop it with the adapter (one run). A new run or a
+  resumed process starts empty.
+- Add a two-round test for both buffered and streaming paths. The second wire
+  request must contain the native material unchanged, in order, and before the
+  matching tool call; the first request must carry the dialect's
+  `include`/thinking switch. Chat and Responses have template tests in
+  `internal/model/*_continuation_test.go`. Add a real-provider smoke before
+  claiming support.
+- Do not add a raw provider field to the canonical model or session log. If a
+  provider eventually requires continuation across runs, that is a separate
+  durable-reasoning decision, not an adapter cache extension.
+
+Native Anthropic and Gemini adapters are not shipped; those models are
+currently translated through the Chat adapter, and the gateway owns the
+signature round trip. If a native adapter replaces that path, the checklist
+above applies to its SDK types, not to `reasoning_content`.
 
 ## 3. Packages and contracts
 

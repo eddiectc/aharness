@@ -6,7 +6,10 @@
   checks pass. **Deviation:** the v1 "no config file" decision was later
   reversed. Aharness now supports an optional JSON config file below flags and
   environment; see [configuration.md](../configuration.md) and the deviation
-  noted in §1.2.
+  noted in §1.2. **Deviation:** the assumption that Responses needs no
+  reasoning-item continuation no longer holds. Both adapters now retain
+  provider-native continuation material in memory for tool rounds; see
+  [architecture §2.2 and §2.4](../architecture.md#22-canonical-model-and-dialect-adapters).
 - **Source:** [v0 build plan](v0-build.md); v0 is complete, including both
   dialect smoke runs.
 - **Research:** [Bare-Minimum Agent Harness](../research/agent-harness-minimum.md). v1
@@ -539,7 +542,7 @@ that freezes it.
 | Interactive first `SIGINT` interrupts, second terminates; non-interactive `SIGINT` remains terminal; steering is plain stdin text. | Scripts, exit codes, terminal behavior, and any future control protocol change. | M3, before release. |
 | Isolation and approval remain external; v1 adds neither. | The process, tool, environment, and credential contracts change; this is the highest-cost product reversal. | M1/M3, before recommending real-work use. |
 | Unix-like hosts with `flock`, `/bin/sh`, process groups, and `SIGINT`/`SIGTERM` are sufficient; the state directory is local. | Per-OS locking, command handling, and signal paths are required; Windows remains unclaimed. | M0/M1. |
-| Provider streaming uses SSE with a terminal completed event and final usage; Responses still needs no reasoning-item continuation. | The adapter needs a continuation mechanism, a different accounting path, or a non-streaming-only claim. | M2 with a real provider. |
+| Provider streaming uses SSE with a terminal completed event and final usage; reasoning continuation is adapter-owned, bounded, and in-memory in both dialects. | The adapter needs a different continuation mechanism, a durable reasoning design, or a different accounting path. | M2 with a real provider. |
 | Session IDs resolve under `<state>/sessions`; there is no arbitrary-path resume or log rotation in v1. | Identity, path containment, work-directory, and storage-retention rules change. | M1. |
 | Durability syncs after each tool result; a torn final line is the only rewrite of a log. | The store's append-only/repair contract and crash-recovery rules change. | M0/M1. |
 | The session log is trusted input; v1 does not authenticate or sign it. | Resume/fork need a trust boundary, signatures, or a separate UID; the log format and threat model change. | M1, before recommending resume on shared hosts. |

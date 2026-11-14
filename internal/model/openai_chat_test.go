@@ -24,10 +24,11 @@ type chatRequestWire struct {
 }
 
 type chatMessageWire struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
-	ToolCallID string `json:"tool_call_id"`
-	ToolCalls  []struct {
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
+	ToolCallID       string `json:"tool_call_id"`
+	ToolCalls        []struct {
 		ID       string `json:"id"`
 		Type     string `json:"type"`
 		Function struct {

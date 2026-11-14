@@ -14,7 +14,8 @@ import (
 
 // OpenAIChat is the dialect adapter for the OpenAI Chat Completions API.
 type OpenAIChat struct {
-	transport *httpTransport
+	transport    *httpTransport
+	continuation continuationCache[string]
 }
 
 // NewOpenAIChat constructs a Chat Completions adapter. An empty baseURL uses
@@ -22,7 +23,8 @@ type OpenAIChat struct {
 // non-positive timeout selects DefaultHTTPTimeout.
 func NewOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIChat {
 	return &OpenAIChat{
-		transport: newHTTPTransport(baseURL, "/chat/completions", token, sessionID, version, timeout),
+		transport:    newHTTPTransport(baseURL, "/chat/completions", token, sessionID, version, timeout),
+		continuation: newContinuationCache(func(s string) int { return len(s) }),
 	}
 }
 
@@ -41,10 +43,11 @@ type chatStreamOptions struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          string         `json:"content"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 
 type chatToolCall struct {
@@ -171,7 +174,12 @@ func (a *OpenAIChat) Complete(ctx context.Context, req Request) (Response, error
 	if err != nil {
 		return Response{}, err
 	}
-	return decodeChatResponse(body)
+	completion, err := decodeChatCompletion(body)
+	if err != nil {
+		return Response{}, err
+	}
+	a.rememberContinuation(completion.Response, completion.reasoning)
+	return completion.Response, nil
 }
 
 // CompleteStream sends a streaming Chat Completions request. Assistant-text
@@ -190,12 +198,22 @@ func (a *OpenAIChat) CompleteStream(ctx context.Context, req Request, stream Str
 		if err != nil {
 			return Response{}, err
 		}
-		return decodeChatResponse(body)
+		completion, err := decodeChatCompletion(body)
+		if err != nil {
+			return Response{}, err
+		}
+		a.rememberContinuation(completion.Response, completion.reasoning)
+		return completion.Response, nil
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	return consumeChatStream(resp.Body, stream)
+	completion, err := consumeChatStreamFull(resp.Body, stream)
+	if err != nil {
+		return Response{}, err
+	}
+	a.rememberContinuation(completion.Response, completion.reasoning)
+	return completion.Response, nil
 }
 
 func (a *OpenAIChat) payload(req Request) chatRequest {
@@ -211,6 +229,14 @@ func (a *OpenAIChat) payload(req Request) chatRequest {
 			Role:       string(msg.Role),
 			Content:    msg.Content,
 			ToolCallID: msg.ToolCallID,
+		}
+		if msg.Role == RoleAssistant {
+			// DeepSeek-compatible endpoints require the reasoning_content of
+			// earlier assistant turns when the request carries tools. Only
+			// messages this adapter itself produced have a retained copy.
+			if reasoning, ok := a.continuation.lookup(continuationKey(msg.Content, msg.ToolCalls)); ok {
+				wire.ReasoningContent = reasoning
+			}
 		}
 		for _, call := range msg.ToolCalls {
 			wire.ToolCalls = append(wire.ToolCalls, chatToolCall{
@@ -233,32 +259,70 @@ func (a *OpenAIChat) payload(req Request) chatRequest {
 	return payload
 }
 
-func decodeChatResponse(body []byte) (Response, error) {
-	var decoded chatResponse
-	if err := jsonv2.Unmarshal(body, &decoded); err != nil {
-		return Response{}, &ProtocolError{Err: fmt.Errorf("decode chat completion: %w", err)}
+// rememberContinuation retains one response's thinking for the next tool round.
+func (a *OpenAIChat) rememberContinuation(resp Response, reasoning string) {
+	if reasoning == "" {
+		return
 	}
-	return decoded.canonical()
+	a.continuation.remember(continuationKey(resp.Text, resp.ToolCalls), reasoning)
 }
 
+// chatCompletion is one decoded Chat response plus the adapter-owned thinking
+// copy needed to continue a tool round. Response.Reasoning is the display copy.
+type chatCompletion struct {
+	Response  Response
+	reasoning string
+}
+
+func decodeChatResponse(body []byte) (Response, error) {
+	completion, err := decodeChatCompletion(body)
+	if err != nil {
+		return Response{}, err
+	}
+	return completion.Response, nil
+}
+
+func decodeChatCompletion(body []byte) (chatCompletion, error) {
+	var decoded chatResponse
+	if err := jsonv2.Unmarshal(body, &decoded); err != nil {
+		return chatCompletion{}, &ProtocolError{Err: fmt.Errorf("decode chat completion: %w", err)}
+	}
+	resp, reasoning, err := decoded.canonical()
+	if err != nil {
+		return chatCompletion{}, err
+	}
+	return chatCompletion{Response: resp, reasoning: reasoning}, nil
+}
+
+// consumeChatStream returns the canonical response for callers that do not
+// need the adapter-owned continuation copy.
 func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
+	completion, err := consumeChatStreamFull(r, stream)
+	if err != nil {
+		return Response{}, err
+	}
+	return completion.Response, nil
+}
+
+func consumeChatStreamFull(r io.Reader, stream StreamHandler) (chatCompletion, error) {
 	dec := newSSEDecoder(r)
 	var (
-		text         strings.Builder
-		emittedText  strings.Builder
-		reasoning    strings.Builder
-		emittedBytes int
-		argBytes     int
-		calls        = make(map[int]*chatStreamCall)
-		order        []int
-		finishReason string
-		usage        *chatUsage
+		text          strings.Builder
+		emittedText   strings.Builder
+		reasoning     strings.Builder
+		wireReasoning strings.Builder
+		emittedBytes  int
+		argBytes      int
+		calls         = make(map[int]*chatStreamCall)
+		order         []int
+		finishReason  string
+		usage         *chatUsage
 	)
-	fail := func(err error) (Response, error) {
+	fail := func(err error) (chatCompletion, error) {
 		if emittedBytes > 0 {
-			return Response{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
+			return chatCompletion{}, &PartialError{Err: err, Text: partialStreamText(emittedText.String()), Bytes: emittedBytes}
 		}
-		return Response{}, err
+		return chatCompletion{}, err
 	}
 
 	for {
@@ -288,10 +352,15 @@ func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
 			finishReason = *choice.FinishReason
 		}
 		// DeepSeek-compatible servers stream thinking as reasoning_content;
-		// OpenAI-compatible servers use reasoning. Either is display-only.
+		// OpenAI-compatible servers use reasoning. The display copy is capped
+		// at MaxReasoningText; the adapter-owned copy must stay complete enough
+		// to replay in the next tool round.
 		for _, delta := range [...]string{choice.Delta.ReasoningContent, choice.Delta.Reasoning} {
 			if delta == "" {
 				continue
+			}
+			if raw := acceptText(wireReasoning.Len(), maxContinuationBytes, delta); raw != "" {
+				wireReasoning.WriteString(raw)
 			}
 			delta = acceptReasoning(reasoning.Len(), delta)
 			if delta == "" {
@@ -299,7 +368,7 @@ func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
 			}
 			reasoning.WriteString(delta)
 			if err := stream.reasoning(delta); err != nil {
-				return Response{}, err
+				return chatCompletion{}, err
 			}
 		}
 		if delta := choice.Delta.Content; delta != "" {
@@ -310,7 +379,7 @@ func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
 			emittedText.WriteString(delta)
 			emittedBytes += len(delta)
 			if err := stream.text(delta); err != nil {
-				return Response{}, err
+				return chatCompletion{}, err
 			}
 		}
 		for _, fragment := range choice.Delta.ToolCalls {
@@ -384,14 +453,15 @@ func consumeChatStream(r io.Reader, stream StreamHandler) (Response, error) {
 		return fail(&ProtocolError{Err: fmt.Errorf("assembled response exceeds %d bytes", MaxCanonicalResponse)})
 	}
 	out.FinishReason = chatFinishReason(finishReason, len(out.ToolCalls) > 0)
-	return out, nil
+	return chatCompletion{Response: out, reasoning: wireReasoning.String()}, nil
 }
 
-// canonical maps the first wire choice into a canonical response. A provided
-// tool-call ID is trusted only when it is present, unique, and named.
-func (r chatResponse) canonical() (Response, error) {
+// canonical maps the first wire choice into a canonical response plus the
+// adapter-owned full reasoning copy. A provided tool-call ID is trusted only
+// when it is present, unique, and named.
+func (r chatResponse) canonical() (Response, string, error) {
 	if len(r.Choices) == 0 {
-		return Response{}, &ProtocolError{Err: errors.New("chat completion has no choices")}
+		return Response{}, "", &ProtocolError{Err: errors.New("chat completion has no choices")}
 	}
 
 	choice := r.Choices[0]
@@ -405,21 +475,21 @@ func (r chatResponse) canonical() (Response, error) {
 		Usage:     r.Usage.canonical(),
 	}
 	if err := validateUsage(out.Usage); err != nil {
-		return Response{}, err
+		return Response{}, "", err
 	}
 	seen := make(map[string]struct{}, len(choice.Message.ToolCalls))
 	for _, call := range choice.Message.ToolCalls {
 		if call.ID == "" {
-			return Response{}, &ProtocolError{Err: errors.New("tool call is missing an id")}
+			return Response{}, "", &ProtocolError{Err: errors.New("tool call is missing an id")}
 		}
 		if _, ok := seen[call.ID]; ok {
-			return Response{}, &ProtocolError{Err: fmt.Errorf("duplicate tool call id %q", call.ID)}
+			return Response{}, "", &ProtocolError{Err: fmt.Errorf("duplicate tool call id %q", call.ID)}
 		}
 		if call.Function.Name == "" {
-			return Response{}, &ProtocolError{Err: fmt.Errorf("tool call %q is missing a name", call.ID)}
+			return Response{}, "", &ProtocolError{Err: fmt.Errorf("tool call %q is missing a name", call.ID)}
 		}
 		if !jsontext.Value(call.Function.Arguments).IsValid() {
-			return Response{}, &ProtocolError{Err: fmt.Errorf("tool call %q has invalid json arguments", call.ID)}
+			return Response{}, "", &ProtocolError{Err: fmt.Errorf("tool call %q has invalid json arguments", call.ID)}
 		}
 		seen[call.ID] = struct{}{}
 		out.ToolCalls = append(out.ToolCalls, ToolCall{
@@ -430,7 +500,7 @@ func (r chatResponse) canonical() (Response, error) {
 	}
 
 	out.FinishReason = chatFinishReason(choice.FinishReason, len(out.ToolCalls) > 0)
-	return out, nil
+	return out, capContinuationReasoning(reasoning), nil
 }
 
 // chatFinishReason normalizes a Chat Completions finish reason. A response
