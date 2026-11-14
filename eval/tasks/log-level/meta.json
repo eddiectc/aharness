@@ -1,6 +1,0 @@
-{
-  "cluster": "text-transform",
-  "language": "text",
-  "timeout": 30,
-  "notes": "Two log files; exact level-token replacement."
-}

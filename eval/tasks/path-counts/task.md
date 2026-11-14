@@ -1,1 +1,0 @@
-access.log has lines beginning with an RFC3339 timestamp, then method, then request path. Write paths.txt with one line per distinct path as "path count", sorted by path ascending, counting all requests.

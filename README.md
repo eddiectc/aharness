@@ -8,16 +8,16 @@ opt-in and unlimited by default.
 
 - **Status:** v1 implementation complete. The agent-tooling M0–M3 work is also
   implemented, including usage/cost accounting, the contiguous 2,000-line read
-  contract with `toolset-v1` replay, search/command improvements, builtin
-  SearXNG-backed web search, and the dev-only eval driver and 30-task suite. The
+  contract with `toolset-v1` replay, search/command improvements, and builtin
+  SearXNG-backed web search. The
   default TUI, provider/model discovery, per-model thinking effort,
   display-only thinking text, and folded thinking/tool output are implemented.
   The TUI is
   the default in a terminal;
   `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
   surface. Mock-provider, integration, fuzz, race, and §8 gate checks pass. The
-  real-provider TUI, thinking-effort, thinking-display, transcript-folding, and
-  eval baseline/A-B runs remain pending
+  real-provider TUI, thinking-effort, thinking-display, and transcript-folding
+  runs remain pending
   provider credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
   environment); they are explicit release prerequisites.
 - **Toolchain:** Go 1.27.3, module `aharness`.
@@ -200,14 +200,6 @@ export AHARNESS_PROVIDER_TOKEN=...   # optional for local no-auth endpoints
 `make build` and `make test` wrap the same build and race-test commands.
 `make install` builds the binary and installs it to `~/.local/bin`
 (override with `INSTALL_DIR=/some/dir`).
-
-Development measurement tooling is separate from the runtime binary:
-`go build -trimpath -o bin/aharness-eval ./cmd/aharness-eval` builds the
-A/B driver, and `eval/` holds the task suite, price file, and results. The
-driver runs two or more harness binaries over the same tasks with fresh
-workspaces, verifies each task with its own script, and reports paired
-bootstrap confidence intervals. It is not part of the shipped runtime
-dependency graph; see [eval/README.md](eval/README.md).
 
 In TUI and `-ui-json` modes a task is optional: a new session is created
 eagerly, the header shows its ID, and the first submitted message supplies the

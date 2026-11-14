@@ -1,6 +1,0 @@
-{
-  "cluster": "shell-pipeline",
-  "language": "sh",
-  "timeout": 30,
-  "notes": "Keep-last dedupe preserves the order of surviving rows."
-}

@@ -1,6 +1,0 @@
-{
-  "cluster": "go-fix",
-  "language": "go",
-  "timeout": 90,
-  "notes": "maxOf initializes to zero, so negative windows are wrong."
-}

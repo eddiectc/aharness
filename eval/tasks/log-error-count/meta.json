@@ -1,6 +1,0 @@
-{
-  "cluster": "shell-pipeline",
-  "language": "sh",
-  "timeout": 30,
-  "notes": "Count a level token without matching substrings such as ERROR_CODE."
-}

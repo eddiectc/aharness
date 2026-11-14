@@ -1,8 +1,0 @@
-{
-  "status": "unmeasured",
-  "reason": "provider credentials unavailable",
-  "tasks": 30,
-  "clusters": 3,
-  "seed": 1,
-  "repeats": 3
-}

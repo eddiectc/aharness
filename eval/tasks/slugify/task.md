@@ -1,1 +1,0 @@
-The Go module's Slug function in slug.go does not collapse runs of whitespace. Fix it so "  Hello  World  " becomes "hello-world": trim, lowercase, and join words with single hyphens. Do not modify slug_test.go.

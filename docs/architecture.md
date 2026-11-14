@@ -407,13 +407,6 @@ above applies to its SDK types, not to `reasoning_content`.
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the five tool implementations. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
-`cmd/aharness-eval/` is development measurement tooling, not shipped runtime.
-It is a separate `main` package that imports only the standard library and
-`internal/session`; it is outside the runtime package graph and does not add a
-provider, tool, or agent dependency. Its task fixtures, price file, and results
-live under the top-level `eval/` tree. The shipped `cmd/aharness` binary never
-imports the eval driver.
-
 ```text
 go.mod
 cmd/aharness/
@@ -962,7 +955,7 @@ it on every turn. Compaction never mutates the log.
   the corresponding flag false. Cache-read falls back to the input rate when
   the catalog omits it; reasoning is already inside output tokens and is not
   charged twice. The runtime does not model provider time-of-day tiers; the
-  eval driver owns peak pricing.
+  estimate uses the flat catalog rates.
 
 ## 7. Session log
 

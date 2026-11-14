@@ -1,6 +1,0 @@
-{
-  "cluster": "text-transform",
-  "language": "text",
-  "timeout": 30,
-  "notes": "Requires column-aware lowercasing rather than lowercasing the file."
-}

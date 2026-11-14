@@ -1,1 +1,0 @@
-SumCSV in parse.go should read a CSV-like text whose first line is the header "amount" and sum the integer rows after it. It currently fails by trying to parse the header. Fix it; keep parse_test.go unchanged.

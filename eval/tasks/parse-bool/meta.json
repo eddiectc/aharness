@@ -1,6 +1,0 @@
-{
-  "cluster": "go-fix",
-  "language": "go",
-  "timeout": 90,
-  "notes": "Trim whitespace before the case-insensitive switch."
-}

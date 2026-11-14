@@ -1,6 +1,0 @@
-{
-  "cluster": "text-transform",
-  "language": "text",
-  "timeout": 30,
-  "notes": "Two files use different spacing around the same key."
-}

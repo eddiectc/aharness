@@ -1,6 +1,0 @@
-{
-  "cluster": "shell-pipeline",
-  "language": "sh",
-  "timeout": 30,
-  "notes": "Word frequency with a deterministic tie break."
-}

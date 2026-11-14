@@ -1,6 +1,0 @@
-{
-  "cluster": "go-fix",
-  "language": "go",
-  "timeout": 90,
-  "notes": "Use strings.Fields instead of splitting on a single space."
-}

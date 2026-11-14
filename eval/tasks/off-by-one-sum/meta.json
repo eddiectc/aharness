@@ -1,6 +1,0 @@
-{
-  "cluster": "go-fix",
-  "language": "go",
-  "timeout": 90,
-  "notes": "Off-by-one loop excludes the last element."
-}

@@ -715,6 +715,13 @@ When implemented, update:
 
 The implementation follows §1–§10 with these recorded choices:
 
+- **Eval tooling removed (2026-11-14).** `cmd/aharness-eval` and the top-level
+  `eval/` tree were deleted. They were dev-only, sat outside the runtime
+  package graph, and never produced a measured baseline (`eval/baseline.json`
+  was `unmeasured`), so no shipped behavior, metric, or claim depended on them.
+  This supersedes the eval items in §1.4, §2.3, §3.7, §5 M2, §11, and the eval
+  baseline note below. Evaluation is deferred; when it returns it should start
+  from a fresh design rather than this driver.
 - **Pricing on resume/fork.** When no catalog load is needed (model unchanged),
   the run inherits the latest recorded `run_start.pricing` snapshot instead of
   forcing a network fetch. An explicit model change refreshes the snapshot from
@@ -744,9 +751,9 @@ The implementation follows §1–§10 with these recorded choices:
   copy remains capped at 64 KiB and the continuation copy is never logged.
   Future native adapters follow the same pattern; see
   [architecture §2.4](../architecture.md#24-continuation-for-a-new-dialect).
-- **Eval baseline.** The 30-task suite and driver are complete and tested with
-  fake arms; `eval/baseline.json` honestly records `status=unmeasured` with the
-  credential reason. No solve rate, token delta, or cost delta is claimed
-  without a real run.
-- **Manual smokes.** The real-provider thinking-tool, cache-hit, and A/B runs
-  remain release prerequisites; see §11.
+- **Eval baseline.** Superseded by the removal note above. The 30-task suite
+  and driver were complete and tested with fake arms; `eval/baseline.json`
+  honestly recorded `status=unmeasured` with the credential reason. No solve
+  rate, token delta, or cost delta was ever claimed.
+- **Manual smokes.** The real-provider thinking-tool and cache-hit runs remain
+  release prerequisites; see §11.

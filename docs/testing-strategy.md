@@ -528,13 +528,7 @@ separation, confirm no delta events are logged, and confirm no
 `<state>/work/<session-id>` directory remains. If a hosted model does not
 stream, record the limitation and do not claim streaming support for it.
 
-These are manual checks, not substitute measurements. The dev-only internal
-eval suite lives under `eval/` with the driver in `cmd/aharness-eval`; it runs
-task manifests with setup/verify hooks, extracts session-JSONL metrics, applies
-the price file, and reports paired bootstrap intervals. It is not part of the
-runtime package graph; external benchmarking platforms remain out of scope.
-Its baseline is recorded as `unmeasured` until provider credentials exist, and
-a fake-arm smoke is used only to validate the driver and suite wiring.
+These are manual checks, not substitute measurements.
 
 The v0 smoke passed for `deepseek-v4.1-flash` (2026-11-09) and
 `muse-spark-1.3-contributor` (2026-11-10). v1 manual smoke results are recorded

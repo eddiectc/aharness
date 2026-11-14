@@ -1,6 +1,0 @@
-{
-  "cluster": "shell-pipeline",
-  "language": "sh",
-  "timeout": 30,
-  "notes": "Two-file join and numeric sort."
-}

@@ -1,6 +1,0 @@
-{
-  "cluster": "text-transform",
-  "language": "text",
-  "timeout": 30,
-  "notes": "Order-sensitive dedupe of a small set."
-}

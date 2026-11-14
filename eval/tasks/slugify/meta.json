@@ -1,6 +1,0 @@
-{
-  "cluster": "go-fix",
-  "language": "go",
-  "timeout": 90,
-  "notes": "Collapse whitespace before joining with hyphens."
-}

@@ -1,1 +1,0 @@
-The Go module computes sliding-window maxima. MaxWindow lives in window.go and uses the maxOf helper in util.go. A test with negative values fails. Fix the helper (or its use) so windows of negative numbers are handled correctly. Search the module; do not modify the test file.
