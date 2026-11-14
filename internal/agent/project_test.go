@@ -429,4 +429,19 @@ func TestCanonicalJSON(t *testing.T) {
 	if first != second {
 		t.Fatalf("whitespace-insensitive identity mismatch: %q != %q", first, second)
 	}
+
+	dropped, err := canonicalJSONWithout([]byte(`{"intent":"why","a":1}`), "intent")
+	if err != nil {
+		t.Fatalf("canonicalJSONWithout error = %v", err)
+	}
+	if want := `{"a":1}`; dropped != want {
+		t.Fatalf("canonicalJSONWithout = %q, want %q", dropped, want)
+	}
+	nested, err := canonicalJSONWithout([]byte(`{"a":{"intent":"keep"},"intent":"drop"}`), "intent")
+	if err != nil {
+		t.Fatalf("canonicalJSONWithout nested error = %v", err)
+	}
+	if want := `{"a":{"intent":"keep"}}`; nested != want {
+		t.Fatalf("canonicalJSONWithout nested = %q, want %q", nested, want)
+	}
 }

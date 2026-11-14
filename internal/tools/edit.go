@@ -16,6 +16,7 @@ import (
 // editFileArgs is the typed argument shape for edit_file. It must agree with
 // the edit_file schema in schemas.go.
 type editFileArgs struct {
+	Intent     string `json:"intent,omitempty"`
 	Path       string `json:"path"`
 	OldString  string `json:"old_string"`
 	NewString  string `json:"new_string"`

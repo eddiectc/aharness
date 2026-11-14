@@ -20,6 +20,7 @@ const (
 // runCommandArgs is the typed argument shape for run_command. It must agree
 // with the run_command schema in schemas.go.
 type runCommandArgs struct {
+	Intent    string  `json:"intent,omitempty"`
 	Command   string  `json:"command"`
 	Cwd       *string `json:"cwd,omitempty"`
 	TimeoutMS *int    `json:"timeout_ms,omitempty"`

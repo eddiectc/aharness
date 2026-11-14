@@ -55,11 +55,17 @@ opt-in and unlimited by default.
   unchanged.
 - Folded transcript blocks: thinking and tool output are collapsed by default to
   their header, an elision row with the hidden rendered-row count, and the last
-  three rendered rows. The tail keeps the conclusion, failure, or test verdict
+  seven rendered rows. The tail keeps the conclusion, failure, or test verdict
   visible. `F3` expands every block, and `F3` again collapses them; the mode is
   sticky across turns and runs, inert in overlays, and not persisted. Expanded
   tool output stays bounded to 40 lines / 4 KiB, and the 64 KiB safety caps and
   truncation markers are unchanged.
+- Tool intents: every tool schema declares a shared `intent` string, one short
+  sentence explaining why the call is needed. The TUI uses it as the tool block
+  title and falls back to the raw argument preview when a replayed or
+  non-compliant call omits it. It is display metadata: tools accept it for
+  strict argument agreement but never act on it, and it is recorded only as
+  part of the model response's tool-call arguments.
 - Provider usage detail and an observational cost estimate. `model.Usage`
   keeps input/output totals plus cached-input, cache-write, and
   reasoning-output subsets and a `reported` flag; `run_start` records the

@@ -25,6 +25,7 @@ const (
 // searchArgs is the typed argument shape for search. It must agree with the
 // search schema in schemas.go.
 type searchArgs struct {
+	Intent        string  `json:"intent,omitempty"`
 	Pattern       string  `json:"pattern"`
 	Path          *string `json:"path,omitempty"`
 	Glob          string  `json:"glob,omitempty"`

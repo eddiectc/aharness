@@ -309,6 +309,14 @@ func cleanText(s string) string { return strings.ToValidUTF8(s, "\uFFFD") }
 // preserved, duplicate object names are rejected, and insignificant
 // whitespace is ignored.
 func canonicalJSON(raw json.RawMessage) (string, error) {
+	return canonicalJSONWithout(raw, "")
+}
+
+// canonicalJSONWithout canonicalizes raw and, when drop is non-empty, removes
+// that top-level object member first. Repeated-failure detection uses it to
+// ignore display-only tool arguments such as intent, so calls that differ only
+// in their title still count as the same failure.
+func canonicalJSONWithout(raw json.RawMessage, drop string) (string, error) {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.UseNumber()
 	value, err := readJSONValue(dec)
@@ -319,6 +327,15 @@ func canonicalJSON(raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("canonical json: trailing token %v", tok)
 	} else if !errors.Is(trailingErr, io.EOF) {
 		return "", fmt.Errorf("canonical json: trailing data: %w", trailingErr)
+	}
+	if drop != "" && value.kind == 'o' {
+		kept := value.members[:0]
+		for _, member := range value.members {
+			if member.name != drop {
+				kept = append(kept, member)
+			}
+		}
+		value.members = kept
 	}
 	var b strings.Builder
 	writeCanonical(&b, value)

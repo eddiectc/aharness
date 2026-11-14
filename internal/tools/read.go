@@ -20,6 +20,7 @@ const (
 // readFileArgs is the typed argument shape for read_file. It must agree with
 // the read_file schema in schemas.go.
 type readFileArgs struct {
+	Intent string `json:"intent,omitempty"`
 	Path   string `json:"path"`
 	Offset *int   `json:"offset,omitempty"`
 	Limit  *int   `json:"limit,omitempty"`

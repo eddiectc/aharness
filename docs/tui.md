@@ -193,8 +193,8 @@ thinking.
 - While the model is still thinking the block header is `thinking…`; it becomes
   `thinking` when assistant text arrives or the response completes.
 - Thinking blocks are folded by default. A collapsed block shows its header,
-  one elision row with the number of hidden rendered rows, and the last three
-  rendered rows of the body. The three-row tail is a count of wrapped rows, so
+  one elision row with the number of hidden rendered rows, and the last seven
+  rendered rows of the body. The seven-row tail is a count of wrapped rows, so
   a long provider line can contribute several of them and the collapsed height
   stays constant while text streams. The tail means a settled block ends on the
   model's conclusion rather than its opening restatement.
@@ -226,6 +226,27 @@ thinking.
 - Batch mode never prints thinking: `-batch`/`-stream` stdout remains assistant
   text only, so the one-shot stdout contract is unchanged. Thinking is also not
   part of `-ui-json` events.
+
+## Tool blocks
+
+Each model tool call renders as a folded `tool` transcript block. Its header is
+`tool <name> · <intent> · <status>`, followed by elapsed time when known and by
+the stable result code, truncation, and timeout markers on failure. The model
+supplies the title as the shared `intent` argument: one short sentence naming
+why the call is needed. The intent is display metadata; the session log records
+it only as part of the model response's tool-call arguments, and tools never
+act on it.
+
+- When a call omits `intent` (a replayed `toolset-v0`/`toolset-v1` call with no
+  recorded intent, or a model that ignores the schema), the header falls back
+  to the raw argument preview, capped at 2 KiB and one line.
+- The header is identical collapsed and expanded. A collapsed block shows the
+  last seven rendered body rows after one elision row; expanded output is
+  bounded to the first 40 lines / 4 KiB and the remainder stays in the session
+  log. `F3` folds tool and thinking blocks together.
+- The intent is normalized for display: surrounding whitespace is trimmed,
+  newlines flatten to spaces, tabs expand, and the value is capped at 200 bytes
+  on a rune boundary. A missing intent never fails a tool call.
 
 ## Status line and details
 
@@ -327,7 +348,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | External editor draft | 64 KiB | `F4` reads the edited temp file under the composer cap; an over-cap or failed edit leaves the composer unchanged. Available while idle only. |
 | Transcript items / text | 20,000 / 16 MiB | Oldest UI items are dropped with an "older history omitted" marker; the log is unchanged. |
 | Assistant text per item | 64 KiB | Truncation marker; the canonical response remains in the log. |
-| Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. Collapsed blocks show the last three rendered rows; expanded blocks show the full text up to this cap. |
+| Thinking text per item | 64 KiB | Provider reasoning is display-only and never logged; the marker is shown, and a resumed session has no prior thinking. Collapsed blocks show the last seven rendered rows; expanded blocks show the full text up to this cap. |
 | Markdown source / blocks / nesting | 64 KiB / 4,000 / 16 | Over-cap input falls back to plain text with a notice. |
 | Table columns / rows | 12 / 500 | Column width cap 40 cells; the overlay scrolls horizontally. |
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
@@ -335,8 +356,9 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |
 | Images per transcript / thumbnail | 32 / 60×20 cells | Older images fall off; thumbnails are half-block glyphs. |
-| Tool output | 4 KiB or 40 lines expanded | Collapsed tool blocks show the last three rendered rows of the full result; expanded output is bounded to the first 40 lines / 4 KiB, and the remainder stays in the log. |
-| Transcript fold | 3 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last three wrapped rows. `F3` expands all folds; the mode is sticky and not persisted. |
+| Tool output | 4 KiB or 40 lines expanded | Collapsed tool blocks show the last seven rendered rows of the full result; expanded output is bounded to the first 40 lines / 4 KiB, and the remainder stays in the log. |
+| Tool intent title | 200 bytes | Shared display-only `intent` argument, trimmed and cut on a rune boundary; a missing intent falls back to the 2 KiB raw argument preview and never fails the call. |
+| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last seven wrapped rows. `F3` expands all folds; the mode is sticky and not persisted. |
 | Tool arguments preview | 2 KiB | Full arguments remain in `model_response`. |
 | Input history | 100 entries | In-memory only. |
 | Minimum terminal | 40×10 | Smaller shows a resize message and keeps quit/resize keys. |

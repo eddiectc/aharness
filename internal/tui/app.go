@@ -1004,6 +1004,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 				callID:  SanitizeLine(call.ID),
 				name:    SanitizeLine(call.Name),
 				args:    CapText(SanitizeLine(string(call.Arguments)), 2<<10),
+				intent:  toolIntent(call.Arguments),
 				pending: true,
 			}
 			m.addItem(it)
@@ -1027,6 +1028,7 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.running = true
 		m.dirty = true
 		it.args = CapText(SanitizeLine(string(ev.Call.Arguments)), 2<<10)
+		it.intent = toolIntent(ev.Call.Arguments)
 		it.invalidateLines()
 		m.emit(EventToolStarted{CallID: it.callID, Name: it.name, Arguments: it.args})
 		m.dirty = true

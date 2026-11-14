@@ -65,18 +65,20 @@ var v0Schemas = []model.ToolSchema{
 
 // v1Schemas is the current toolset-v1 declaration set. It describes the
 // contiguous read window, the 60 KiB file-result cap, the search ** glob and
-// skip summary, command output spilling, and web search.
+// skip summary, command output spilling, web search, and the shared
+// display-only intent argument.
 var v1Schemas = []model.ToolSchema{
 	schema("read_file",
 		"Read a UTF-8 text file from the workspace. Returns one contiguous window of numbered lines with a 'lines X-Y of Z' header describing the lines actually delivered. offset is 1-based; limit defaults to 2000 and is capped at 4000. The result is capped at 60 KiB. When more lines remain, the result ends with 'continue with offset=N'; a line cut by the byte cap is marked instead. Rejects binary files and files over 2 MiB.",
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "path": {"type": "string", "description": "Workspace-relative or absolute path inside the workspace."},
     "offset": {"type": "integer", "minimum": 1, "default": 1, "description": "First line to return, 1-based."},
     "limit": {"type": "integer", "minimum": 1, "maximum": 4000, "default": 2000, "description": "Maximum number of lines to return."}
   },
-  "required": ["path"],
+  "required": ["intent", "path"],
   "additionalProperties": false
 }`),
 	schema("edit_file",
@@ -84,12 +86,13 @@ var v1Schemas = []model.ToolSchema{
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "path": {"type": "string", "description": "Workspace-relative or absolute path inside the workspace."},
     "old_string": {"type": "string", "description": "Exact text to replace; empty only when creating a new file."},
     "new_string": {"type": "string", "description": "Replacement text."},
     "replace_all": {"type": "boolean", "default": false, "description": "Replace every occurrence instead of requiring a unique match."}
   },
-  "required": ["path", "old_string", "new_string"],
+  "required": ["intent", "path", "old_string", "new_string"],
   "additionalProperties": false
 }`),
 	schema("search",
@@ -97,13 +100,14 @@ var v1Schemas = []model.ToolSchema{
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "pattern": {"type": "string", "description": "Go RE2 regular expression."},
     "path": {"type": "string", "default": ".", "description": "Directory to search, relative to the workspace."},
     "glob": {"type": "string", "description": "Optional workspace-relative glob; ** matches zero or more path segments and * does not cross '/'."},
     "case_sensitive": {"type": "boolean", "default": false, "description": "Match case-sensitively."},
     "max_results": {"type": "integer", "minimum": 1, "maximum": 200, "default": 100, "description": "Maximum matching lines to return."}
   },
-  "required": ["pattern"],
+  "required": ["intent", "pattern"],
   "additionalProperties": false
 }`),
 	schema("run_command",
@@ -111,11 +115,12 @@ var v1Schemas = []model.ToolSchema{
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "command": {"type": "string", "description": "Shell command to execute."},
     "cwd": {"type": "string", "default": ".", "description": "Working directory relative to the workspace."},
     "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "default": 120000, "description": "Command timeout in milliseconds."}
   },
-  "required": ["command"],
+  "required": ["intent", "command"],
   "additionalProperties": false
 }`),
 	schema("web_search",
@@ -123,6 +128,7 @@ var v1Schemas = []model.ToolSchema{
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "query": {
       "type": "string",
       "description": "Search query."
@@ -148,7 +154,7 @@ var v1Schemas = []model.ToolSchema{
       "description": "Optional time filter."
     }
   },
-  "required": ["query"],
+  "required": ["intent", "query"],
   "additionalProperties": false
 }`),
 	schema("web_fetch",
@@ -156,6 +162,7 @@ var v1Schemas = []model.ToolSchema{
 		`{
   "type": "object",
   "properties": {
+    "intent": {"type": "string", "maxLength": 200, "description": "Required. One short single-line sentence explaining why this call is needed; shown as the tool block title."},
     "url": {
       "type": "string",
       "description": "Absolute http or https URL."
@@ -167,7 +174,7 @@ var v1Schemas = []model.ToolSchema{
       "description": "Byte offset into the extracted UTF-8 text."
     }
   },
-  "required": ["url"],
+  "required": ["intent", "url"],
   "additionalProperties": false
 }`),
 }

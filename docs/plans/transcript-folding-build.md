@@ -438,6 +438,10 @@ package, event, or wire contract moves.
   marker beyond the 40-line inline window, the expanded view appends the marker
   explicitly before the inline-cap sentence, so the marker is visible in both
   fold states.
+- **Tail rows.** The shipped collapsed tail was later widened from three to
+  seven rendered rows for both thinking and tool blocks. The row-counting,
+  constant-height, and elision rules above are unchanged; the current value is
+  documented in [tui.md](../tui.md) and [limits.md](../limits.md).
 - **Fold cache shape.** The per-item cache stores the unfolded, wrapped body
   keyed by width, fold mode, and source text, and the existing `lines` cache
   stores the final folded rows. A toggle therefore re-folds a body without

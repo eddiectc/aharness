@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -398,6 +399,46 @@ func TestRunLineRendersLegacyLimitStatuses(t *testing.T) {
 		if !strings.Contains(line, string(status)) || !strings.Contains(line, "legacy reason") {
 			t.Fatalf("run line = %q, want the legacy status and reason", line)
 		}
+	}
+}
+
+func TestToolIntentTitlesTheLiveBlock(t *testing.T) {
+	app := newTestApp(t, newManualHost())
+	startTestRun(t, app, "edit the parser")
+	deliver(app, agent.ResponseCompleted{
+		Turn: 1, FinishReason: model.FinishToolCalls,
+		ToolCalls: []model.ToolCall{{
+			ID:   "call-1",
+			Name: "edit_file",
+			Arguments: json.RawMessage(
+				`{"path":"parser.go","old_string":"x","new_string":"y","intent":"Fix the parser"}`),
+		}},
+	})
+	item := app.items[len(app.items)-1]
+	if item.kind != itemTool {
+		t.Fatalf("last item kind = %q, want tool", item.kind)
+	}
+	if item.intent != "Fix the parser" {
+		t.Fatalf("tool intent = %q", item.intent)
+	}
+	header := plainRows(app.renderTool(newTheme(true), item))[0]
+	if !strings.Contains(header, "Fix the parser") {
+		t.Fatalf("tool header lacks the intent: %q", header)
+	}
+}
+
+func TestToolIntentTitlesAReplayedBlock(t *testing.T) {
+	host := newManualHost()
+	host.history = []agent.HistoryItem{{
+		Kind: agent.HistoryTool, Run: 1, Turn: 1, CallID: "call-1", Name: "read_file",
+		Arguments: json.RawMessage(`{"path":"parser.go","intent":"Inspect the parser"}`),
+	}}
+	app := newTestApp(t, host)
+	if len(app.items) != 1 {
+		t.Fatalf("history items = %d, want 1", len(app.items))
+	}
+	if got := app.items[0].intent; got != "Inspect the parser" {
+		t.Fatalf("replayed tool intent = %q", got)
 	}
 }
 

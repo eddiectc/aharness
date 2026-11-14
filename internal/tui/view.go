@@ -531,7 +531,7 @@ const (
 	// foldedTailRows is the number of rendered body rows a collapsed block
 	// keeps. It is a count of wrapped rows, not provider source lines, so the
 	// collapsed height stays constant while text streams.
-	foldedTailRows = 3
+	foldedTailRows = 7
 
 	toolBodyLines = 40
 	toolBodyBytes = 4 << 10
@@ -629,7 +629,10 @@ func (m *App) renderTool(t uiTheme, it *transcriptItem) []string {
 		status += " timeout"
 	}
 	head := fmt.Sprintf("tool %s", it.name)
-	if it.args != "" {
+	switch {
+	case it.intent != "":
+		head += " · " + it.intent
+	case it.args != "":
 		head += " " + it.args
 	}
 	head += " · " + status

@@ -66,7 +66,8 @@ func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessag
 
 // decodeArgs decodes tool arguments strictly: unknown object members are
 // rejected so a stale or hallucinated field is model-visible instead of
-// silently ignored.
+// silently ignored. Each typed shape carries the shared display-only intent
+// member so the TUI can title the tool block; execution never reads it.
 func decodeArgs(name string, args json.RawMessage, v any) error {
 	if err := jsonv2.Unmarshal(args, v, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return fmt.Errorf("%s: %w", name, err)

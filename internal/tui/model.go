@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"slices"
 	"strings"
@@ -87,6 +88,7 @@ type transcriptItem struct {
 	callID    string
 	name      string
 	args      string
+	intent    string
 	pending   bool
 	running   bool
 	ok        bool
@@ -325,6 +327,7 @@ func (m *App) loadHistory(items []agent.HistoryItem) {
 		}
 		if len(h.Arguments) > 0 {
 			it.args = SanitizeLine(string(h.Arguments))
+			it.intent = toolIntent(h.Arguments)
 		}
 		if it.kind == itemNotice {
 			it.noticeKind = agent.NoticeWarning
@@ -389,7 +392,14 @@ func (m *App) trimItems() {
 
 // itemTextBytes is the capped display weight of one item.
 func itemTextBytes(it *transcriptItem) int {
-	return len(it.text) + len(it.output) + len(it.errText) + len(it.args)
+	return len(it.text) + len(it.output) + len(it.errText) + len(it.args) + len(it.intent)
+}
+
+// toolIntent extracts the display-only title for one tool call. It is empty
+// when the model omitted the shared intent argument, so the renderer falls
+// back to the raw argument preview.
+func toolIntent(args json.RawMessage) string {
+	return SanitizeLine(tools.Intent(args))
 }
 
 // invalidateLines drops the item's finished rendering. The folded body cache

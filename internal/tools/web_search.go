@@ -37,6 +37,7 @@ const (
 // webSearchArgs is the typed argument shape for web_search. It must agree with
 // the web_search schema in schemas.go.
 type webSearchArgs struct {
+	Intent     string `json:"intent,omitempty"`
 	Query      string `json:"query"`
 	MaxResults *int   `json:"max_results,omitempty"`
 	Categories string `json:"categories,omitempty"`

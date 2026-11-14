@@ -35,32 +35,32 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 		{
 			name:   "read_file",
 			args:   readFileArgs{},
-			sample: `{"path":"a.txt","offset":2,"limit":10}`,
+			sample: `{"intent":"read a","path":"a.txt","offset":2,"limit":10}`,
 		},
 		{
 			name:   "edit_file",
 			args:   editFileArgs{},
-			sample: `{"path":"a.txt","old_string":"a","new_string":"b","replace_all":true}`,
+			sample: `{"intent":"edit a","path":"a.txt","old_string":"a","new_string":"b","replace_all":true}`,
 		},
 		{
 			name:   "search",
 			args:   searchArgs{},
-			sample: `{"pattern":"x","path":".","glob":"*.go","case_sensitive":true,"max_results":5}`,
+			sample: `{"intent":"search a","pattern":"x","path":".","glob":"*.go","case_sensitive":true,"max_results":5}`,
 		},
 		{
 			name:   "run_command",
 			args:   runCommandArgs{},
-			sample: `{"command":"true","cwd":".","timeout_ms":1000}`,
+			sample: `{"intent":"run tests","command":"true","cwd":".","timeout_ms":1000}`,
 		},
 		{
 			name:   "web_search",
 			args:   webSearchArgs{},
-			sample: `{"query":"aharness","max_results":5,"categories":"general","language":"en","time_range":"day"}`,
+			sample: `{"intent":"search the web","query":"aharness","max_results":5,"categories":"general","language":"en","time_range":"day"}`,
 		},
 		{
 			name:   "web_fetch",
 			args:   webFetchArgs{},
-			sample: `{"url":"https://example.com/","offset":0}`,
+			sample: `{"intent":"fetch a page","url":"https://example.com/","offset":0}`,
 		},
 	}
 	for _, tc := range tests {
@@ -106,12 +106,12 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 
 func TestSchemaRequiredFields(t *testing.T) {
 	want := map[string][]string{
-		"read_file":   {"path"},
-		"edit_file":   {"path", "old_string", "new_string"},
-		"search":      {"pattern"},
-		"run_command": {"command"},
-		"web_search":  {"query"},
-		"web_fetch":   {"url"},
+		"read_file":   {"intent", "path"},
+		"edit_file":   {"intent", "path", "old_string", "new_string"},
+		"search":      {"intent", "pattern"},
+		"run_command": {"intent", "command"},
+		"web_search":  {"intent", "query"},
+		"web_fetch":   {"intent", "url"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -121,6 +121,40 @@ func TestSchemaRequiredFields(t *testing.T) {
 		got := strings.Join(doc.Required, ",")
 		if want := strings.Join(want[s.Name], ","); got != want {
 			t.Errorf("%s required = %q, want %q", s.Name, got, want)
+		}
+	}
+}
+
+func TestEveryCurrentToolDeclaresAnIntent(t *testing.T) {
+	for _, s := range Schemas() {
+		var doc schemaDoc
+		if err := jsonv2.Unmarshal(s.Parameters, &doc); err != nil {
+			t.Fatalf("unmarshal %s schema: %v", s.Name, err)
+		}
+		raw, ok := doc.Properties["intent"]
+		if !ok {
+			t.Errorf("%s schema does not declare intent", s.Name)
+			continue
+		}
+		var property struct {
+			Type      string `json:"type"`
+			MaxLength int    `json:"maxLength"`
+		}
+		if err := jsonv2.Unmarshal(raw, &property); err != nil {
+			t.Errorf("%s intent property: %v", s.Name, err)
+		}
+		if property.Type != "string" || property.MaxLength != MaxIntentBytes {
+			t.Errorf("%s intent = %+v, want a string capped at %d", s.Name, property, MaxIntentBytes)
+		}
+		if !slices.Contains(doc.Required, "intent") {
+			t.Errorf("%s schema does not require intent", s.Name)
+		}
+	}
+
+	// toolset-v0 is frozen prompt material and predates the shared argument.
+	for _, s := range SchemasForMust(t, "toolset-v0") {
+		if strings.Contains(string(s.Parameters), `"intent"`) {
+			t.Errorf("frozen toolset-v0 %s declares intent", s.Name)
 		}
 	}
 }
@@ -200,7 +234,7 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	if !strings.Contains(v1WebFetch.Description, "untrusted data") {
 		t.Errorf("toolset-v1 web_fetch description missing the untrusted-data warning")
 	}
-	if !strings.Contains(string(v1WebFetch.Parameters), `"required": ["url"]`) {
+	if !strings.Contains(string(v1WebFetch.Parameters), `"required": ["intent", "url"]`) {
 		t.Errorf("toolset-v1 web_fetch parameters missing the required url")
 	}
 	if strings.Contains(string(v1WebFetch.Parameters), "userinfo") {

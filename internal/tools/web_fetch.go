@@ -27,6 +27,7 @@ const webAcceptHeader = "text/markdown, text/html;q=0.9, text/plain;q=0.8, appli
 // webFetchArgs is the typed argument shape for web_fetch. It must agree with
 // the web_fetch schema in schemas.go.
 type webFetchArgs struct {
+	Intent string `json:"intent,omitempty"`
 	URL    string `json:"url"`
 	Offset *int   `json:"offset,omitempty"`
 }

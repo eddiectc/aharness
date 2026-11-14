@@ -868,7 +868,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			continue
 		}
 
-		canonical, canonicalErr := canonicalJSON(call.Arguments)
+		canonical, canonicalErr := canonicalJSONWithout(call.Arguments, tools.IntentArgument)
 		key := failureKey(call.Name, canonical, canonicalErr, string(result.Code), call.Arguments)
 		if key == st.failKey {
 			st.failCount++

@@ -52,7 +52,7 @@ by its own constant.
 | Streaming retry | only before the first display delta | A retry after output would duplicate stdout and could duplicate tool calls. |
 | Context-overflow retry | 1 | Rebuilds against 90% of the failed per-call input limit. |
 | Consecutive output-length stops | 2 | Two `length` responses without a tool round stop with `token_limit`. |
-| Repeated-failure hint | 3 | Same tool, canonical arguments, and result code. |
+| Repeated-failure hint | 3 | Same tool, canonical arguments (the display-only `intent` is ignored), and result code. |
 | Repeated-failure stop | 5 | Same identity as the hint. |
 | Retained verbatim turns | 4 | Most recent model-response turns in the projection. |
 | Token estimate | `ceil(bytes/4) + 8/message + 16/tool schema` | Conservative; provider usage is authoritative for totals. |
@@ -126,6 +126,7 @@ Other event payloads:
 
 | Tool | Limit | Value | Behavior |
 |---|---|---|---|
+| All tools | Intent argument | 200 bytes displayed | Shared `intent` string: one short sentence naming why the call is needed. Required by every current schema, accepted but never acted on by the tools, trimmed and cut on a rune boundary for the TUI title. A missing intent never fails the call. |
 | `read_file` | Default lines | 2,000 | `offset` is 1-based. |
 | `read_file` | Max lines per call | 4,000 | Larger `limit` values are clamped. |
 | `read_file` | Max file size | 2 MiB | Larger files are `too_large`. |
@@ -171,7 +172,7 @@ Other event payloads:
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
-| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
+| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`, `web_fetch`, and the shared `intent` argument. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration
@@ -253,8 +254,9 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Decoded image pixels | 16 Mi (4096×4096 max) | Larger images are rejected before full decode. |
 | Images per transcript | 32 | Oldest displayed thumbnails are dropped; the transcript item remains. |
 | Image thumbnail | 60×20 cells or available width | Half-block glyph preview; Kitty only in the viewer. |
-| Tool output | 4 KiB or 40 lines expanded | Collapsed shows the last three rendered rows of the full result; expanded output never exceeds the logged tool-result cap. |
-| Transcript fold | 3 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky, display-only, and not persisted. |
+| Tool output | 4 KiB or 40 lines expanded | Collapsed shows the last seven rendered rows of the full result; expanded output never exceeds the logged tool-result cap. |
+| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky, display-only, and not persisted. |
+| Tool intent title | 200 bytes | Shared display-only `intent`, trimmed and cut on a rune boundary. A missing intent falls back to the raw argument preview and never fails a call. |
 | Tool arguments preview | 2 KiB or 8 lines | Full arguments remain in `model_response`/the log. |
 | Input history | 100 entries | In-memory only; not persisted. |
 | Minimum terminal size | 40×10 | Below shows a resize message; quit/resize keys still work. |

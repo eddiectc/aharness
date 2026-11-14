@@ -582,6 +582,41 @@ func TestRunRepeatedFailureHint(t *testing.T) {
 	}
 }
 
+func TestRunRepeatedFailureIgnoresTheDisplayOnlyIntent(t *testing.T) {
+	cfg := testConfig()
+	toolResp := func(intent string) scriptStep {
+		return scriptStep{resp: model.Response{
+			ToolCalls:    []model.ToolCall{toolCall("call", "read_file", `{"path":"x","intent":"`+intent+`"}`)},
+			FinishReason: model.FinishToolCalls,
+		}}
+	}
+	comp := &fakeCompleter{steps: []scriptStep{
+		toolResp("first attempt"),
+		toolResp("second attempt"),
+		toolResp("third attempt"),
+		{resp: model.Response{Text: "recovered", FinishReason: model.FinishStop}},
+	}}
+	ts := &fakeToolset{exec: func(context.Context, string, json.RawMessage) tools.Result {
+		return tools.Failure(tools.CodeNotFound, "missing")
+	}}
+	store, res, err := runTask(t, cfg, comp, ts)
+	if err != nil {
+		t.Fatalf("Run error = %v, want nil", err)
+	}
+	if res.Status != StopCompleted || res.CumulativeTurns != 4 {
+		t.Fatalf("result = %+v", res)
+	}
+	hints := 0
+	for _, ev := range eventsByType(store, session.TypeUserMessage) {
+		if decodePayload[userMessageData](t, ev).Source == sourceStuckHint {
+			hints++
+		}
+	}
+	if hints != 1 {
+		t.Fatalf("stuck hints = %d, want 1: differing intents split one failure", hints)
+	}
+}
+
 func TestRunModelEventLogFailureIsInternal(t *testing.T) {
 	cfg := testConfig()
 	cfg.LogRequests = true

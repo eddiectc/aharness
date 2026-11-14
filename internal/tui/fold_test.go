@@ -52,16 +52,16 @@ func TestThinkingCollapsesToTheTail(t *testing.T) {
 	app := newTestApp(t, newManualHost())
 	it := &transcriptItem{
 		kind: itemThinking,
-		text: "first\nsecond\nthird\nfourth\nconclusion",
+		text: "first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\nconclusion",
 	}
 	collapsed := plainRows(app.renderThinking(newTheme(true), it))
 	if collapsed[0] != "thinking" {
 		t.Fatalf("header = %q", collapsed[0])
 	}
-	if !strings.Contains(collapsed[1], "2 earlier lines") {
+	if !strings.Contains(collapsed[1], "3 earlier lines") {
 		t.Fatalf("elision row = %q", collapsed[1])
 	}
-	if got, want := strings.Join(collapsed[2:], "|"), "  third|  fourth|  conclusion"; got != want {
+	if got, want := strings.Join(collapsed[2:], "|"), "  fourth|  fifth|  sixth|  seventh|  eighth|  ninth|  conclusion"; got != want {
 		t.Fatalf("collapsed tail = %q, want %q", got, want)
 	}
 	if strings.Contains(strings.Join(collapsed, "\n"), "session log") {
@@ -70,8 +70,8 @@ func TestThinkingCollapsesToTheTail(t *testing.T) {
 
 	app.expandAll = true
 	expanded := plainRows(app.renderThinking(newTheme(true), it))
-	if len(expanded) != 6 {
-		t.Fatalf("expanded rows = %d, want 6: %q", len(expanded), expanded)
+	if len(expanded) != 11 {
+		t.Fatalf("expanded rows = %d, want 11: %q", len(expanded), expanded)
 	}
 	if expanded[0] != collapsed[0] {
 		t.Fatalf("thinking header changed between states: %q vs %q", expanded[0], collapsed[0])
@@ -143,10 +143,10 @@ func TestToolCollapsesToTheTailAndKeepsItsHeader(t *testing.T) {
 			t.Fatalf("collapsed tool header lacks %q: %q", want, header)
 		}
 	}
-	if !strings.Contains(collapsed[1], "97 earlier lines") {
+	if !strings.Contains(collapsed[1], "93 earlier lines") {
 		t.Fatalf("tool elision row = %q", collapsed[1])
 	}
-	if got, want := strings.Join(collapsed[2:], "|"), "  line 97|  line 98|  line 99"; got != want {
+	if got, want := strings.Join(collapsed[2:], "|"), "  line 93|  line 94|  line 95|  line 96|  line 97|  line 98|  line 99"; got != want {
 		t.Fatalf("collapsed tool tail = %q, want %q", got, want)
 	}
 
@@ -163,6 +163,32 @@ func TestToolCollapsesToTheTailAndKeepsItsHeader(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(expanded, "\n"), "line 99") {
 		t.Fatal("expanded tool showed a row beyond the inline cap")
+	}
+}
+
+func TestToolHeaderUsesTheIntentAsTitle(t *testing.T) {
+	app := newTestApp(t, newManualHost())
+	it := &transcriptItem{
+		kind:   itemTool,
+		name:   "edit_file",
+		args:   `{"path":"parser.go","old_string":"x","new_string":"y","intent":"Fix the parser"}`,
+		intent: "Fix the parser",
+		ok:     true,
+	}
+	header := plainRows(app.renderTool(newTheme(true), it))[0]
+	for _, want := range []string{"tool edit_file", "Fix the parser", "ok"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("tool header lacks %q: %q", want, header)
+		}
+	}
+	if strings.Contains(header, `"path"`) {
+		t.Fatalf("tool header still shows raw arguments when an intent exists: %q", header)
+	}
+
+	// A call without an intent keeps the argument preview.
+	it.intent = ""
+	if header := plainRows(app.renderTool(newTheme(true), it))[0]; !strings.Contains(header, `"path"`) {
+		t.Fatalf("tool header lost the argument fallback: %q", header)
 	}
 }
 
@@ -243,10 +269,10 @@ func TestFoldModeSticksAcrossTurnsAndRuns(t *testing.T) {
 func TestNewThinkingBlockInheritsTheFoldMode(t *testing.T) {
 	app := newTestApp(t, newManualHost())
 	app.expandAll = true
-	it := app.appendThinking(1, "one\ntwo\nthree\nfour\nfive")
+	it := app.appendThinking(1, "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine")
 	app.ensureContent()
 	rendered := plainRows(it.lines)
-	if len(rendered) != 6 {
+	if len(rendered) != 10 {
 		t.Fatalf("new block did not inherit expansion: %q", rendered)
 	}
 	app.expandAll = false
@@ -260,8 +286,8 @@ func TestNewThinkingBlockInheritsTheFoldMode(t *testing.T) {
 
 func TestFoldRenderingIsDeterministic(t *testing.T) {
 	app := newTestApp(t, newManualHost())
-	app.addItem(&transcriptItem{kind: itemThinking, text: "alpha\nbeta\ngamma\ndelta"})
-	app.addItem(&transcriptItem{kind: itemTool, name: "run_command", ok: true, output: "one\ntwo\nthree\nfour\nfive"})
+	app.addItem(&transcriptItem{kind: itemThinking, text: "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"})
+	app.addItem(&transcriptItem{kind: itemTool, name: "run_command", ok: true, output: "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine"})
 	app.ensureContent()
 	collapsed := strings.Join(app.transcriptLines(), "\n")
 
