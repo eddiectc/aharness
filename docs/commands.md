@@ -76,7 +76,7 @@ change and frames expose the resulting composer, menu rows, and overlay.
 | `/files`, `/file` | none | `Ctrl-O` | workspace file picker (idle) |
 | `/table` | none | `Ctrl-T` | most recent markdown table |
 | `/agent-hub` | none | none | live delegated-child roster; Enter focuses a child for viewing and steering; works during a run |
-| `/agents` | none | none | read-only agent definitions browser |
+| `/agents` | none | none | agent definitions browser; edits model, effort, max_turns, and enabled |
 | `/image` | none | `Ctrl-G` | image viewer for the most recent image block |
 | `/rich` | none | `Ctrl-R` toggles | set rich assistant rendering |
 | `/raw` | none | `Ctrl-R` toggles | set raw assistant rendering |
@@ -276,16 +276,32 @@ at the parent interrupts as usual. The focused view is not an overlay, so
 
 ### `/agents`
 
-Opens the read-only definitions browser: name, source (`bundled` or `user` with
-the file path), declared model and effort (`inherit` when absent), tool count,
-`max_turns`, and status. `Enter` expands a row in place to show the tool list,
-the first prompt line, and, for a malformed file, the parse error; `Esc`
-closes. Rows are sorted by name. The browser shows the set loaded for this
-process, so a mid-run edit cannot change what a child in flight will run and an
-edit takes effect for the next process. It has no editing keys and writes
-nothing: it never opens `<state-dir>/config.json` for writing, and agent
-overrides do not exist. Invalid files appear as `invalid` rows while the bundled
-agent of the same name stays active. It works while a run is active.
+Opens the agent definitions browser: name, source (`bundled` or `user` with the
+file path), effective model and effort (`inherit` when absent, `default` after a
+model switch), tool count, `max_turns`, and status (`active`, `disabled`, or
+`invalid`). A `*` marks a value set by an operator override. `Enter` expands a
+row in place to show the tool list, the first prompt line, each setting's
+provenance (override, definition, or inherit), the declared value an override
+replaced, and, for a malformed file, the parse error; `Esc` closes.
+
+The four routing settings are editable in place: `m` edits `model`, `e` edits
+`thinking_effort`, `t` edits `max_turns`, `d` toggles `enabled`, and `r`
+removes every override for the row. Empty input clears that override field. The
+editor shows its prompt and any error in a footer; `Enter` saves and `Esc`
+cancels the edit without closing the browser. Rows are sorted by name. An
+invalid file appears as an `invalid` row while the bundled agent of the same
+name stays active.
+
+A save rewrites the active config file (`-config`/`AHARNESS_CONFIG`, default
+`<state-dir>/config.json`) with `agent_overrides`, atomically and in 0600, and
+preserves every other key. A path inside the workspace is refused, because
+operator settings must not become repository-controlled state, and `-config ""`
+disables the file, so the browser reports that settings cannot be saved. A saved override applies to the next
+process: the browser shows it immediately, but the catalog loaded for this
+process is unchanged, so neither a child in flight nor a new run in this process
+is affected. The tool grant and prompt body stay file-only; `/agents` cannot
+widen either. An invalid value or a failed write is reported in the footer, and
+a malformed config file is left untouched.
 
 ## Run control
 
@@ -314,7 +330,7 @@ to idle. Idle: reports that no run is active.
 /resume                     pick a previous session for this workspace
 /files                      insert a workspace-relative path into the composer
 /agent-hub                  live roster of the children in the current run
-/agents                     read-only agent definitions browser
+/agents                     agent definitions and settings
 /interrupt                  stop the current model call; the run continues
 /cancel                     end the active run and return to idle
 /quit                       exit; an active run is canceled with exit code 130

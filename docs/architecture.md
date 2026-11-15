@@ -441,7 +441,7 @@ internal/tui/
   todo.go        # persistent todo checklist widget, restore decode, layout
   markdown.go    # Glamour rendering, raw/rich toggle, table extraction
   widgets.go     # table/file/model/effort/session overlays and focus
-  agents_overlay.go # /agent-hub roster and /agents definitions browser
+  agents_overlay.go # /agent-hub roster and /agents definitions and settings browser
   child_view.go  # focused child transcript and delegation steering view
   image.go       # workspace image resolver, ntcharts picture, viewer
   protocol.go    # -ui-json v1 commands, events, frames, snapshots
@@ -1354,6 +1354,21 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   negative value is a config error. Agent definitions are read from
   `<state-dir>/agents/`, not from a flag: a workspace file would be
   repository-controlled prompt material with no trust model.
+- `agent_overrides` in the config file changes the routing settings of a
+  discovered definition: `model`, `thinking_effort`, `max_turns`, and
+  `enabled`. Precedence is override → definition file → parent run's
+  model/effort. Only routing settings are overridable; the recorded tool grant
+  and prompt body stay file-only, so a settings surface cannot widen authority.
+  Shape and value errors are config errors (exit 2) naming the agent and key;
+  an override for an undiscovered name fails when the catalog loads. Model
+  existence and effort support are resolved at spawn time and become a
+  per-task `invalid_args`, because the catalog is optional offline. A model
+  override without an effort uses the new model's default. `enabled: false`
+  removes the agent from the prompt and `delegate` catalogs and refuses a
+  continuation of that agent. Overrides apply on the next process; a run in
+  flight keeps the catalog it loaded. `/agents` is the only writer and rewrites
+  the active config file atomically in 0600, refusing a path inside the
+  workspace.
 - `-require-usage` (default false) turns a completed buffered model response
   with `reported=false` into a terminal `protocol_error` before any tool
   executes. The `model_response` is already durable, so the transcript remains
@@ -1438,11 +1453,11 @@ empty token for local no-auth endpoints and tests (Section 2.1).
 - The optional JSON config file (`-config` / `AHARNESS_CONFIG`, default
   `<state-dir>/config.json`) supplies the subset of settings that are not
   per-invocation: model, provider, workspace, base URL, catalog URL, SearXNG
-  base URL, thinking effort, the run budgets and timeouts, and the usage/logging
-  switches. It never holds the provider token, the state directory, the task, or
-  a session ID. The TUI owns interactive input and signals; batch is non-interactive and
-  has no steering. The `-ui-json` v1 protocol is the machine-readable UI
-  surface.
+  base URL, thinking effort, the run budgets and timeouts, the usage/logging
+  switches, and per-agent routing overrides. It never holds the provider token,
+  the state directory, the task, or a session ID. The TUI owns interactive
+  input and signals; batch is non-interactive and has no steering. The
+  `-ui-json` v1 protocol is the machine-readable UI surface.
 
 Defaults are deliberately conservative and easy to change:
 
@@ -1468,6 +1483,7 @@ Defaults are deliberately conservative and easy to change:
 | Prompt version | `prompt-v1` for new sessions; `prompt-v0` replay supported |
 | Max subagents | 8 fresh children per run (`-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; `0` unlimited) |
 | Agent definitions | `<state-dir>/agents/*.md`; five bundled defaults; at most 32 |
+| Agent overrides | `agent_overrides` in the config file; model, effort, `max_turns`, and `enabled` only; definition grant and prompt are never overridable |
 | Max total tokens | 0 (unlimited; `-max-total-tokens`) |
 | Max run wall clock | 0 (none; `-session-timeout`) |
 | Model call timeout | 0 (none; `-model-timeout`) |

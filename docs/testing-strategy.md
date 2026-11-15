@@ -326,7 +326,22 @@ diagnostic, not a gate.
   bundled agent of the same name and its prompt, tools, model, and effort are
   what the child records; a malformed file does not replace a bundled agent and
   appears as an `invalid` row in `/agents`. A batch session records a grant
-  without `delegate`, and a resumed batch session keeps it.
+  without `delegate`, and a resumed batch session keeps it. The override
+  validator rejects an empty model or effort, a non-positive `max_turns`, a bad
+  agent name, and more than 32 entries; an override for an unknown name is a
+  config error, and a model change with no effort resets the effective effort
+  to the model default.
+- Agent overrides end to end: a config file with
+  `agent_overrides.explore.model` and `max_turns` makes the child request and
+  its `session_start` record the override model and cap while the definition's
+  grant and prompt stay unchanged; a model switch without an effort records the
+  model default. `enabled: false` removes the agent from the parent prompt and
+  returns `not_found` from `delegate` without creating a child session. An
+  unknown name or a malformed override exits 2 with the agent and key named.
+  The `/agents` browser edits a row through the host capability, shows
+  provenance and a `disabled` status, and cancels an edit on `Esc` before
+  closing; a save writes the active config file atomically in 0600 and
+  preserves other keys, while a failed write leaves the previous file intact.
 - Delegation display: `SubagentStarted` precedes `SubagentFinished` precedes
   `ToolCompleted`; a replayed delegate block is reconstructed from `details`
   alone; a headless `-ui-json` run opens `/agent-hub` mid-run and a frame lists

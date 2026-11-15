@@ -5,8 +5,10 @@ import (
 	jsonv2 "encoding/json/v2"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -347,8 +349,16 @@ func hubCells(row *subagentRow, now time.Time) map[string]string {
 	}
 }
 
-// agentsOverlay is the read-only definitions browser. It shows the set loaded
-// for this process; editing takes effect for the next process.
+// maxAgentSettingInputBytes bounds one inline setting edit. The model cap is
+// the largest accepted value; a longer buffer is refused before it is written.
+const maxAgentSettingInputBytes = 200
+
+// agentsOverlay is the definitions browser. It shows the set loaded for this
+// process with the current operator overrides applied for display; a saved
+// setting writes the active config file and takes effect on the next process.
+// Only model, effort, max_turns, and enabled are editable: the tool grant and
+// prompt body stay in the definition file so this surface cannot widen
+// authority.
 type agentsOverlay struct {
 	rows     []AgentDefView
 	expanded map[int]bool
@@ -356,6 +366,15 @@ type agentsOverlay struct {
 	scroll   int
 	width    int
 	height   int
+
+	provider AgentProvider
+	settings AgentSettings
+
+	editing bool
+	editKey string
+	editBuf string
+	editErr string
+	notice  string
 }
 
 func (m *App) openAgentsOverlay() tea.Cmd {
@@ -364,24 +383,77 @@ func (m *App) openAgentsOverlay() tea.Cmd {
 		m.notice = "agent definitions are unavailable"
 		return nil
 	}
+	settings, _ := m.host.(AgentSettings)
 	rows := provider.Agents()
 	if len(rows) == 0 {
 		m.notice = "no agent definitions were discovered"
 	}
+	sortAgentRows(rows)
+	notice := ""
+	if settings == nil {
+		notice = "agent settings are read-only in this host"
+	}
+	m.overlay.agents = &agentsOverlay{
+		rows:     rows,
+		expanded: make(map[int]bool),
+		provider: provider,
+		settings: settings,
+		notice:   notice,
+	}
+	m.overlay.push(OverlayAgents)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+// sortAgentRows orders the browser by name, with the invalid row for a name
+// after its active definition.
+func sortAgentRows(rows []AgentDefView) {
 	slices.SortStableFunc(rows, func(a, b AgentDefView) int {
 		if a.Name != b.Name {
 			return strings.Compare(a.Name, b.Name)
 		}
 		return strings.Compare(a.Status, b.Status)
 	})
-	m.overlay.agents = &agentsOverlay{rows: rows, expanded: make(map[int]bool)}
-	m.overlay.push(OverlayAgents)
-	m.overlay.resize(m, m.width, m.height)
-	return nil
 }
 
 func (a *agentsOverlay) resize(width, height int) {
 	a.width, a.height = width, height
+}
+
+// currentRow returns the row under the cursor, or nil when the list is empty.
+func (a *agentsOverlay) currentRow() *AgentDefView {
+	if a.cursor < 0 || a.cursor >= len(a.rows) {
+		return nil
+	}
+	return &a.rows[a.cursor]
+}
+
+// currentName is the row name for the footer prompt.
+func (a *agentsOverlay) currentName() string {
+	if row := a.currentRow(); row != nil {
+		return row.Name
+	}
+	return ""
+}
+
+// bodyHeight is the number of transcript rows available after the header,
+// legend, and footer.
+func (a *agentsOverlay) bodyHeight() int {
+	return max(1, a.height-2-len(a.footer()))
+}
+
+// refresh re-reads the browser rows from the host after a successful save. The
+// host applies the saved override for display while the process keeps the
+// catalog it loaded for running children.
+func (a *agentsOverlay) refresh() {
+	if a.provider == nil {
+		return
+	}
+	rows := a.provider.Agents()
+	sortAgentRows(rows)
+	a.rows = rows
+	a.cursor = min(max(0, a.cursor), max(0, len(a.rows)-1))
+	a.scrollWindow(a.bodyHeight())
 }
 
 // resetScroll keeps the cursor inside the visible window.
@@ -398,7 +470,28 @@ func (a *agentsOverlay) scrollWindow(height int) {
 }
 
 func (a *agentsOverlay) update(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.Keystroke() {
+	key := msg.Keystroke()
+	if a.editing {
+		switch key {
+		case "enter":
+			a.commitEdit()
+		case "backspace":
+			a.backspace()
+		case "ctrl+u":
+			a.editBuf = ""
+			a.editErr = ""
+		default:
+			// A modal overlay swallows the composer's printable-input path, so
+			// the editor consumes the key's text itself. Paste arrives through
+			// insertInput and takes the same buffer.
+			if msg.Text != "" && !msg.Mod.Contains(tea.ModCtrl) && !msg.Mod.Contains(tea.ModMeta) {
+				a.insert(Sanitize(msg.Text))
+			}
+		}
+		a.scrollWindow(a.bodyHeight())
+		return nil
+	}
+	switch key {
 	case "up", "k":
 		a.cursor = max(0, a.cursor-1)
 	case "down", "j":
@@ -416,83 +509,435 @@ func (a *agentsOverlay) update(msg tea.KeyPressMsg) tea.Cmd {
 			a.expanded = make(map[int]bool)
 		}
 		a.expanded[a.cursor] = !a.expanded[a.cursor]
+	case "m":
+		a.startEdit("model")
+	case "e":
+		a.startEdit("effort")
+	case "t":
+		a.startEdit("max_turns")
+	case "d":
+		a.toggleEnabled()
+	case "r":
+		a.resetOverrides()
 	}
-	a.scrollWindow(max(1, a.height-1))
+	a.scrollWindow(a.bodyHeight())
 	return nil
 }
 
 func (a *agentsOverlay) wheel(up bool) {
+	if a.editing {
+		return
+	}
 	if up {
 		a.cursor = max(0, a.cursor-mouseWheelLines)
 	} else {
 		a.cursor = min(max(0, len(a.rows)-1), a.cursor+mouseWheelLines)
 	}
-	a.scrollWindow(max(1, a.height-1))
+	a.scrollWindow(a.bodyHeight())
+}
+
+// insert appends printable text to the active inline edit. It reports whether
+// the overlay consumed the text; when no edit is active the composer keeps it,
+// matching the browser's previous behavior.
+func (a *agentsOverlay) insert(text string) bool {
+	if !a.editing {
+		return false
+	}
+	if len(a.editBuf)+len(text) > maxAgentSettingInputBytes {
+		a.editErr = fmt.Sprintf("input is capped at %d bytes", maxAgentSettingInputBytes)
+		return true
+	}
+	a.editBuf += text
+	a.editErr = ""
+	return true
+}
+
+// command consumes the single-character editing keys when a headless client
+// sends them as text instead of key presses. The interactive path handles the
+// same keys in update.
+func (a *agentsOverlay) command(text string) bool {
+	if a.editing || len(text) != 1 {
+		return false
+	}
+	switch text {
+	case "m":
+		a.startEdit("model")
+	case "e":
+		a.startEdit("effort")
+	case "t":
+		a.startEdit("max_turns")
+	case "d":
+		a.toggleEnabled()
+	case "r":
+		a.resetOverrides()
+	default:
+		return false
+	}
+	a.scrollWindow(a.bodyHeight())
+	return true
+}
+
+func (a *agentsOverlay) backspace() {
+	if a.editBuf == "" {
+		return
+	}
+	_, size := utf8.DecodeLastRuneInString(a.editBuf)
+	a.editBuf = a.editBuf[:len(a.editBuf)-size]
+	a.editErr = ""
+}
+
+// cancelEdit drops the inline editor without saving. The App calls it for Esc
+// so an edit cancels before the overlay closes.
+func (a *agentsOverlay) cancelEdit() {
+	a.editing = false
+	a.editBuf = ""
+	a.editErr = ""
+}
+
+// startEdit opens the inline editor for one routing setting. The buffer is
+// empty when no override is set, so an empty submission clears the override
+// instead of copying a definition value into the config file.
+func (a *agentsOverlay) startEdit(key string) {
+	row := a.currentRow()
+	if row == nil || row.Status == "invalid" {
+		return
+	}
+	if a.settings == nil {
+		a.notice = "agent settings are read-only in this host"
+		return
+	}
+	a.editing = true
+	a.editKey = key
+	a.editBuf = ""
+	a.editErr = ""
+	a.notice = ""
+	if row.Override == nil {
+		return
+	}
+	switch key {
+	case "model":
+		if row.Override.Model != nil {
+			a.editBuf = *row.Override.Model
+		}
+	case "effort":
+		if row.Override.ThinkingEffort != nil {
+			a.editBuf = *row.Override.ThinkingEffort
+		}
+	case "max_turns":
+		if row.Override.MaxTurns != nil {
+			a.editBuf = fmt.Sprintf("%d", *row.Override.MaxTurns)
+		}
+	}
+}
+
+// commitEdit saves the buffer as one field of the row's complete override. A
+// failed validation or write keeps the editor open with the error shown.
+func (a *agentsOverlay) commitEdit() {
+	row := a.currentRow()
+	if row == nil || a.settings == nil {
+		a.cancelEdit()
+		return
+	}
+	value := strings.TrimSpace(a.editBuf)
+	next := cloneAgentOverride(row.Override)
+	switch a.editKey {
+	case "model":
+		if value == "" {
+			next.Model = nil
+		} else {
+			next.Model = &value
+		}
+	case "effort":
+		if value == "" {
+			next.ThinkingEffort = nil
+		} else {
+			next.ThinkingEffort = &value
+		}
+	case "max_turns":
+		if value == "" {
+			next.MaxTurns = nil
+		} else {
+			turns, err := strconv.Atoi(value)
+			if err != nil || turns <= 0 {
+				a.editErr = "max_turns must be a positive integer"
+				return
+			}
+			next.MaxTurns = &turns
+		}
+	default:
+		a.cancelEdit()
+		return
+	}
+	if err := a.settings.SetAgentOverride(row.Name, next); err != nil {
+		a.editErr = SanitizeLine(err.Error())
+		return
+	}
+	label := agentSettingLabel(a.editKey)
+	a.editing = false
+	a.editBuf = ""
+	a.editErr = ""
+	a.notice = "saved " + label + "; applies to the next process"
+	a.refresh()
+}
+
+// toggleEnabled flips the row's operator enable state. Enabling writes an
+// explicit true; r removes the override entirely.
+func (a *agentsOverlay) toggleEnabled() {
+	row := a.currentRow()
+	if row == nil || row.Status == "invalid" {
+		return
+	}
+	if a.settings == nil {
+		a.notice = "agent settings are read-only in this host"
+		return
+	}
+	next := cloneAgentOverride(row.Override)
+	enabled := !row.Enabled
+	next.Enabled = &enabled
+	if err := a.settings.SetAgentOverride(row.Name, next); err != nil {
+		a.notice = "save failed: " + SanitizeLine(err.Error())
+		return
+	}
+	a.notice = fmt.Sprintf("saved enabled=%t; applies to the next process", enabled)
+	a.refresh()
+}
+
+// resetOverrides removes every operator override for the row.
+func (a *agentsOverlay) resetOverrides() {
+	row := a.currentRow()
+	if row == nil || row.Status == "invalid" {
+		return
+	}
+	if a.settings == nil {
+		a.notice = "agent settings are read-only in this host"
+		return
+	}
+	if row.Override == nil {
+		a.notice = "no operator override to clear"
+		return
+	}
+	if err := a.settings.ClearAgentOverrides(row.Name); err != nil {
+		a.notice = "save failed: " + SanitizeLine(err.Error())
+		return
+	}
+	a.notice = "overrides cleared; applies to the next process"
+	a.refresh()
+}
+
+// cloneAgentOverride deep-copies the persisted override so an edit cannot
+// mutate the view or a previously saved pointer.
+func cloneAgentOverride(o *agent.AgentOverride) agent.AgentOverride {
+	if o == nil {
+		return agent.AgentOverride{}
+	}
+	out := *o
+	if o.Model != nil {
+		value := *o.Model
+		out.Model = &value
+	}
+	if o.ThinkingEffort != nil {
+		value := *o.ThinkingEffort
+		out.ThinkingEffort = &value
+	}
+	if o.MaxTurns != nil {
+		value := *o.MaxTurns
+		out.MaxTurns = &value
+	}
+	if o.Enabled != nil {
+		value := *o.Enabled
+		out.Enabled = &value
+	}
+	return out
+}
+
+// agentSettingLabel is the human name used in prompts and notices.
+func agentSettingLabel(key string) string {
+	switch key {
+	case "model":
+		return "model"
+	case "effort":
+		return "thinking effort"
+	case "max_turns":
+		return "max turns"
+	default:
+		return key
+	}
+}
+
+// footer renders the inline editor, a save error, or the last save notice.
+func (a *agentsOverlay) footer() []string {
+	var lines []string
+	switch {
+	case a.editing:
+		lines = append(lines, fmt.Sprintf("%s override for %s (empty clears): %s▏",
+			agentSettingLabel(a.editKey), a.currentName(), a.editBuf))
+		if a.editErr != "" {
+			lines = append(lines, "error: "+a.editErr)
+		}
+		lines = append(lines, "Enter saves · Esc cancels")
+	case a.editErr != "":
+		lines = append(lines, "error: "+a.editErr)
+	case a.notice != "":
+		lines = append(lines, a.notice)
+	}
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(SanitizeLine(line), a.width, "…")
+	}
+	return lines
 }
 
 func (a *agentsOverlay) view() string {
 	if len(a.rows) == 0 {
 		return "no agent definitions were discovered."
 	}
-	lines := []string{ansi.Truncate(padCell("NAME", 14)+"  "+padCell("SOURCE", 20)+"  "+
+	header := ansi.Truncate(padCell("NAME", 14)+"  "+padCell("SOURCE", 20)+"  "+
 		padCell("MODEL", 14)+"  "+padCell("EFFORT", 8)+"  "+
-		padCell("TOOLS", 5)+"  "+padCell("MAX_TURNS", 9)+"  "+"STATUS", a.width, "")}
-	height := max(1, a.height-1)
-	end := min(len(a.rows), a.scroll+height)
-	for i := a.scroll; i < end; i++ {
+		padCell("TOOLS", 5)+"  "+padCell("MAX_TURNS", 9)+"  "+"STATUS", a.width, "")
+	legend := "* = operator override · m model · e effort · t max_turns · d enabled · r reset · Enter details"
+	lines := []string{header, ansi.Truncate(legend, a.width, "…")}
+
+	bodyHeight := a.bodyHeight()
+	body := make([]string, 0, bodyHeight)
+	last := a.scroll - 1
+	for i := a.scroll; i < len(a.rows) && len(body) < bodyHeight; i++ {
 		row := a.rows[i]
+		last = i
 		source := row.Source
 		if row.Path != "" {
 			source += " " + row.Path
-		}
-		maxTurns := "—"
-		if row.MaxTurns > 0 {
-			maxTurns = fmt.Sprintf("%d", row.MaxTurns)
 		}
 		modelName := row.Model
 		if modelName == "" {
 			modelName = "inherit"
 		}
+		if row.ModelSource == "override" {
+			modelName += "*"
+		}
 		effort := row.Effort
 		if effort == "" {
 			effort = "inherit"
+			if row.EffortSource == "model default" {
+				effort = "default"
+			}
+		}
+		if row.EffortSource == "override" {
+			effort += "*"
+		}
+		maxTurns := "—"
+		if row.MaxTurns > 0 {
+			maxTurns = fmt.Sprintf("%d", row.MaxTurns)
+		}
+		if row.MaxTurnsSource == "override" {
+			maxTurns += "*"
 		}
 		marker := "  "
 		if i == a.cursor {
 			marker = "> "
 		}
-		lines = append(lines, ansi.Truncate(marker+padCell(row.Name, 12)+"  "+padCell(source, 20)+"  "+
+		body = append(body, ansi.Truncate(marker+padCell(row.Name, 12)+"  "+padCell(source, 20)+"  "+
 			padCell(modelName, 14)+"  "+padCell(effort, 8)+"  "+
-			fmt.Sprintf("%5d  %9s  %s", len(row.Tools), maxTurns, row.Status), a.width, ""))
+			fmt.Sprintf("%5d  %9s  %s", len(row.Tools), maxTurns, SanitizeLine(row.Status)), a.width, ""))
 		if a.expanded[i] {
-			lines = append(lines, a.detailRows(row)...)
+			for _, detail := range a.detailRows(row) {
+				if len(body) >= bodyHeight {
+					break
+				}
+				body = append(body, detail)
+			}
 		}
 	}
+	lines = append(lines, body...)
+	if omitted := len(a.rows) - (last + 1); omitted > 0 {
+		lines = append(lines, fmt.Sprintf("+%d more", omitted))
+	}
+	lines = append(lines, a.footer()...)
 	return strings.Join(lines, "\n")
 }
 
-// detailRows renders the expanded body of one definitions row.
+// detailRows renders the expanded body of one definitions row, including the
+// effective value and provenance of each overridable setting.
 func (a *agentsOverlay) detailRows(row AgentDefView) []string {
 	indent := "    "
-	out := []string{indent + "source:  " + SanitizeLine(row.Source)}
+	out := []string{indent + "source:    " + SanitizeLine(row.Source)}
 	if row.Path != "" {
-		out = append(out, indent+"path:    "+SanitizeLine(row.Path))
+		out = append(out, indent+"path:      "+SanitizeLine(row.Path))
 	}
 	if row.Status == "invalid" {
-		out = append(out, indent+"error:   "+SanitizeLine(row.Err))
-		return out
+		out = append(out, indent+"error:     "+SanitizeLine(row.Err))
+		return truncateLines(out, a.width)
 	}
 	if row.Description != "" {
-		out = append(out, indent+"about:   "+SanitizeLine(row.Description))
+		out = append(out, indent+"about:     "+SanitizeLine(row.Description))
 	}
-	out = append(out, indent+"tools:   "+SanitizeLine(strings.Join(row.Tools, ", ")))
+	out = append(out,
+		indent+"model:     "+settingDetail(row.Model, "inherit", row.ModelSource, row.DeclaredModel),
+		indent+"effort:    "+settingDetail(row.Effort, effortFallback(row), row.EffortSource, row.DeclaredEffort),
+		indent+"max_turns: "+settingDetail(maxTurnsText(row.MaxTurns), "—", row.MaxTurnsSource, declaredMaxTurnsText(row)),
+		indent+"enabled:   "+enabledDetail(row),
+		indent+"tools:     "+SanitizeLine(strings.Join(row.Tools, ", ")),
+	)
 	if row.PromptFirstLine != "" {
-		out = append(out, indent+"prompt:  "+SanitizeLine(row.PromptFirstLine))
+		out = append(out, indent+"prompt:    "+SanitizeLine(row.PromptFirstLine))
 	}
-	for i := range out {
-		out[i] = ansi.Truncate(out[i], a.width, "")
+	return truncateLines(out, a.width)
+}
+
+// settingDetail renders one effective setting and its source. When an override
+// is in effect, the definition's declared value follows so the operator can
+// see what the override replaced.
+func settingDetail(value, fallback, source, declared string) string {
+	shown := value
+	if shown == "" {
+		shown = fallback
 	}
-	return out
+	detail := source
+	if source == "override" && declared != shown {
+		if declared == "" {
+			declared = "—"
+		}
+		detail += "; file: " + declared
+	}
+	return shown + "  (" + detail + ")"
+}
+
+// effortFallback labels an empty effective effort: a model switch resets it to
+// the model default, while no value at all inherits from the parent run.
+func effortFallback(row AgentDefView) string {
+	if row.EffortSource == "model default" {
+		return "model default"
+	}
+	return "inherit"
+}
+
+// maxTurnsText renders a positive turn cap, or an empty string for unlimited.
+func maxTurnsText(turns int) string {
+	if turns > 0 {
+		return fmt.Sprintf("%d", turns)
+	}
+	return ""
+}
+
+// declaredMaxTurnsText renders the definition's cap for provenance; an empty
+// value means the file declares no cap.
+func declaredMaxTurnsText(row AgentDefView) string {
+	if row.DeclaredMaxTurns > 0 {
+		return fmt.Sprintf("%d", row.DeclaredMaxTurns)
+	}
+	return ""
+}
+
+// enabledDetail shows the effective enable state and whether an override set
+// it.
+func enabledDetail(row AgentDefView) string {
+	state := "yes"
+	if !row.Enabled {
+		state = "no"
+	}
+	source := "default"
+	if row.Override != nil && row.Override.Enabled != nil {
+		source = "override"
+	}
+	return state + "  (" + source + ")"
 }
 
 // renderDelegateTaskRow renders one nested per-task line for a delegate block.

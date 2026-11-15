@@ -334,10 +334,16 @@ lines, and `frame.overlay` is `none` because focus is not an overlay.
 
 ### `/agents` definitions browser
 
-`/agents` opens the read-only definitions browser described in
-[commands.md](commands.md#agents). It shows the set loaded for this process, so
-a mid-run edit cannot change a child in flight; editing takes effect for the
-next process. Malformed files appear as `invalid` rows with their parse error.
+`/agents` opens the definitions browser described in
+[commands.md](commands.md#agents). It shows the effective model, effort, and
+`max_turns` with a `*` for an operator override and the provenance of each
+value in the expanded row. `m`, `e`, `t`, `d`, and `r` edit that row's
+override; `Enter` expands or saves, and `Esc` cancels an edit before it closes
+the browser. A save rewrites the active config file atomically and takes effect
+on the next process, so a child in flight is never affected. Malformed files
+appear as `invalid` rows with their parse error. In `-ui-json`, a client may
+send the editing keys as one-character `text` messages; `Enter` saves and `Esc`
+cancels, with no new protocol event or version bump.
 
 ## Todo widget
 
@@ -478,6 +484,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Resume picker sessions / head | 100 per workspace / 64 events | Same canonical workspace only; the active session is excluded; unreadable or corrupt logs are skipped; the first-message preview is sanitized and cut to 160 bytes. |
 | Overlay stack | 4 | Deeper requests close the oldest overlay. |
 | Agent roster | 8 rows, 200-byte intent | Header and `+N more` row; scrolls; every string sanitized. |
+| Agent settings editor | 200 bytes | One inline routing value; longer input is refused with a footer error, and an empty value clears the override. |
 | Delegated tasks per call | 4 | Each renders one nested row; a call produces exactly one tool block. |
 | Child report per task | 16 KiB | Included in the folded block body; the child log keeps the full text. |
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |

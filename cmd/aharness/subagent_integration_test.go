@@ -436,6 +436,220 @@ func contains(values []string, want string) bool {
 	return false
 }
 
+// subagentOverrideScript is the same one-submission script the end-to-end
+// subagent tests use.
+func subagentOverrideScript() string {
+	return strings.Join([]string{
+		`{"v":1,"type":"text","text":"delegate the read"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":45000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+}
+
+func TestSubagentOverrideChangesChildModelAndCap(t *testing.T) {
+	bin := buildHarness(t)
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "config.json"), []byte(`{
+		"agent_overrides": {"explore": {"model": "kimi-k2.7-code", "max_turns": 2}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var (
+		mu         sync.Mutex
+		childModel string
+	)
+	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		switch call {
+		case 1:
+			writeJSON(w, 200, chatDelegateResponse("call_override",
+				`{"intent":"delegate the read","tasks":[{"agent":"explore","task":"Read and report."}]}`))
+		case 2:
+			var request struct {
+				Model string `json:"model"`
+			}
+			_ = json.Unmarshal(body, &request)
+			mu.Lock()
+			childModel = request.Model
+			mu.Unlock()
+			writeJSON(w, 200, chatFinalResponse("child report"))
+		case 3:
+			writeJSON(w, 200, chatFinalResponse("parent done"))
+		default:
+			writeJSON(w, 500, map[string]any{"error": "unexpected model call"})
+		}
+	})
+	stdout, stderr, exit := runHarnessRaw(t, bin, workspace, stateDir, provider.url,
+		strings.NewReader(subagentOverrideScript()),
+		"-ui-json", "-model", "deepseek-v4.1-flash", "-max-turns", "5")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+
+	files, err := filepath.Glob(filepath.Join(stateDir, "sessions", "*.jsonl"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("session logs = %v (%v), want a parent and one child", files, err)
+	}
+	type start struct {
+		Model          string   `json:"model"`
+		ThinkingEffort string   `json:"thinking_effort"`
+		MaxTurns       int      `json:"max_turns"`
+		Agent          string   `json:"agent"`
+		Tools          []string `json:"tools"`
+		ParentCallID   string   `json:"parent_call_id"`
+	}
+	var parentStart, childStart start
+	for _, path := range files {
+		events := readSessionEvents(t, path)
+		var got start
+		if err := json.Unmarshal(events[0].Data, &got); err != nil {
+			t.Fatalf("decode session_start: %v", err)
+		}
+		if got.ParentCallID == "" {
+			parentStart = got
+		} else {
+			childStart = got
+		}
+	}
+	if parentStart.Model != "deepseek-v4.1-flash" {
+		t.Fatalf("parent model = %q, want the run model", parentStart.Model)
+	}
+	if childStart.Agent != "explore" || childStart.Model != "kimi-k2.7-code" {
+		t.Fatalf("child start = %+v, want explore on the override model", childStart)
+	}
+	if childStart.ThinkingEffort != "" {
+		t.Fatalf("child effort = %q, want the model default after a model override", childStart.ThinkingEffort)
+	}
+	if childStart.MaxTurns != 2 {
+		t.Fatalf("child max_turns = %d, want the override 2", childStart.MaxTurns)
+	}
+	if strings.Join(childStart.Tools, ",") != "read_file,search" {
+		t.Fatalf("child grant = %v, want the definition grant unchanged", childStart.Tools)
+	}
+	mu.Lock()
+	gotChildModel := childModel
+	mu.Unlock()
+	if gotChildModel != "kimi-k2.7-code" {
+		t.Fatalf("child request model = %q, want the override", gotChildModel)
+	}
+}
+
+func TestSubagentOverrideUnknownAgentIsConfigError(t *testing.T) {
+	bin := buildHarness(t)
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "config.json"), []byte(`{
+		"agent_overrides": {"nobody": {"model": "kimi-k2.7-code"}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		writeJSON(w, 500, map[string]any{"error": "the TUI should fail before any model call"})
+	})
+	stdout, stderr, exit := runHarnessRaw(t, bin, workspace, stateDir, provider.url,
+		strings.NewReader(""),
+		"-ui-json", "-model", "deepseek-v4.1-flash")
+	if exit != 2 {
+		t.Fatalf("exit = %d, want a config error\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "nobody") || !strings.Contains(stderr, "agent_overrides") {
+		t.Fatalf("stderr = %q, want the offending agent and key", stderr)
+	}
+}
+
+func TestSubagentOverrideDisablesAgent(t *testing.T) {
+	bin := buildHarness(t)
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "config.json"), []byte(`{
+		"agent_overrides": {"explore": {"enabled": false}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	var calls int
+	var mu sync.Mutex
+	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		mu.Lock()
+		calls = call
+		mu.Unlock()
+		switch call {
+		case 1:
+			writeJSON(w, 200, chatDelegateResponse("call_disabled",
+				`{"intent":"delegate the read","tasks":[{"agent":"explore","task":"Read and report."}]}`))
+		case 2:
+			writeJSON(w, 200, chatFinalResponse("parent continued without a child"))
+		default:
+			writeJSON(w, 500, map[string]any{"error": "unexpected model call"})
+		}
+	})
+	stdout, stderr, exit := runHarnessRaw(t, bin, workspace, stateDir, provider.url,
+		strings.NewReader(subagentOverrideScript()),
+		"-ui-json", "-model", "deepseek-v4.1-flash", "-max-turns", "5")
+	if exit != 0 {
+		t.Fatalf("exit = %d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	mu.Lock()
+	gotCalls := calls
+	mu.Unlock()
+	if gotCalls != 2 {
+		t.Fatalf("model calls = %d, want the parent delegate and final only", gotCalls)
+	}
+	files, err := filepath.Glob(filepath.Join(stateDir, "sessions", "*.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("session logs = %v (%v), want only the parent", files, err)
+	}
+	events := readSessionEvents(t, files[0])
+	var prompt string
+	var delegateResult struct {
+		OK     bool
+		Code   string
+		Error  string
+		Output string
+	}
+	for _, ev := range events {
+		switch ev.Type {
+		case "session_start":
+			var start struct {
+				SystemPrompt string `json:"system_prompt"`
+			}
+			_ = json.Unmarshal(ev.Data, &start)
+			prompt = start.SystemPrompt
+		case "tool_result":
+			var data struct {
+				Name   string `json:"name"`
+				OK     bool   `json:"ok"`
+				Code   string `json:"code"`
+				Error  string `json:"error"`
+				Output string `json:"output"`
+			}
+			if err := json.Unmarshal(ev.Data, &data); err != nil {
+				t.Fatalf("decode tool_result: %v", err)
+			}
+			if data.Name == "delegate" {
+				delegateResult.OK = data.OK
+				delegateResult.Code = data.Code
+				delegateResult.Error = data.Error
+				delegateResult.Output = data.Output
+			}
+		}
+	}
+	if delegateResult.OK || delegateResult.Code != "not_found" {
+		t.Fatalf("delegate result = %+v, want not_found", delegateResult)
+	}
+	message := delegateResult.Error + delegateResult.Output
+	if !strings.Contains(message, `unknown agent "explore"`) {
+		t.Fatalf("delegate message = %q, want the disabled name", message)
+	}
+	if strings.Contains(prompt, "- explore:") {
+		t.Fatalf("the prompt still offers the disabled agent:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "- reviewer:") {
+		t.Fatalf("the prompt lost the remaining agents:\n%s", prompt)
+	}
+}
+
 func TestBatchCannotDelegate(t *testing.T) {
 	bin := buildHarness(t)
 	workspace := t.TempDir()

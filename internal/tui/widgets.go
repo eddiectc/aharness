@@ -96,6 +96,23 @@ func (o *overlayState) insert(m *App, text string) bool {
 			o.session.insertFilter(text)
 			return true
 		}
+	case OverlayAgents:
+		if o.agents != nil {
+			if o.agents.insert(text) {
+				return true
+			}
+			return o.agents.command(text)
+		}
+	}
+	return false
+}
+
+// cancelEdit lets an overlay's inline editor consume Esc instead of closing
+// the overlay. It reports whether it handled the key.
+func (o *overlayState) cancelEdit() bool {
+	if o.kind == OverlayAgents && o.agents != nil && o.agents.editing {
+		o.agents.cancelEdit()
+		return true
 	}
 	return false
 }

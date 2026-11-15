@@ -118,8 +118,12 @@ opt-in and unlimited by default.
   not count against `-max-turns` but seed a child's default cap. The TUI renders
   one foldable delegate block per call and adds two display-only commands:
   `/agent-hub`, a live roster of running children with agent, intent, model,
-  effort, elapsed, context tokens, turns, cost, and status, and `/agents`, a
-  read-only browser of the discovered definitions. `Enter` on a roster row
+  effort, elapsed, context tokens, turns, cost, and status, and `/agents`, the
+  definitions browser. The browser also edits an agent's `model`,
+  `thinking_effort`, `max_turns`, and `enabled` through the `agent_overrides`
+  config object; a save rewrites the active config file atomically and takes
+  effect on the next process. The tool grant and prompt stay file-only, so the
+  settings surface cannot widen authority. `Enter` on a roster row
   focuses that child: its read-only transcript replaces the parent view, and
   composer input becomes steering for that child, recorded in the child log as
   `source=subagent-steer`; `Esc` returns to the parent without interrupting it.
@@ -174,7 +178,9 @@ opt-in and unlimited by default.
   optional `searxng_url` key configures `web_search`; omitting it disables
   search. `web_timeout`, `web_fetch_provider`, `web_fetch_url`, and
   `web_fetch_key` configure `web_fetch`; the provider defaults to `builtin`.
-  See [docs/configuration.md](docs/configuration.md).
+  The optional `agent_overrides` object routes a discovered agent's model,
+  effort, turn cap, and enable state; `/agents` writes it atomically and
+  preserves every other key. See [docs/configuration.md](docs/configuration.md).
 
 Out of scope: hooks, model-based summarization, background or asynchronous
 subagents, agent-to-agent messaging, nested delegation, worktrees, RAG/embeddings,
@@ -182,6 +188,8 @@ MCP/plugins, additional provider dialects, built-in evals, price tracking,
 workspace snapshots, built-in isolation/approval, session rotation, or v0 log
 migration. Apart from the subagent surfaces listed above, the TUI adds no
 durable event type, schema version, tool, prompt input, or security boundary.
+The `/agents` writer only changes routing settings: it cannot add a tool to a
+grant or rewrite a prompt.
 
 ## Documentation
 

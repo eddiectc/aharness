@@ -48,6 +48,19 @@ type AgentDefinition struct {
 	Path string
 	// Err is the parse or validation error for an invalid entry.
 	Err string
+
+	// DeclaredModel, DeclaredThinkingEffort, and DeclaredMaxTurns are the
+	// definition's values before an operator override. They let the definitions
+	// browser show both the effective value and where it came from.
+	DeclaredModel          string
+	DeclaredThinkingEffort string
+	DeclaredMaxTurns       int
+	// Override is the operator override applied to this definition; nil when
+	// none applies. It is a copy, so mutating it cannot change the catalog.
+	Override *AgentOverride
+	// Disabled is set by an operator override with enabled=false. A disabled
+	// definition stays discoverable in the browser but is not runnable.
+	Disabled bool
 }
 
 // Valid reports whether the entry can be run.
@@ -63,8 +76,21 @@ type AgentCatalog struct {
 	Warnings []string
 }
 
-// Lookup returns the active definition with the exact name.
+// Lookup returns the runnable definition with the exact name. A disabled
+// definition is discoverable but not runnable, so it is reported as absent;
+// Use LookupDefinition when the caller must explain that state.
 func (c *AgentCatalog) Lookup(name string) (AgentDefinition, bool) {
+	def, ok := c.LookupDefinition(name)
+	if !ok || def.Disabled {
+		return AgentDefinition{}, false
+	}
+	return def, true
+}
+
+// LookupDefinition returns the definition with the exact name whether or not
+// an operator override disabled it. It is for the definitions browser and for
+// continuation diagnostics, never for starting a fresh child.
+func (c *AgentCatalog) LookupDefinition(name string) (AgentDefinition, bool) {
 	if c == nil {
 		return AgentDefinition{}, false
 	}
@@ -77,24 +103,33 @@ func (c *AgentCatalog) Lookup(name string) (AgentDefinition, bool) {
 }
 
 // Infos returns the name/description catalog rendered into the parent prompt.
+// A disabled agent is omitted: the model must not be offered a name that
+// delegate rejects.
 func (c *AgentCatalog) Infos() []AgentInfo {
 	if c == nil {
 		return nil
 	}
 	infos := make([]AgentInfo, 0, len(c.Agents))
 	for _, def := range c.Agents {
+		if def.Disabled {
+			continue
+		}
 		infos = append(infos, AgentInfo{Name: def.Name, Description: def.Description})
 	}
 	return infos
 }
 
 // SpawnInfos returns the catalog shape the delegate tool validates against.
+// Disabled agents are omitted for the same reason as Infos.
 func (c *AgentCatalog) SpawnInfos() []tools.AgentInfo {
 	if c == nil {
 		return nil
 	}
 	infos := make([]tools.AgentInfo, 0, len(c.Agents))
 	for _, def := range c.Agents {
+		if def.Disabled {
+			continue
+		}
 		infos = append(infos, tools.AgentInfo{Name: def.Name, Description: def.Description})
 	}
 	return infos
@@ -195,18 +230,28 @@ func splitAgentTools(value string) []string {
 	return names
 }
 
+// ValidateAgentName enforces the stable identifier shape shared by definition
+// files and operator overrides: lowercase letters, digits, and inner hyphens,
+// at most maxAgentNameBytes.
+func ValidateAgentName(name string) error {
+	if name == "" {
+		return errors.New("name is required")
+	}
+	if len(name) > maxAgentNameBytes {
+		return fmt.Errorf("name is %d bytes; the limit is %d", len(name), maxAgentNameBytes)
+	}
+	if !validAgentName(name) {
+		return fmt.Errorf("name %q must match [a-z][a-z0-9-]*", name)
+	}
+	return nil
+}
+
 // validateAgentDefinition enforces the closed contract: a stable name, a
 // description, a non-empty tool grant without delegate, and a non-empty prompt
 // body. A child with no tools cannot act, and depth is one.
 func validateAgentDefinition(def *AgentDefinition) error {
-	if def.Name == "" {
-		return errors.New("name is required")
-	}
-	if len(def.Name) > maxAgentNameBytes {
-		return fmt.Errorf("name is %d bytes; the limit is %d", len(def.Name), maxAgentNameBytes)
-	}
-	if !validAgentName(def.Name) {
-		return fmt.Errorf("name %q must match [a-z][a-z0-9-]*", def.Name)
+	if err := ValidateAgentName(def.Name); err != nil {
+		return err
 	}
 	if def.Description == "" {
 		return errors.New("description is required")

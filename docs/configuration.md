@@ -49,7 +49,10 @@ before the file is read, and a key in the file cannot move its own location.
   "max_turns": 40,
   "max_subagents": 8,
   "http_timeout": "10m",
-  "thinking_effort": "high"
+  "thinking_effort": "high",
+  "agent_overrides": {
+    "reviewer": {"model": "kimi-k2.7-code", "max_turns": 12}
+  }
 }
 ```
 
@@ -82,6 +85,7 @@ number is rejected so a unit typo cannot silently mean nanoseconds.
 | `catalog_timeout` | duration | `-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT` | Must be positive; default 15s. |
 | `require_usage` | boolean | `-require-usage` / `AHARNESS_REQUIRE_USAGE` | Per-run; not inherited. |
 | `log_requests` | boolean | `-log-requests` / `AHARNESS_LOG_REQUESTS` | Records request debug events. |
+| `agent_overrides` | object | none | Per-agent routing overrides; see §2.2. |
 
 Deliberately **not** configurable in the file:
 
@@ -90,7 +94,7 @@ Deliberately **not** configurable in the file:
 | Provider token (`AHARNESS_PROVIDER_TOKEN`) | A secret does not belong on disk in this harness; keep it in the environment or a secret manager. |
 | State directory (`-state-dir` / `AHARNESS_STATE_DIR`) | It locates the file itself, so it cannot be self-referential. |
 | Task, `-task-file`, `-resume`, `-fork` | Per-invocation inputs; a sticky task or session would be a footgun. |
-| Agent definitions | They are files under `<state-dir>/agents/`, not config keys: a definition carries a tool grant and a prompt, and a settings surface must not widen authority without editing a file. |
+| Agent definitions | They are files under `<state-dir>/agents/`, not config keys: a definition carries a tool grant and a prompt, and a settings surface must not widen authority without editing a file. The `agent_overrides` object changes only routing settings (§2.2). |
 | `-batch`, `-ui-json`, `-ui-size`, `-stream`, `-version`, `-list-models`, `-refresh-models` | Front-end and terminal-action selection is per invocation. |
 | `AHARNESS_IMAGE_PROTOCOL` | A terminal capability, not harness configuration. |
 
@@ -103,8 +107,65 @@ variable, or config key. The state directory is already the harness-owned,
 operator-scoped location, and a workspace-level agent directory would be
 repository-controlled prompt material with no trust model. Moving the state
 directory moves the definitions with it. `-max-subagents` is the one new
-delegation setting because a fan-out guard depends on the operator's patience
-and provider plan, while the definitions themselves are content.
+scalar delegation setting because a fan-out guard depends on the operator's
+patience and provider plan, while the definitions themselves are content and
+`agent_overrides` (§2.2) only routes them.
+
+### 2.2 Agent overrides
+
+`agent_overrides` is an optional object keyed by agent name. It changes the
+routing settings of a discovered definition without editing the definition
+file:
+
+```json
+{
+  "agent_overrides": {
+    "reviewer": {
+      "model": "deepseek-v4.1-flash",
+      "thinking_effort": "high",
+      "max_turns": 12,
+      "enabled": true
+    }
+  }
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `model` | string | Child model, resolved through the catalog at spawn time. |
+| `thinking_effort` | string | A concrete catalog effort. `default`, an empty value, and an unsupported value are rejected. |
+| `max_turns` | integer | Positive cap for that agent's child runs. |
+| `enabled` | boolean | `false` keeps the definition visible in `/agents` but makes `delegate` return `not_found`, including for a continuation of that agent. A resumed session keeps the prompt it recorded, so its catalog may still list the name; the tool still rejects it. |
+
+Precedence is override → definition file → parent run's model and effort. Only
+these four routing settings are overridable: a `tools`, prompt, or unknown key
+inside an entry is an unknown member and a config error, because the definition
+file owns the grant and the prompt and a settings surface must not widen
+authority. A model override without `thinking_effort` resets the child to the
+new model's default effort; the definition's effort does not carry across a
+model change. A continued child keeps the model, effort, prompt, and tool grant
+it recorded; `enabled` and `max_turns` still apply to its new run.
+
+An override must satisfy the shape rules: at most 32 entries, a 64-byte
+`[a-z][a-z0-9-]*` name, a non-empty model of at most 200 bytes, a valid 32-byte
+effort, and a positive `max_turns`. A shape violation is a config error (exit
+2) naming the agent and key on every invocation. The discovered-name check runs
+when the TUI loads the catalog, because that is where definitions exist; batch
+mode records no `delegate` grant and does not load them, so it validates only
+the shape. Model existence and effort support are resolved when a child starts,
+so an unknown or unusable model is a per-task `invalid_args` report rather than
+a process exit; the catalog may be unavailable offline.
+
+Overrides apply to the next process. The process keeps the catalog it loaded at
+startup, so a saved setting changes neither a child in flight nor a new run
+started in the same process; the next process applies the effective values.
+`/agents` shows the saved values immediately and is the only writer: it re-reads
+the active config file, rewrites it atomically through a 0600 same-directory
+temporary file and `rename`, preserves every other key, and leaves the previous
+file intact on failure. The active path is `-config`/`AHARNESS_CONFIG`, default
+`<state-dir>/config.json`; a path inside the workspace is refused, because
+operator settings must not become repository-controlled state, and `-config ""`
+disables the file, so the browser reports that settings cannot be saved.
 
 ## 3. Environment variables
 

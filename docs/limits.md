@@ -198,6 +198,10 @@ Other event payloads:
 | Agent definition | Prompt body | 16 KiB | Recorded per session. |
 | Agent definition | Tools | non-empty, current toolset, no `delegate` | A child with no tools cannot act, and depth is one. |
 | Agent definitions | Discovered count | 32 | The catalog stays readable; later files are ignored with a warning. |
+| Agent override | Entries | 32 | One per discovered agent at most; a larger `agent_overrides` object is a config error. |
+| Agent override | Model | 200 bytes | Non-empty; resolved through the catalog at spawn time. |
+| Agent override | Thinking effort | 32 bytes, `[a-z][a-z0-9_-]*` | A concrete catalog effort; `default` and an empty value are rejected. |
+| Agent override | `max_turns` | positive integer | No zero or negative cap; omit the key to inherit. A disabled agent remains discoverable but is not runnable. |
 | Agent catalog | Prompt material | 4 KiB | One line per agent plus an `[N agents omitted]` marker. |
 | Roster | Visible rows | 8 plus header and `+N more` | Keeps `/agent-hub` readable at 24 rows; more is scrollable. |
 | Roster | Intent text | 200 bytes, one line | The full prompt stays in the tool-call arguments. |
@@ -215,7 +219,7 @@ variable, and a config-file key.
 
 | Limit | v1 value | Layer | Behavior |
 |---|---|---|---|
-| Config file | `<state-dir>/config.json` | `-config`, `AHARNESS_CONFIG` | Optional JSON; an explicit path must exist, the implicit default may be absent; `-config ""` disables it; 1 MiB cap; unknown keys and invalid values are config errors (exit 2). |
+| Config file | `<state-dir>/config.json` | `-config`, `AHARNESS_CONFIG` | Optional JSON; an explicit path must exist, the implicit default may be absent; `-config ""` disables it; 1 MiB cap; unknown keys and invalid values are config errors (exit 2). `/agents` rewrites the active file atomically (0600 same-directory temporary file, sync, rename), preserves every other key, and refuses a path inside the workspace. |
 | `-provider` / `AHARNESS_PROVIDER` | `opencode-go` | flag, env, `provider` | Only supported provider; an unknown value is a config error (exit 2) listing `opencode-go`. |
 | `-list-models` | off | flag | Terminal action: prints `ID`, `NAME`, `DIALECT`, `CONTEXT`, `OUTPUT`, `STATUS`, `EFFORT` and exits; no session, task, or token. `EFFORT` is comma-separated normalized values or `-`. No separate output cap; bounded by the catalog size. |
 | `-refresh-models` | off | flag | Terminal action: unconditional catalog fetch, atomic cache replace, one-line summary, then exits; no session, task, or token. Bounded by the catalog timeout/body caps; no new budget. |

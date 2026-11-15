@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -429,7 +431,7 @@ func TestConfigFileAcceptsAbsentPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadFileConfig(\"\"): %v", err)
 	}
-	if cfg != (fileConfig{}) {
+	if !reflect.DeepEqual(cfg, fileConfig{}) {
 		t.Fatalf("loadFileConfig(\"\") = %+v, want zero", cfg)
 	}
 	// An implicit missing file is allowed; an explicit one is not.
@@ -451,5 +453,218 @@ func TestConfigFileHTTPTimeoutReachesAdapter(t *testing.T) {
 	}
 	if !cfg.httpTimeoutSet {
 		t.Fatal("httpTimeoutSet = false, want true for a file-supplied timeout")
+	}
+}
+
+func TestConfigFileAgentOverrides(t *testing.T) {
+	path := writeConfigFile(t, `{
+		"agent_overrides": {
+			"reviewer": {"model": "review-model", "thinking_effort": "high", "max_turns": 4, "enabled": false},
+			"explore": {"max_turns": 9}
+		}
+	}`)
+	cfg, err := loadFileConfig(path, true)
+	if err != nil {
+		t.Fatalf("loadFileConfig: %v", err)
+	}
+	overrides := cfg.agentOverrides()
+	reviewer, ok := overrides["reviewer"]
+	if !ok {
+		t.Fatalf("reviewer override missing: %+v", overrides)
+	}
+	if reviewer.Model == nil || *reviewer.Model != "review-model" ||
+		reviewer.ThinkingEffort == nil || *reviewer.ThinkingEffort != "high" ||
+		reviewer.MaxTurns == nil || *reviewer.MaxTurns != 4 ||
+		reviewer.Enabled == nil || *reviewer.Enabled {
+		t.Fatalf("reviewer override = %+v", reviewer)
+	}
+	if explore := overrides["explore"]; explore.MaxTurns == nil || *explore.MaxTurns != 9 {
+		t.Fatalf("explore override = %+v", explore)
+	}
+}
+
+func TestConfigFileAgentOverrideErrors(t *testing.T) {
+	var tooMany strings.Builder
+	tooMany.WriteString(`{"agent_overrides":{`)
+	for i := 0; i <= 32; i++ {
+		if i > 0 {
+			tooMany.WriteByte(',')
+		}
+		fmt.Fprintf(&tooMany, `"agent-%02d":{}`, i)
+	}
+	tooMany.WriteString(`}}`)
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"unknown field", `{"agent_overrides":{"reviewer":{"tools":["read_file"]}}}`, "unknown object member"},
+		{"prompt is not overridable", `{"agent_overrides":{"reviewer":{"prompt":"x"}}}`, "unknown object member"},
+		{"bad agent name", `{"agent_overrides":{"Reviewer":{}}}`, "must match"},
+		{"empty model", `{"agent_overrides":{"reviewer":{"model":""}}}`, "model must not be empty"},
+		{"empty effort", `{"agent_overrides":{"reviewer":{"thinking_effort":""}}}`, "thinking_effort must not be empty"},
+		{"default effort", `{"agent_overrides":{"reviewer":{"thinking_effort":"default"}}}`, "thinking_effort"},
+		{"zero max turns", `{"agent_overrides":{"reviewer":{"max_turns":0}}}`, "max_turns must be positive"},
+		{"negative max turns", `{"agent_overrides":{"reviewer":{"max_turns":-2}}}`, "max_turns must be positive"},
+		{"too many entries", tooMany.String(), "limit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeConfigFile(t, tc.body)
+			_, err := loadFileConfig(path, true)
+			if err == nil {
+				t.Fatalf("loadFileConfig accepted %s", tc.body)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func fileStr(value string) *string { return &value }
+func fileInt(value int) *int       { return &value }
+func fileBool(value bool) *bool    { return &value }
+func fileDuration(value time.Duration) *configDuration {
+	duration := configDuration(value)
+	return &duration
+}
+
+func TestWriteFileConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	original := fileConfig{
+		Model:            fileStr("model-x"),
+		Provider:         fileStr("provider-x"),
+		Workspace:        fileStr("/tmp/ws"),
+		ProviderBaseURL:  fileStr("https://example.test"),
+		ModelsDevURL:     fileStr("https://models.test/api.json"),
+		SearXNGURL:       fileStr(""),
+		WebTimeout:       fileDuration(30 * time.Second),
+		WebFetchProvider: fileStr("builtin"),
+		WebFetchURL:      fileStr(""),
+		WebFetchKey:      fileStr(""),
+		ThinkingEffort:   fileStr("high"),
+		MaxTurns:         fileInt(4),
+		MaxTotalTokens:   fileInt(1000),
+		MaxSubagents:     fileInt(2),
+		MaxContextTokens: fileInt(64000),
+		MaxOutputTokens:  fileInt(0),
+		SessionTimeout:   fileDuration(0),
+		ModelTimeout:     fileDuration(5 * time.Minute),
+		HTTPTimeout:      fileDuration(15 * time.Minute),
+		CatalogTimeout:   fileDuration(15 * time.Second),
+		RequireUsage:     fileBool(false),
+		LogRequests:      fileBool(false),
+		AgentOverrides: map[string]fileAgentOverride{
+			"reviewer": {
+				Model:          fileStr("review-model"),
+				ThinkingEffort: fileStr("high"),
+				MaxTurns:       fileInt(3),
+				Enabled:        fileBool(false),
+			},
+		},
+	}
+	if err := writeFileConfig(path, original); err != nil {
+		t.Fatalf("writeFileConfig: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("mode = %o, want 600", perm)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// Explicit false, zero, and empty values survive; a payload that dropped
+	// them would silently change behavior when an environment layer is set.
+	for _, want := range []string{`"enabled": false`, `"require_usage": false`, `"max_output_tokens": 0`, `"session_timeout": "0s"`, `"searxng_url": ""`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("written config is missing %s:\n%s", want, raw)
+		}
+	}
+	loaded, err := loadFileConfig(path, true)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, original) {
+		t.Fatalf("round trip = %+v, want %+v", loaded, original)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".config-") {
+			t.Fatalf("temporary file left behind: %s", entry.Name())
+		}
+	}
+}
+
+func TestWriteFileConfigPreservesOtherKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{
+		"model": "keep-me",
+		"http_timeout": "3s",
+		"agent_overrides": {"explore": {"max_turns": 7}}
+	}`), 0o600); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	cfg, err := loadFileConfig(path, true)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	override := cfg.AgentOverrides["explore"]
+	override.Enabled = fileBool(false)
+	cfg.AgentOverrides["explore"] = override
+	if err := writeFileConfig(path, cfg); err != nil {
+		t.Fatalf("writeFileConfig: %v", err)
+	}
+	reloaded, err := loadFileConfig(path, true)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Model == nil || *reloaded.Model != "keep-me" {
+		t.Fatalf("model = %v, want keep-me", reloaded.Model)
+	}
+	if reloaded.HTTPTimeout == nil || time.Duration(*reloaded.HTTPTimeout) != 3*time.Second {
+		t.Fatalf("http_timeout = %v, want 3s", reloaded.HTTPTimeout)
+	}
+	explore := reloaded.AgentOverrides["explore"]
+	if explore.MaxTurns == nil || *explore.MaxTurns != 7 || explore.Enabled == nil || *explore.Enabled {
+		t.Fatalf("explore override = %+v", explore)
+	}
+}
+
+func TestWriteFileConfigFailureLeavesTargetIntact(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.json")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	keep := filepath.Join(target, "keep")
+	if err := os.WriteFile(keep, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := writeFileConfig(target, fileConfig{Model: fileStr("x")}); err == nil {
+		t.Fatal("writeFileConfig replaced a directory target")
+	}
+	data, err := os.ReadFile(keep)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("target contents = %q, %v, want keep", data, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".config-") {
+			t.Fatalf("temporary file left behind after a failed write: %s", entry.Name())
+		}
+	}
+	if err := writeFileConfig("", fileConfig{}); err == nil {
+		t.Fatal("empty config path accepted")
 	}
 }

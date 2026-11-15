@@ -172,27 +172,50 @@ type TodoProvider interface {
 }
 
 // AgentDefView is one discovered agent definition shown by the /agents
-// browser. Status is "active" or "invalid"; an invalid row carries the parse
-// error instead of usable settings.
+// browser. Status is "active", "disabled", or "invalid"; an invalid row
+// carries the parse error instead of usable settings. Model, Effort, and
+// MaxTurns are the effective values after operator overrides; Declared* are
+// the definition file's values, and the *Source fields say where each
+// effective value came from ("override", "definition", "model default", or
+// "inherit"). Override is the persisted override, nil when none applies.
 type AgentDefView struct {
-	Name            string
-	Description     string
-	Model           string
-	Effort          string
-	Source          string
-	Path            string
-	Tools           []string
-	MaxTurns        int
-	Status          string
-	Err             string
-	PromptFirstLine string
+	Name             string
+	Description      string
+	Model            string
+	Effort           string
+	ModelSource      string
+	EffortSource     string
+	MaxTurnsSource   string
+	DeclaredModel    string
+	DeclaredEffort   string
+	DeclaredMaxTurns int
+	Override         *agent.AgentOverride
+	Enabled          bool
+	Source           string
+	Path             string
+	Tools            []string
+	MaxTurns         int
+	Status           string
+	Err              string
+	PromptFirstLine  string
 }
 
 // AgentProvider is an optional Host capability for the /agents browser. It
-// reports the definitions loaded for this process, not a re-read of disk, so a
-// mid-run edit cannot change what a child in flight will run.
+// reports the definitions loaded for this process, with the current operator
+// overrides applied for display. A mid-run edit cannot change what a child in
+// flight will run, and a saved override takes effect on the next process.
 type AgentProvider interface {
 	Agents() []AgentDefView
+}
+
+// AgentSettings is an optional Host capability for editing agent overrides
+// from the /agents browser. SetAgentOverride replaces one agent's complete
+// override and persists it to the active config file; an empty override
+// removes the entry. Only model, thinking effort, max_turns, and enabled are
+// expressible, so this surface cannot widen a tool grant or rewrite a prompt.
+type AgentSettings interface {
+	SetAgentOverride(name string, override agent.AgentOverride) error
+	ClearAgentOverrides(name string) error
 }
 
 // SubagentFocus is an optional Host capability for the /agent-hub child view.
@@ -656,6 +679,9 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	if m.overlay.kind != OverlayNone {
 		if keystroke == "esc" {
+			if m.overlay.cancelEdit() {
+				return nil
+			}
 			return m.closeOverlayCmd()
 		}
 		if cmd := m.overlay.update(m, msg); cmd != nil {

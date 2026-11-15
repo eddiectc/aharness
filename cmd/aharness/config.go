@@ -134,6 +134,10 @@ type config struct {
 	// ConfigPath is the resolved config file path, empty when no file is
 	// consulted. It is reported at startup for operator visibility.
 	ConfigPath string
+	// AgentOverrides is the agent_overrides object from the config file. It is
+	// applied to the discovered catalog when the TUI host opens; batch mode has
+	// no delegate grant and therefore never resolves it.
+	AgentOverrides map[string]agent.AgentOverride
 
 	modelSet          bool
 	providerSet       bool
@@ -714,6 +718,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		Stream:            stream,
 		StreamSet:         visited["stream"],
 		ConfigPath:        configPath,
+		AgentOverrides:    file.agentOverrides(),
 		PromptVersion:     agent.PromptVersion,
 		ToolsetVersion:    tools.Version,
 		modelSet:          modelSet,

@@ -420,6 +420,12 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 		return failedReport(spec, tools.CodeInvalidArgs, tools.SubagentFailed,
 			fmt.Sprintf("session %s belongs to agent %q, not %q", spec.Session, start.Agent, spec.Agent))
 	}
+	if start.Agent != "" {
+		if def, ok := s.opts.Definitions.LookupDefinition(start.Agent); ok && def.Disabled {
+			return failedReport(spec, tools.CodeNotFound, tools.SubagentFailed,
+				fmt.Sprintf("agent %q is disabled by an operator override", start.Agent))
+		}
+	}
 	store, err := session.Open(s.opts.Config.StateDir, spec.Session)
 	if err != nil {
 		if errors.Is(err, session.ErrLocked) {

@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
+	"aharness/internal/agent"
 	"aharness/internal/tools"
 )
 
@@ -27,28 +31,72 @@ const configFileHint = "<state-dir>/config.json"
 // and mode flags are deliberately absent: the token never belongs on disk, the
 // state directory locates this file, and the rest are per-invocation inputs.
 type fileConfig struct {
-	Model            *string         `json:"model"`
-	Provider         *string         `json:"provider"`
-	Workspace        *string         `json:"workspace"`
-	ProviderBaseURL  *string         `json:"provider_base_url"`
-	ModelsDevURL     *string         `json:"models_dev_url"`
-	SearXNGURL       *string         `json:"searxng_url"`
-	WebTimeout       *configDuration `json:"web_timeout"`
-	WebFetchProvider *string         `json:"web_fetch_provider"`
-	WebFetchURL      *string         `json:"web_fetch_url"`
-	WebFetchKey      *string         `json:"web_fetch_key"`
-	ThinkingEffort   *string         `json:"thinking_effort"`
-	MaxTurns         *int            `json:"max_turns"`
-	MaxTotalTokens   *int            `json:"max_total_tokens"`
-	MaxSubagents     *int            `json:"max_subagents"`
-	MaxContextTokens *int            `json:"max_context_tokens"`
-	MaxOutputTokens  *int            `json:"max_output_tokens"`
-	SessionTimeout   *configDuration `json:"session_timeout"`
-	ModelTimeout     *configDuration `json:"model_timeout"`
-	HTTPTimeout      *configDuration `json:"http_timeout"`
-	CatalogTimeout   *configDuration `json:"catalog_timeout"`
-	RequireUsage     *bool           `json:"require_usage"`
-	LogRequests      *bool           `json:"log_requests"`
+	Model            *string                      `json:"model,omitzero"`
+	Provider         *string                      `json:"provider,omitzero"`
+	Workspace        *string                      `json:"workspace,omitzero"`
+	ProviderBaseURL  *string                      `json:"provider_base_url,omitzero"`
+	ModelsDevURL     *string                      `json:"models_dev_url,omitzero"`
+	SearXNGURL       *string                      `json:"searxng_url,omitzero"`
+	WebTimeout       *configDuration              `json:"web_timeout,omitzero"`
+	WebFetchProvider *string                      `json:"web_fetch_provider,omitzero"`
+	WebFetchURL      *string                      `json:"web_fetch_url,omitzero"`
+	WebFetchKey      *string                      `json:"web_fetch_key,omitzero"`
+	ThinkingEffort   *string                      `json:"thinking_effort,omitzero"`
+	MaxTurns         *int                         `json:"max_turns,omitzero"`
+	MaxTotalTokens   *int                         `json:"max_total_tokens,omitzero"`
+	MaxSubagents     *int                         `json:"max_subagents,omitzero"`
+	MaxContextTokens *int                         `json:"max_context_tokens,omitzero"`
+	MaxOutputTokens  *int                         `json:"max_output_tokens,omitzero"`
+	SessionTimeout   *configDuration              `json:"session_timeout,omitzero"`
+	ModelTimeout     *configDuration              `json:"model_timeout,omitzero"`
+	HTTPTimeout      *configDuration              `json:"http_timeout,omitzero"`
+	CatalogTimeout   *configDuration              `json:"catalog_timeout,omitzero"`
+	RequireUsage     *bool                        `json:"require_usage,omitzero"`
+	LogRequests      *bool                        `json:"log_requests,omitzero"`
+	AgentOverrides   map[string]fileAgentOverride `json:"agent_overrides,omitzero"`
+}
+
+// fileAgentOverride is the JSON shape of one operator override. Only routing
+// settings are overridable; a tool grant or prompt body here is an unknown key
+// and a config error.
+type fileAgentOverride struct {
+	Model          *string `json:"model,omitzero"`
+	ThinkingEffort *string `json:"thinking_effort,omitzero"`
+	MaxTurns       *int    `json:"max_turns,omitzero"`
+	Enabled        *bool   `json:"enabled,omitzero"`
+}
+
+// toAgent converts one file override into the catalog type.
+func (o fileAgentOverride) toAgent() agent.AgentOverride {
+	return agent.AgentOverride{
+		Model:          o.Model,
+		ThinkingEffort: o.ThinkingEffort,
+		MaxTurns:       o.MaxTurns,
+		Enabled:        o.Enabled,
+	}
+}
+
+// fromAgent converts one catalog override into the file shape.
+func fromAgent(o agent.AgentOverride) fileAgentOverride {
+	return fileAgentOverride{
+		Model:          o.Model,
+		ThinkingEffort: o.ThinkingEffort,
+		MaxTurns:       o.MaxTurns,
+		Enabled:        o.Enabled,
+	}
+}
+
+// agentOverrides converts every file override into the catalog type. A nil or
+// empty map yields nil, which means "no overrides".
+func (c fileConfig) agentOverrides() map[string]agent.AgentOverride {
+	if len(c.AgentOverrides) == 0 {
+		return nil
+	}
+	out := make(map[string]agent.AgentOverride, len(c.AgentOverrides))
+	for name, override := range c.AgentOverrides {
+		out[name] = override.toAgent()
+	}
+	return out
 }
 
 // configDuration decodes a duration written as a string, so a config file uses
@@ -67,6 +115,12 @@ func (d *configDuration) UnmarshalJSON(data []byte) error {
 	}
 	*d = configDuration(parsed)
 	return nil
+}
+
+// MarshalJSON implements json.Marshaler so the settings writer preserves the
+// same "90s"/"2h" spelling the reader accepts.
+func (d configDuration) MarshalJSON() ([]byte, error) {
+	return jsonv2.Marshal(time.Duration(d).String())
 }
 
 // loadFileConfig reads one optional JSON config file. An empty path selects no
@@ -133,6 +187,13 @@ func (c fileConfig) validate(path string) error {
 	// an explicit empty value too.
 	if c.ThinkingEffort != nil && *c.ThinkingEffort == "" {
 		return fail("thinking_effort must not be empty; omit the key or use \"default\"")
+	}
+	// Overrides are validated without the discovered catalog: the name shape,
+	// the two free-form routing values, and the turn cap are fixed rules. The
+	// catalog exists only in the TUI path, which additionally checks that each
+	// name resolves to an active definition.
+	if err := agent.ValidateAgentOverrides(c.agentOverrides()); err != nil {
+		return fail("%v", err)
 	}
 	if c.SearXNGURL != nil && *c.SearXNGURL != "" {
 		if _, err := tools.ParseSearXNGURL(*c.SearXNGURL); err != nil {
@@ -232,4 +293,65 @@ func durationLayer(flagValue time.Duration, flagSet bool, envValue time.Duration
 	}
 	value := time.Duration(*file)
 	return layered(flagValue, flagSet, envValue, envSet, &value, def)
+}
+
+// writeFileConfig atomically replaces path with cfg. It writes a same-directory
+// temporary file in 0600, syncs it, and renames it over the target, so a
+// failure leaves the previous file intact and no partial file is ever visible
+// under the config path. The temporary file is removed on every error path.
+func writeFileConfig(path string, cfg fileConfig) error {
+	if path == "" {
+		return errors.New("no config file is configured")
+	}
+	data, err := marshalFileConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("encode config file %s: %w", path, err)
+	}
+	if len(data) > maxConfigFileBytes {
+		return fmt.Errorf("config file %s would be %d bytes; the limit is %d", path, len(data), maxConfigFileBytes)
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace config file %s: %w", path, err)
+	}
+	// The rename is already atomic; syncing the directory is a best-effort
+	// durability improvement and cannot undo the replacement.
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
+}
+
+// marshalFileConfig renders the config file with a stable two-space layout and
+// a trailing newline, matching what an operator would write by hand.
+func marshalFileConfig(cfg fileConfig) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := jsontext.NewEncoder(&buf, jsontext.WithIndent("  "))
+	if err := jsonv2.MarshalEncode(enc, cfg); err != nil {
+		return nil, err
+	}
+	buf.WriteByte('\n')
+	return buf.Bytes(), nil
 }

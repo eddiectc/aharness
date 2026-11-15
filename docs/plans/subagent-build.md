@@ -1,11 +1,10 @@
 # aharness subagent build plan
 
 - **Date:** 2026-11-15
-- **Status:** implemented 2026-11-15 (milestones 1–3). Milestone 4 is
-  deferred and recorded in §4.3. Current reference documents win where they
-  disagree; implementation updated them in the same change, and §11 records the
-  deviations. The real-provider smoke (§5.4) is **not run** while
-  `AHARNESS_PROVIDER_TOKEN` is unset.
+- **Status:** implemented 2026-11-15 (milestones 1–4). Current reference
+  documents win where they disagree; implementation updated them in the same
+  change, and §11 records the deviations. The real-provider smoke (§5.4) is
+  **not run** while `AHARNESS_PROVIDER_TOKEN` is unset.
 - **Source:** [subagent research](../research/subagent-research.md).
 - **Target:** Go 1.27.3, module `aharness`.
 - **Architecture:** [architecture.md](../architecture.md) §3.1 (packages), §3.2
@@ -54,7 +53,8 @@ session, and projection machinery unchanged.
   occupancy, turns, and status, computed from throttled display events and the
   TUI's own clock. `Esc` then works as the real bound on a runaway child. A
   companion `/agents` browser shows the discovered definitions, their source,
-  and their declared settings, read-only in M1.
+  and their declared and effective settings, and edits the routing overrides in
+  M4.
 - **No background, no messaging, no worktrees, no advisor.** Parallel tasks
   execute sequentially in M1 and concurrently in M3; both are the same blocking
   call, so the orchestrator is suspended either way and no asynchronous run
@@ -74,10 +74,10 @@ session, and projection machinery unchanged.
 | Accounting | Child turns, usage, and cost in the tool result `details`; folded into `Inspect` and `run_end`; child tokens count against `-max-total-tokens`. |
 | Prompt contract | `prompt-v1` with the delegation paragraph and the agent catalog; frozen `prompt-v0`; recorded `system_prompt`. |
 | Toolset contract | `toolset-v2`; frozen `toolset-v0` and `toolset-v1`; recorded tool allowlist. |
-| Display | `SubagentStarted`/`SubagentProgress`/`SubagentFinished`; one foldable delegate block; `/agent-hub` live roster overlay; `Enter` child focus with a read-only `agent.History` transcript and delegation steering; `/agents` read-only definitions browser; `Details` decode on replay. |
-| Configuration | `-max-subagents` (default 8); agent directory derived from the state directory; `delegate` withheld from the `-batch` grant. No config-file writer. |
-| Commands | `/agent-hub` (live roster and focused child view) and `/agents` (definitions browser, read-only in M1). |
-| Documentation | README, architecture, limits, configuration, tui, testing strategy, and this plan. |
+| Display | `SubagentStarted`/`SubagentProgress`/`SubagentFinished`; one foldable delegate block; `/agent-hub` live roster overlay; `Enter` child focus with a read-only `agent.History` transcript and delegation steering; `/agents` definitions and settings browser; `Details` decode on replay. |
+| Configuration | `-max-subagents` (default 8); agent directory derived from the state directory; `agent_overrides` for model, effort, `max_turns`, and `enabled`; atomic 0600 config writer; `delegate` withheld from the `-batch` grant. |
+| Commands | `/agent-hub` (live roster and focused child view) and `/agents` (definitions browser and routing overrides). |
+| Documentation | README, architecture, limits, configuration, commands, tui, testing strategy, and this plan. |
 
 ### 1.2 What stays the same
 
@@ -113,8 +113,8 @@ session, and projection machinery unchanged.
 - Automatic delegation. The model chooses to call `delegate`; aharness adds no
   classifier and no `description`-matching router.
 - A per-agent transcript viewer beyond the existing session surfaces.
-- Editing agent settings from the TUI. `/agents` is read-only in M1; overrides
-  need a config writer and are specified in §3.10 for M4.
+- A general config writer. `/agents` can write only `agent_overrides`; no other
+  config key, and never the workspace.
 
 ### 1.4 Definition of done
 
@@ -166,8 +166,10 @@ gate test unless marked otherwise.
 - [x] `/agents` opens a definitions browser listing every discovered agent with
       name, source and file path, declared model, effort, tool count, and
       `max_turns`; a malformed file appears as `invalid` with its parse error.
-- [x] `/agents` is read-only: no key edits, writes, or persists anything, and
-      the process never opens `<state-dir>/config.json` for writing.
+- [x] In M1, `/agents` was read-only: no key edits, writes, or persistence, and
+      the process never opened `<state-dir>/config.json` for writing. M4 adds
+      explicit edit keys and the scoped writer; navigation and expansion still
+      write nothing.
 - [x] Both commands appear in the `F1` help overlay and in composer
       autocomplete, and trailing words after either are accepted and ignored.
 - [x] Columns drop in the documented order as width shrinks (intent below 60
@@ -208,6 +210,28 @@ gate test unless marked otherwise.
       version bump.
 - [x] README, architecture, limits, configuration, tui, and testing strategy are
       updated; `make dod` passes.
+- [x] `agent_overrides` changes the next child's `model`, `thinking_effort`,
+      `max_turns`, and `enabled` without editing a definition file; the
+      definition's tool grant and prompt stay unchanged.
+- [x] A model override with no explicit effort resets the child to that model's
+      default effort; the definition's effort does not carry across a model
+      change.
+- [x] An `agent_overrides` entry with an unknown agent name (checked when the
+      TUI loads the catalog), a bad name shape, an empty model or effort, or an
+      over-cap count is a config error (exit 2) naming the agent and key; an
+      unknown or unusable model at spawn time is a per-task `invalid_args`, not
+      a process exit.
+- [x] `enabled: false` keeps the agent discoverable in `/agents`, removes it
+      from the prompt and `delegate` catalogs, returns `not_found` for a fresh
+      or continued child, and shows `disabled` in its row.
+- [x] `/agents` edits `model`, `effort`, `max_turns`, and `enabled` inline,
+      shows each effective value's provenance and the declared value it
+      replaced, cancels an edit with `Esc` before closing, and applies a saved
+      override on the next process.
+- [x] The settings writer replaces the active config file atomically in 0600,
+      preserves every other key, and leaves the previous file intact when a
+      write fails.
+- [x] `make dod` passes with the override tests.
 - [ ] A manual real-provider smoke runs `explore` and `reviewer` against this
       repository and records the parent's context growth, child turns, and cost.
       **Not run** while `AHARNESS_PROVIDER_TOKEN` is unset; it is a release
@@ -808,10 +832,11 @@ of what is running now. `SubagentProgress` updates both.
 ### 3.10 `/agents`: definitions and settings
 
 The live roster answers "what is running"; `/agents` answers "what could run,
-where did it come from, and what will it run on". Both are composer commands and
-neither is durable.
+where did it come from, and what will it run on". Both are composer commands;
+neither writes a session event (M4's `/agents` writes the config file, not the
+log).
 
-#### M1: read-only definitions browser
+#### The definitions browser
 
 `/agents` opens an overlay listing every discovered agent, bundled and user,
 one row each:
@@ -820,52 +845,46 @@ one row each:
 |---|---|
 | `name` | Definition name; a user file that shadows a bundled agent shows `user` in `source` |
 | `source` | `bundled` or `user`, plus the file path for a user agent |
-| `model` | Declared model, or `inherit` |
-| `effort` | Declared effort, or `inherit` |
+| `model` | Effective model, or `inherit`; `*` marks an operator override |
+| `effort` | Effective effort, `default`, or `inherit`; `*` marks an override |
 | `tools` | Granted tool count, with the names in the expanded row |
-| `max_turns` | Declared cap, or `—` |
-| `status` | `active`, or `shadowed` when a malformed file lost to the bundled definition |
+| `max_turns` | Effective cap, or `—`; `*` marks an override |
+| `status` | `active`, `disabled`, or `invalid` |
 
 Behavior:
 
-- Read-only in M1. It has no editing keys, which keeps the milestone free of a
-  config writer and of the precedence questions below.
 - Rows are sorted by name; `Enter` expands a row in place to show the tool list,
-  `max_turns`, and the first line of the prompt. `Esc` closes, matching every
-  other overlay.
-- It shows the set loaded for this process, not a re-read of disk, so a mid-run
-  edit cannot change what a child in flight will run. Editing takes effect for
-  the next process. This is stated in the header row and in `docs/commands.md`.
+  each setting's effective value and provenance (override, definition, model
+  default, or inherit), the declared value an override replaced, `max_turns`,
+  and the first line of the prompt. `Esc` closes, matching every other overlay.
+- `m`, `e`, `t`, `d`, and `r` edit the focused row's `model`, `thinking_effort`,
+  `max_turns`, and `enabled`, and remove all of its overrides. The inline editor
+  shows its prompt and any error in a footer; `Enter` saves, and `Esc` cancels
+  the edit before a second `Esc` closes the browser.
+- It shows the set loaded for this process with overrides applied for display,
+  not a re-read of disk, so a mid-run edit cannot change what a child in flight
+  will run. A save applies on the next process. This is stated in
+  `docs/commands.md` and `docs/configuration.md`.
 - Skipped files appear as rows with `status=invalid` and the parse error in the
   expanded body, so a user who edits a definition gets an answer instead of
   silence. This is the same information `cmd` already logs as a warning.
 - It works while a run is active, because it is display-only.
 
-#### Overrides are deliberately not in M1
+#### M4: routing overrides
 
-The obvious "settings" feature is per-agent `model` and `thinking_effort`
-overrides written from the overlay. Two facts make that a separate increment
-rather than a column edit:
-
-1. **There is no config writer.** `<state-dir>/config.json` is read-only today
-   (`cmd/aharness/fileconfig.go:29-52,75-97`); nothing in the repository writes
-   it. Editing settings means adding an atomic 0600 writer, validation, and a
-   re-resolution path, which is a surface the harness does not have.
-2. **It creates a second source of truth for the same four fields.** An agent
-   already declares `model`, `thinking_effort`, `tools`, and `max_turns` in its
-   file. An override layer needs an explicit precedence rule and a UI that shows
-   effective values with provenance, or an operator cannot tell why a child ran
-   on the model it did.
-
-When it lands, the contract should be:
+M4 adds the settings surface that M1 deliberately left out. The shipped
+contract:
 
 | Rule | Decision |
 |---|---|
-| Storage | A new `agent_overrides` object in `<state-dir>/config.json`, keyed by agent name |
+| Storage | An `agent_overrides` object in the active config file (`-config`/`AHARNESS_CONFIG`, default `<state-dir>/config.json`), keyed by agent name |
 | Precedence | override → definition file → parent run's model/effort |
 | Overridable | `model`, `thinking_effort`, `max_turns`, `enabled` |
 | Not overridable | `tools` and the prompt body |
-| `enabled: false` | The agent is discoverable but `delegate` returns `not_found`, and the name says `disabled` |
+| Model change | A model override without an effort resets to the new model's default |
+| `enabled: false` | The agent is discoverable but `delegate` returns `not_found` for a fresh or continued child, and the row says `disabled` |
+| Validation | Shape, count, and empty-value errors are config errors naming the agent and key at load; the discovered-name check runs when the TUI loads the catalog; model existence and effort support resolve at spawn time as a per-task `invalid_args` |
+| Writer | Atomic 0600 same-directory temporary file plus `rename`; every other key preserved; the previous file survives a failed write; a path inside the workspace is refused |
 | Scope | Operator state directory only; never the workspace |
 
 Not overridable is the security rule, not a limitation: a tool grant must come
@@ -873,6 +892,13 @@ from a definition file the operator wrote in their own state directory, and the
 prompt is what the child session records. Allowing either to be changed from a
 settings surface would add a way to widen authority without editing a file,
 which is the property the plan's §7 trust discussion depends on.
+
+Two facts made this a separate milestone rather than a column edit in M1: there
+was no config writer at all, and an override layer creates a second source of
+truth for the same four fields. The resolution is that the browser shows
+effective values with provenance, the definition file still owns the grant and
+prompt, and a save is scoped to `agent_overrides` rather than a general config
+writer.
 
 ## 4. Implementation
 
@@ -884,7 +910,8 @@ which is the property the plan's §7 trust discussion depends on.
 | `internal/tools/registry.go` | `Options.Spawning` field; `executeDelegate`; allowlist enforcement in `Execute`. |
 | `internal/tools/schemas.go` | `v1Schemas` frozen; `v2Schemas` adds `delegate`; `SchemasFor` accepts three versions. |
 | `internal/tools/result.go` | `Version = "toolset-v2"`; `CodeSubagentLimit`. |
-| `internal/agent/agents.go` | New: strict definition parser, bundled set, discovery, precedence, validation. |
+| `internal/agent/agents.go` | New: strict definition parser, bundled set, discovery, precedence, validation; effective/declared fields, `Disabled`, and the runnable/discoverable lookup split. |
+| `internal/agent/overrides.go` | New: `AgentOverride`, validation, catalog application, model-switch effort reset, and disabled resolution. |
 | `internal/agent/prompt.go` | New: frozen `prompt-v0`, `prompt-v1` template, environment block, agent catalog rendering. |
 | `internal/agent/spawn.go` | New: `Spawner` implementing the spawn interface; child store lifecycle, budgets, resolver calls, display adapter, accounting. |
 | `internal/agent/runner.go` | Record `system_prompt`/`agent`/`tools`; accumulate subagent totals; honor the grant; no behavioral change to the turn sequence. |
@@ -893,12 +920,13 @@ which is the property the plan's §7 trust discussion depends on.
 | `internal/agent/state.go` | Decode the new fields; fold delegate `details`; expose subagent totals. |
 | `internal/agent/display.go` | `SubagentStarted`, `SubagentProgress`, `SubagentFinished`; throttled forwarding from the child display callback. |
 | `internal/tui/model.go`, `view.go` | Delegate block rendering, nested task lines, replay decode. |
-| `internal/tui/agents_overlay.go` | New: `/agent-hub` roster overlay and `/agents` definitions browser; column fitting, row models, elapsed tick, scroll, expand; `Enter` row selection opens the focused child. |
+| `internal/tui/agents_overlay.go` | New: `/agent-hub` roster overlay and `/agents` definitions and settings browser; column fitting, row models, elapsed tick, scroll, expand; `Enter` row selection opens the focused child; M4 inline editor for model, effort, `max_turns`, and enabled, with provenance and `*` markers. |
 | `internal/tui/child_view.go` | New: focused child transcript rendering, queued delegation-steer markers, scrolling, and Esc-to-parent. |
 | `internal/tui/commands.go`, `widgets.go` | Register `/agent-hub` and `/agents`, help entries, `OverlayAgentHub`/`OverlayAgents` kinds and their push/pop, key handling. |
 | `internal/tui/protocol.go` | Optional `subagent_tasks` on tool events; no version bump. |
-| `internal/tui/app.go`, `cmd/aharness/tui.go` | Resume picker excludes children; `SubagentFocus` host capability and focus key handling; the host keeps the run spawner for child steering and transcript reads. |
-| `cmd/aharness/config.go` | `-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; agent directory from the state directory. |
+| `internal/tui/app.go`, `cmd/aharness/tui.go` | Resume picker excludes children; `SubagentFocus` host capability and focus key handling; the host keeps the run spawner for child steering and transcript reads; M4 `AgentSettings` save/clear capability, startup override application, and the effective browser view. |
+| `cmd/aharness/config.go` | `-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; agent directory from the state directory; `agent_overrides` carried on the effective config. |
+| `cmd/aharness/fileconfig.go` | `agent_overrides` schema and validation; the atomic 0600 config writer used by `/agents`. |
 | `cmd/aharness/models.go` | Expose catalog resolution for the spawner's model resolver. |
 | `cmd/aharness/run.go`, `tui.go` | Load definitions, build the spawner, wire it into the registry and the display callback. |
 
@@ -1003,12 +1031,12 @@ Acceptance: three read-only tasks complete with overlapping start times in a
 sequential; canceling mid-call stops every child and pairs the delegate result
 with `canceled`.
 
-**M4 — agent settings and overrides.**
+**M4 — agent settings and overrides.** Implemented.
 
-Deferred from M1 by §3.10. It is listed so the intended shape is recorded, not
-so it can be smuggled into M1.
+Added after M1–M3; §3.10's M4 table is the shipped contract, and this list is
+the milestone's original scope.
 
-- A `agent_overrides` object in `<state-dir>/config.json`, with an atomic 0600
+- An `agent_overrides` object in the active config file, with an atomic 0600
   writer, validation, and re-resolution on the next process.
 - Editing `model`, `thinking_effort`, `max_turns`, and `enabled` from `/agents`,
   with effective values and provenance shown per row.
@@ -1020,7 +1048,11 @@ Acceptance: an override changes the next child's model and effort without
 editing a definition file; the definition file still wins for `tools` and the
 prompt; an invalid override is a config error naming the agent and key; a
 disabled agent is unreachable by name and its row says so; the writer is atomic
-and a failed write leaves the previous file intact.
+and a failed write leaves the previous file intact. Shipped with one
+distinction: shape, count, and empty-value errors are config errors at load,
+and the discovered-name check is a config error when the TUI loads the catalog;
+model existence and effort support resolve at spawn time as a per-task
+`invalid_args`, because the catalog may be unavailable offline.
 
 ## 5. Testing
 
@@ -1046,13 +1078,34 @@ and a failed write leaves the previous file intact.
 - Accounting: folding, unpriced child clears completeness, turn exclusion.
 - Prompt: v0 replay from a frozen template, v1 rendering, catalog cap and
   omission marker, recorded-prompt precedence after an agent file change.
+- Overrides: valid model/effort/`max_turns`/`enabled`, a model switch with no
+  effort resetting to the model default, an effort-only override, an unknown
+  agent, a bad name, an empty model or effort, a non-positive `max_turns`,
+  over-cap entries, and a disabled definition absent from `Infos`/`SpawnInfos`
+  and `Lookup` but present in `LookupDefinition`; the base catalog is never
+  mutated.
+- Config writer: `agent_overrides` decoding with nested unknown-member
+  rejection; explicit false, zero, and empty values survive a marshal round
+  trip; the temporary file is 0600; a rewrite preserves every other key; and a
+  failed rename leaves the target intact with no temporary file behind.
 
 ### 5.2 Integration
 
 - Fake provider plus a real spawner: a parent calls `delegate`; the child log
   validates as v2, has one `final`, and the parent log has no child events.
 - Continuation: a second call with `session` appends a new run to the same
-  child; cumulative turns are bounded by the 40-turn cap.
+  child; cumulative turns are bounded by the definition's `max_turns`, else the
+  parent's explicit `-max-turns`, else unlimited.
+- Overrides end to end: a config file with `agent_overrides.explore.model` and
+  `max_turns` changes the child request and the child's recorded `model` and
+  `max_turns` while the definition grant and prompt are unchanged; a model
+  switch without an effort records the model default; `enabled: false` removes
+  the agent from the prompt and returns `not_found` without a child session;
+  an unknown name exits 2 naming the agent and key.
+- Settings browser: `/agents` edits a row through the host capability, shows
+  the override marker and provenance, toggles `disabled`, clears overrides,
+  cancels an edit on `Esc` before closing, keeps the editor open on a failed
+  write, and performs no write for navigation or expansion alone.
 - Isolation: a child's `todo` and command spill files are its own; the
   workspace is shared.
 - Cancel: a context cancellation mid-child pairs the delegate call with
@@ -1079,8 +1132,10 @@ and a failed write leaves the previous file intact.
 - Definitions browser: bundled-only, one user override showing `user` plus its
   path, a malformed file shown as `invalid` with its parse error, row
   expansion, sort order, and an 80-column frame that fits without overflow.
-- No-writer: a test asserts the definitions browser performs no file write, by
-  running it against a read-only state directory.
+- No-writer on navigation: a test asserts the definitions browser performs no
+  file write while opening, scrolling, or expanding rows, by running it against
+  a read-only state directory; only an explicit edit key reaches the host
+  writer.
 - Locking: resuming a child that is already open returns `unavailable`.
 
 ### 5.3 Fuzzing
@@ -1099,8 +1154,10 @@ and a failed write leaves the previous file intact.
   whether the 16 KiB report cap and the bundled read-only grants are right.
 - `Esc` during a long `explore` child; confirm the child log ends
   `interrupted`, the parent continues, and no child process survives.
-- A user agent overriding `reviewer` with a different model and effort; confirm
-  the child records the new values.
+- A user agent overriding `reviewer` with a different model and effort, or the
+  same routing change saved through `/agents` as an `agent_overrides` entry;
+  confirm the next process records the new values in the child and that the
+  definition's grant and prompt are unchanged.
 
 ### 5.5 Gates
 
@@ -1128,6 +1185,11 @@ Add to [limits.md](../limits.md):
 | Agent description | 200 bytes | Billed on every parent call |
 | Agent prompt body | 16 KiB | Recorded per session |
 | Agents discovered | 32 | Catalog stays readable |
+| Agent overrides | 32 entries | One per discovered agent at most |
+| Override model | 200 bytes, non-empty | Resolved through the catalog at spawn time |
+| Override thinking effort | 32 bytes, `[a-z][a-z0-9_-]*` | Must be a concrete catalog effort; `default` is rejected, and omitting the key inherits |
+| Override `max_turns` | Positive integer | `0` and negative are config errors; omitting the key inherits |
+| Config file write | Atomic 0600 temporary plus rename; 1 MiB cap | Preserves every other key and the previous file on failure |
 | Agent catalog in the prompt | 4 KiB | Prompt material; omission marker beyond |
 | Recorded `system_prompt` | 32 KiB | Agent prompt plus environment block and catalog |
 | Child session ID | canonical UUID | `session.CanonicalID` |
@@ -1176,6 +1238,21 @@ currently enumerates every stable code.
   `Esc`, and withholding `delegate` in batch; a fixed cap was rejected because
   it truncates legitimate long work without preventing the case it pretends to
   prevent.
+- **A recorded prompt can outlive an override.** A resumed session keeps the
+  system prompt it recorded, so it may list an agent that is now disabled or
+  describe settings that a newer override changed. The catalog is current for
+  dispatch, so `delegate` rejects a disabled name with `not_found`; a new
+  session's catalog omits it. This is the same replay-first tradeoff as an old
+  session that cannot delegate.
+- **The settings writer is a new write surface.** It rewrites the operator's
+  config file from a TUI command. Mitigations: re-read before write, mutate only
+  `agent_overrides`, replace atomically in 0600, refuse to overwrite a file that
+  no longer validates, and keep `tools` and the prompt out of the override type
+  entirely.
+- **Overrides drift from their definitions.** A definition can be deleted or
+  renamed after an override is saved. Applying the catalog reports the stale
+  name as a config error, so the operator sees it at startup; a model the
+  catalog no longer offers is a per-task `invalid_args`.
 - **Old sessions are cut off.** A session recorded before this change keeps
   `prompt-v0`/`toolset-v1` through resume and fork, so it can never delegate.
   Users who habitually resume will not see the feature. Document it in the
@@ -1211,8 +1288,8 @@ currently enumerates every stable code.
 | Child token budget | Parent's remaining, always; unlimited when the parent is | A child spends inside the parent's call, so it cannot be allowed more than the parent has |
 | Runaway child | Progress forwarding plus `Esc`; `delegate` withheld in batch | A fixed cap cannot distinguish a slow task from a stuck one |
 | Roster surface | `/agent-hub` overlay, not a pinned panel | No layout, panel-height, or todo-widget interaction; `Esc` matches every other overlay; works during a run under the existing display-command rule |
-| Definitions surface | `/agents` read-only browser in M1 | Answers "what can run, from where, on what" without a config writer or a second source of truth |
-| Settings overrides | M4, routing keys only | Needs an atomic config writer; `tools` and prompt stay file-only so a settings surface cannot widen authority |
+| Definitions surface | `/agents` browser, read-only in M1 and editable for routing in M4 | Answers "what can run, from where, on what" without widening the grant or prompt |
+| Settings overrides | M4: routing keys only; implemented | Needs an atomic config writer; `tools` and prompt stay file-only so a settings surface cannot widen authority |
 | Command names | `/agent-hub` and `/agents` | Follows OMP's split and keeps the key table unchanged |
 | Roster columns | Agent, intent, model, effort, elapsed, context tokens, turns, cost, status | Matches what identifies a running child |
 | Batch | `delegate` not granted | No `Esc` and no observer; `SIGINT` is the only stop |
@@ -1237,12 +1314,15 @@ When implemented, update:
   a flag.
 - `docs/tui.md`: the delegate block, nested task lines, replay, the
   `/agent-hub` roster (columns, responsive drop order, caps, keys) and the
-  `/agents` definitions browser, plus the M2 child view and steering source.
+  `/agents` definitions and settings browser (edit keys, provenance, `disabled`
+  row, next-process behavior), plus the M2 child view and steering source.
 - `docs/commands.md`: `/agent-hub` and `/agents` in the command table with their
   reference entries — no argument, display-only, works while a run is active,
-  idle response, `Esc` closes, and the `-ui-json` mapping. Note that `/agents`
-  is read-only and that agent overrides do not exist.
-- `docs/configuration.md`: only when M4 lands, for `agent_overrides`.
+  idle response, `Esc` closes, and the `-ui-json` mapping. `/agents` edits the
+  four routing settings, writes the active config file atomically, and cannot
+  change a tool grant or prompt.
+- `docs/configuration.md`: `agent_overrides`, its precedence, validation, and
+  the atomic 0600 writer.
 - `docs/testing-strategy.md`: the parser fuzz target, child-run integration
   cases, and the manual smoke.
 - `docs/README.md`: plan status and the research index row.
@@ -1274,10 +1354,11 @@ When implemented, update:
 ## 11. Implementation deviations
 
 Milestone 1 was implemented in one change. Milestone 2 added child focus and
-steering, and milestone 3 added read-only fan-out. The current reference
-documents (architecture, limits, configuration, commands, tui, testing
-strategy) carry the shipped contract; this section records where the code
-differs from the plan text above.
+steering, milestone 3 added read-only fan-out, and milestone 4 added agent
+routing overrides and the config writer. The current reference documents
+(architecture, limits, configuration, commands, tui, testing strategy) carry the
+shipped contract; this section records where the code differs from the plan text
+above.
 
 | Area | Plan | Shipped | Why |
 |---|---|---|---|
@@ -1286,7 +1367,7 @@ differs from the plan text above.
 | Progress and finish payloads | no cost-completeness field | `CostComplete` on `SubagentProgress` and `SubagentFinished` | Without it the roster cannot distinguish a free child from an unpriced one; the column would have to claim `$0.000000` for an unknown cost. |
 | Resumed child turns | "the same 40-turn cap" | definition `max_turns`, else parent `-max-turns`, else unlimited | §1.4 and §6 define the budget and reject a fixed constant; §3.5's 40 was a leftover and is superseded. |
 | Continuation `agent` | a `session` task may omit `agent` | accepted empty only with `session`; the recorded agent wins | The schema marks `agent` required, so a model always sends something; an empty value is meaningless for a fresh task and is rejected there. |
-| `/agents` status | `active`, `invalid`, or `shadowed` | `active` or `invalid` | A malformed user file is an `invalid` row and the bundled agent of the same name simply stays active, which the two-status model expresses without a third state. |
+| `/agents` status | `active`, `invalid`, or `shadowed` | `active` or `invalid` in M1; `disabled` added in M4 | A malformed user file is an `invalid` row and the bundled agent of the same name simply stays active, which the two-status model expresses without a third state. M4's `enabled: false` needs the third state for a discoverable but unrunnable agent. |
 | `-ui-json` roster | "no new event kind" | roster appears in frames plus optional `tool_started`/`tool_finished.subagent_tasks` | No subagent semantic event was added; the plan already allowed the optional task array and the rendered overlay in frames. |
 | Batch grant | "a grant without `delegate`" | the grant is computed from the recorded toolset version | A resumed or forked `toolset-v0`/`toolset-v1` session must not receive a v2-only name (`web_search`, `web_fetch`, `todo`) in its recorded grant; `Project` would reject it as corrupt. |
 | Agent catalog source | bundled agents "compiled in" | `bundledAgents()` in `internal/agent/agents.go` | Keeps the parser, the catalog, and the definitions in one package with no embedded file system. |
@@ -1297,8 +1378,17 @@ differs from the plan text above.
 | Read-only classification (M3) | "every named agent's grant" | fresh tasks use the definition; continuations read the recorded `session_start.tools`, require a non-nil grant, and are never classified optimistically | A continuation must not become concurrent because a definition file changed after the child started. A nil recorded grant means the whole toolset, including writers. |
 | Reservation under `-max-subagents` (M3) | not specified | a concurrent call falls back to sequential when its fresh tasks do not all fit the remaining `-max-subagents` budget | Otherwise several goroutines race for the last slot and the task that loses is nondeterministic. Falling back keeps array order and the M1 result shape. |
 | `toolset-v2` text (M3) | "no schema change later" | unchanged, including "Tasks run in order" | The schema is recorded prompt material and M3 promised no version bump. Read-only concurrent execution is behavior, not a new tool declaration; it is documented in the reference docs and `details` carries the actual mode. |
+| Override storage path (M4) | `<state-dir>/config.json` | the active config file resolved at startup (`-config`/`AHARNESS_CONFIG`, default `<state-dir>/config.json`) | A rewrite must land in the file the process read; writing a different implicit path would apply the override to the wrong invocation and could create a second config file. |
+| Override validation split (M4) | "an invalid override is a config error naming the agent and key" | shape, count, and empty-value errors are config errors at load; the discovered-name check is a config error when the TUI loads the catalog; unknown model and unsupported effort are per-task `invalid_args` | The model catalog is optional offline, and batch mode has no `delegate` grant and loads no definitions. The spawner already reports a model resolution failure per task. |
+| Model override without effort (M4) | not specified | resets the child to the new model's default effort | Mirrors §3.3: a model switch must not carry an effort the new model may not support. |
+| `thinking_effort: default` (M4) | `thinking_effort` is overridable | rejected; clearing the override is how a row inherits again | The override layer has no set-bit for "explicitly empty", and the global `default` sentinel would otherwise silently fall back to the parent's effort. |
+| Disabled continuations (M4) | `enabled: false` makes `delegate` return `not_found` | a `session` continuation of a disabled agent also returns `not_found` | Disabling means stop starting runs of that agent, including a new run in an existing child log. |
+| Continuation settings (M4) | not specified | a continued child keeps its recorded model, effort, prompt, and grant; `max_turns` and `enabled` still apply to the new run | The recorded contract wins for replay, but the operator can still cap or stop a continuation. |
+| Browser after a save (M4) | "editing takes effect for the next process" | the browser shows the persisted override immediately; the run catalog stays at startup | Gives the operator feedback without changing a child in flight or a new run in this process. The next process applies the effective values. |
+| Override writer scope (M4) | a new `agent_overrides` object; operator state only, never the workspace | the whole config file is re-read and rewritten, but only `agent_overrides` is mutated, and a path inside the workspace is refused | Preserves every other key and validates a hand-edited file before replacing it; a corrupt file is left untouched rather than overwritten. The active path can be outside the state directory via `-config`, so containment is enforced against the one untrusted tree. |
+| Settings surface keys (M4) | "editing from `/agents`" with effective values and provenance | `m`, `e`, `t`, `d`, `r`, with a `*` marker in the row and full provenance in the expanded body | Keeps the existing overlay's `Enter`-to-expand behavior and avoids a second overlay or a new key table entry for each field. |
 
-Deferred as planned: `agent_overrides` with a config writer (M4). The M1
-checklist in §1.4 is the shipped M1 scope, the M2 acceptance paragraph in §4.3
-is the shipped M2 scope, and the M3 paragraph above is the shipped M3 scope.
-The manual real-provider smoke was not run.
+Implemented and shipped: M1–M4. The M1 checklist in §1.4 is the shipped M1
+scope, the M2 acceptance paragraph in §4.3 is the shipped M2 scope, the M3
+paragraph above is the shipped M3 scope, and §3.10's M4 table is the shipped M4
+scope. The manual real-provider smoke was not run.

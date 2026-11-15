@@ -353,6 +353,31 @@ func TestSpawnerContinuation(t *testing.T) {
 	}
 }
 
+func TestSpawnerContinuationRefusesDisabledAgent(t *testing.T) {
+	f := newSpawnFixture(t, testConfig())
+	f.completer.steps = []scriptStep{completedStep("first run", model.Usage{InputTokens: 1, OutputTokens: 1})}
+	first := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "explore", Task: "one"}))
+	disabled := false
+	applied, err := ApplyAgentOverrides(f.catalog, map[string]AgentOverride{
+		"explore": {Enabled: &disabled},
+	})
+	if err != nil {
+		t.Fatalf("ApplyAgentOverrides: %v", err)
+	}
+	f.spawner.opts.Definitions = applied
+	report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-2"},
+		tools.SubagentSpec{Task: "two", Session: first.Session}))
+	if report.Status != tools.SubagentFailed || report.Code != tools.CodeNotFound {
+		t.Fatalf("disabled continuation = %+v, want not_found", report)
+	}
+	if !strings.Contains(report.Text, "disabled") || !strings.Contains(report.Text, "explore") {
+		t.Fatalf("disabled continuation message = %q", report.Text)
+	}
+	if len(f.completer.requests) != 1 {
+		t.Fatalf("model calls = %d, want only the first run", len(f.completer.requests))
+	}
+}
+
 func TestSpawnerCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newSpawnFixture(t, testConfig())

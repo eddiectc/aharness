@@ -2,11 +2,13 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"aharness/internal/agent"
@@ -14,16 +16,95 @@ import (
 	"aharness/internal/tools"
 )
 
-// agentHost is the manual host plus the optional definitions capability.
+// agentHost is the manual host plus the definitions and settings capabilities.
 type agentHost struct {
 	*manualHost
-	defs []AgentDefView
+	defs      []AgentDefView
+	overrides map[string]agent.AgentOverride
+	saves     []agentSave
+	clears    []string
+	saveErr   error
 }
 
-func (h *agentHost) Agents() []AgentDefView { return h.defs }
+type agentSave struct {
+	name     string
+	override agent.AgentOverride
+}
+
+func (h *agentHost) Agents() []AgentDefView {
+	out := append([]AgentDefView(nil), h.defs...)
+	for i := range out {
+		out[i].Enabled = true
+	}
+	for i := range out {
+		row := &out[i]
+		if row.Status == "invalid" {
+			continue
+		}
+		override, ok := h.overrides[row.Name]
+		if !ok {
+			continue
+		}
+		row.Override = &override
+		if override.Model != nil {
+			row.Model = *override.Model
+			row.ModelSource = "override"
+			if override.ThinkingEffort == nil {
+				row.Effort = ""
+				row.EffortSource = "model default"
+			}
+		}
+		if override.ThinkingEffort != nil {
+			row.Effort = *override.ThinkingEffort
+			row.EffortSource = "override"
+		}
+		if override.MaxTurns != nil {
+			row.MaxTurns = *override.MaxTurns
+			row.MaxTurnsSource = "override"
+		}
+		if override.Enabled != nil {
+			row.Enabled = *override.Enabled
+			if *override.Enabled {
+				row.Status = "active"
+			} else {
+				row.Status = "disabled"
+			}
+		}
+	}
+	return out
+}
+
+func (h *agentHost) SetAgentOverride(name string, override agent.AgentOverride) error {
+	if h.saveErr != nil {
+		return h.saveErr
+	}
+	h.saves = append(h.saves, agentSave{name: name, override: override})
+	if override.Empty() {
+		delete(h.overrides, name)
+	} else {
+		h.overrides[name] = override
+	}
+	return nil
+}
+
+func (h *agentHost) ClearAgentOverrides(name string) error {
+	if h.saveErr != nil {
+		return h.saveErr
+	}
+	h.clears = append(h.clears, name)
+	delete(h.overrides, name)
+	return nil
+}
 
 func newAgentHost() *agentHost {
-	return &agentHost{manualHost: newManualHost()}
+	return &agentHost{manualHost: newManualHost(), overrides: make(map[string]agent.AgentOverride)}
+}
+
+// pressRune sends one printable key press, matching the event a terminal
+// delivers for an editing key such as m or d.
+func pressRune(t *testing.T, app *App, r rune) tea.Cmd {
+	t.Helper()
+	return updateApp(t, app, tea.KeyPressMsg{Code: r, Text: string(r)})
 }
 
 // startAgentRun starts a run through the agent host without the manual host
@@ -283,7 +364,7 @@ func TestDelegateBlockTracksLiveChild(t *testing.T) {
 	}
 }
 
-func TestAgentsOverlayReadOnly(t *testing.T) {
+func TestAgentsOverlayProvenanceAndNavigation(t *testing.T) {
 	host := newAgentHost()
 	host.defs = []AgentDefView{
 		{
@@ -292,8 +373,10 @@ func TestAgentsOverlayReadOnly(t *testing.T) {
 		},
 		{
 			Name: "reviewer", Source: "user", Path: "/state/agents/reviewer.md",
-			Model: "deepseek-v4.1-flash", Effort: "high", Tools: []string{"read_file"},
-			MaxTurns: 12, Status: "active", PromptFirstLine: "Review the change.",
+			Model: "deepseek-v4.1-flash", ModelSource: "definition",
+			Effort: "high", EffortSource: "definition",
+			Tools: []string{"read_file"}, MaxTurns: 12, MaxTurnsSource: "definition",
+			Status: "active", PromptFirstLine: "Review the change.",
 		},
 		{
 			Name: "broken.md", Source: "user", Path: "/state/agents/broken.md",
@@ -311,7 +394,8 @@ func TestAgentsOverlayReadOnly(t *testing.T) {
 	}
 	body := ansi.Strip(app.overlay.agents.view())
 	for _, want := range []string{"NAME", "SOURCE", "MODEL", "EFFORT", "TOOLS", "MAX_TURNS", "STATUS",
-		"explore", "bundled", "reviewer", "/state/agents/", "deepseek-v4.1", "12", "invalid", "broken.md"} {
+		"explore", "bundled", "reviewer", "/state/agents/", "deepseek-v4.1", "12", "invalid", "broken.md",
+		"m model", "e effort", "t max_turns", "d enabled", "r reset"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("definitions browser missing %q:\n%s", want, body)
 		}
@@ -326,8 +410,8 @@ func TestAgentsOverlayReadOnly(t *testing.T) {
 	}
 	app.setSize(120, 30)
 	// Enter expands a row in place. The invalid file shows its parse error and
-	// the user override shows its file path; nothing is written, and no editing
-	// key exists.
+	// the user definition shows the file path and each setting's provenance.
+	// Navigation and expansion never write.
 	press(t, app, "home")
 	press(t, app, "enter")
 	expanded := ansi.Strip(app.overlay.agents.view())
@@ -337,11 +421,219 @@ func TestAgentsOverlayReadOnly(t *testing.T) {
 	press(t, app, "end")
 	press(t, app, "enter")
 	expanded = ansi.Strip(app.overlay.agents.view())
-	if !strings.Contains(expanded, "/state/agents/reviewer.md") {
-		t.Fatalf("expanded row lacks the file path:\n%s", expanded)
+	for _, want := range []string{"/state/agents/reviewer.md", "model:     deepseek-v4.1-flash  (definition)",
+		"effort:    high  (definition)", "max_turns: 12  (definition)", "enabled:   yes  (default)"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded row missing %q:\n%s", want, expanded)
+		}
 	}
-	if strings.Contains(expanded, "edit ") {
-		t.Fatalf("the definitions browser exposes an editing key:\n%s", expanded)
+	if len(host.saves) != 0 || len(host.clears) != 0 {
+		t.Fatalf("navigation wrote settings: saves=%d clears=%d", len(host.saves), len(host.clears))
+	}
+	// r with no override is a no-op and does not write.
+	pressRune(t, app, 'r')
+	if len(host.clears) != 0 {
+		t.Fatalf("r with no override wrote: %d clears", len(host.clears))
+	}
+	if !strings.Contains(app.overlay.agents.view(), "no operator override") {
+		t.Fatalf("notice = %q, want the no-override message", app.overlay.agents.notice)
+	}
+}
+
+func TestAgentsOverlayEditsOverrides(t *testing.T) {
+	host := newAgentHost()
+	host.defs = []AgentDefView{{
+		Name: "reviewer", Source: "user", Path: "/state/agents/reviewer.md",
+		Model: "old-model", ModelSource: "definition",
+		Effort: "high", EffortSource: "definition",
+		Tools: []string{"read_file"}, MaxTurns: 12, MaxTurnsSource: "definition",
+		Status: "active", PromptFirstLine: "Review.",
+	}}
+	app := newTestApp(t, host)
+	app.setSize(120, 30)
+	submitComposer(t, app, "/agents")
+
+	// Model: an empty editor because no override exists; Enter saves it.
+	pressRune(t, app, 'm')
+	if !app.overlay.agents.editing || app.overlay.agents.editKey != "model" {
+		t.Fatalf("editor = %+v, want the model editor", app.overlay.agents)
+	}
+	if got := app.overlay.agents.editBuf; got != "" {
+		t.Fatalf("model editor prefill = %q, want empty", got)
+	}
+	pressRune(t, app, 'x')
+	if got := app.overlay.agents.editBuf; got != "x" {
+		t.Fatalf("printable key buffer = %q, want x", got)
+	}
+	press(t, app, "ctrl+u")
+	typeText(t, app, "new-model")
+	press(t, app, "enter")
+	if len(host.saves) != 1 {
+		t.Fatalf("saves = %d, want 1", len(host.saves))
+	}
+	if host.saves[0].name != "reviewer" || host.saves[0].override.Model == nil ||
+		*host.saves[0].override.Model != "new-model" {
+		t.Fatalf("saved override = %+v", host.saves[0])
+	}
+	view := ansi.Strip(app.overlay.agents.view())
+	if !strings.Contains(view, "new-model*") || !strings.Contains(view, "default") {
+		t.Fatalf("saved model did not reach the row:\n%s", view)
+	}
+	if !strings.Contains(view, "applies to the next process") {
+		t.Fatalf("save notice missing:\n%s", view)
+	}
+
+	// Effort adds to the same override.
+	pressRune(t, app, 'e')
+	typeText(t, app, "low")
+	press(t, app, "enter")
+	if len(host.saves) != 2 {
+		t.Fatalf("saves = %d, want 2", len(host.saves))
+	}
+	if host.saves[1].override.ThinkingEffort == nil || *host.saves[1].override.ThinkingEffort != "low" {
+		t.Fatalf("effort override = %+v", host.saves[1].override)
+	}
+
+	// Max turns adds too.
+	pressRune(t, app, 't')
+	typeText(t, app, "3")
+	press(t, app, "enter")
+	if len(host.saves) != 3 {
+		t.Fatalf("saves = %d, want 3", len(host.saves))
+	}
+	if host.saves[2].override.MaxTurns == nil || *host.saves[2].override.MaxTurns != 3 {
+		t.Fatalf("max turns override = %+v", host.saves[2].override)
+	}
+	view = ansi.Strip(app.overlay.agents.view())
+	if !strings.Contains(view, "3*") {
+		t.Fatalf("saved max turns did not reach the row:\n%s", view)
+	}
+
+	// d disables the agent; the row says so.
+	pressRune(t, app, 'd')
+	if len(host.saves) != 4 {
+		t.Fatalf("saves = %d, want 4", len(host.saves))
+	}
+	if host.saves[3].override.Enabled == nil || *host.saves[3].override.Enabled {
+		t.Fatalf("enabled override = %+v", host.saves[3].override)
+	}
+	view = ansi.Strip(app.overlay.agents.view())
+	if !strings.Contains(view, "disabled") {
+		t.Fatalf("disabled row not labelled:\n%s", view)
+	}
+
+	// r removes every override.
+	pressRune(t, app, 'r')
+	if len(host.clears) != 1 || host.clears[0] != "reviewer" {
+		t.Fatalf("clears = %v, want reviewer", host.clears)
+	}
+	view = ansi.Strip(app.overlay.agents.view())
+	if strings.Contains(view, "new-model*") || strings.Contains(view, "disabled") {
+		t.Fatalf("cleared override still shown:\n%s", view)
+	}
+	if !strings.Contains(view, "old-model") {
+		t.Fatalf("definition model not restored after a clear:\n%s", view)
+	}
+}
+
+func TestAgentsOverlayEditValidationAndCancel(t *testing.T) {
+	host := newAgentHost()
+	host.defs = []AgentDefView{{
+		Name: "reviewer", Source: "user", Model: "old-model", ModelSource: "definition",
+		Tools: []string{"read_file"}, Status: "active",
+	}}
+	app := newTestApp(t, host)
+	app.setSize(120, 30)
+	submitComposer(t, app, "/agents")
+
+	// A non-positive turn cap stays in the editor with an error and no write.
+	pressRune(t, app, 't')
+	typeText(t, app, "0")
+	press(t, app, "enter")
+	if !app.overlay.agents.editing {
+		t.Fatal("invalid max_turns closed the editor")
+	}
+	if !strings.Contains(app.overlay.agents.editErr, "positive integer") {
+		t.Fatalf("edit error = %q, want a positive-integer message", app.overlay.agents.editErr)
+	}
+	if len(host.saves) != 0 {
+		t.Fatalf("invalid max_turns wrote %d saves", len(host.saves))
+	}
+
+	// Esc cancels the edit and leaves the overlay open.
+	press(t, app, "esc")
+	if app.overlay.kind != OverlayAgents {
+		t.Fatalf("overlay after the first Esc = %q, want it open", app.overlay.kind)
+	}
+	if app.overlay.agents.editing {
+		t.Fatal("Esc did not cancel the editor")
+	}
+	// A second Esc closes the browser.
+	press(t, app, "esc")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay after the second Esc = %q, want none", app.overlay.kind)
+	}
+
+	// A failed write keeps the editor open with the host's error.
+	submitComposer(t, app, "/agents")
+	host.saveErr = errors.New("config file is read-only")
+	pressRune(t, app, 'm')
+	typeText(t, app, "next-model")
+	press(t, app, "enter")
+	if !app.overlay.agents.editing {
+		t.Fatal("failed save closed the editor")
+	}
+	if !strings.Contains(app.overlay.agents.editErr, "read-only") {
+		t.Fatalf("edit error = %q, want the write failure", app.overlay.agents.editErr)
+	}
+	press(t, app, "esc")
+	press(t, app, "esc")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay after failed-save Esc = %q, want none", app.overlay.kind)
+	}
+}
+
+func TestAgentsOverlayAcceptsTextEncodedKeys(t *testing.T) {
+	host := newAgentHost()
+	host.defs = []AgentDefView{{
+		Name: "reviewer", Source: "user", Tools: []string{"read_file"}, Status: "active",
+	}}
+	app := newTestApp(t, host)
+	app.setSize(120, 30)
+	submitComposer(t, app, "/agents")
+	// A -ui-json client can send a single-character text message in place of a
+	// key press; the overlay treats it as the same editing command.
+	typeText(t, app, "m")
+	if !app.overlay.agents.editing || app.overlay.agents.editKey != "model" {
+		t.Fatalf("text m did not open the model editor: %+v", app.overlay.agents)
+	}
+	typeText(t, app, "next-model")
+	press(t, app, "enter")
+	if len(host.saves) != 1 || host.saves[0].override.Model == nil ||
+		*host.saves[0].override.Model != "next-model" {
+		t.Fatalf("text-encoded edit did not save: %+v", host.saves)
+	}
+	typeText(t, app, "d")
+	if len(host.saves) != 2 || host.saves[1].override.Enabled == nil || *host.saves[1].override.Enabled {
+		t.Fatalf("text d did not disable: %+v", host.saves)
+	}
+}
+
+func TestAgentsOverlayInputCap(t *testing.T) {
+	host := newAgentHost()
+	host.defs = []AgentDefView{{
+		Name: "reviewer", Source: "user", Tools: []string{"read_file"}, Status: "active",
+	}}
+	app := newTestApp(t, host)
+	app.setSize(120, 30)
+	submitComposer(t, app, "/agents")
+	pressRune(t, app, 'm')
+	typeText(t, app, strings.Repeat("a", maxAgentSettingInputBytes+1))
+	if got := len(app.overlay.agents.editBuf); got != 0 {
+		t.Fatalf("over-cap input buffer = %d bytes, want 0", got)
+	}
+	if !strings.Contains(app.overlay.agents.editErr, "capped") {
+		t.Fatalf("edit error = %q, want the cap message", app.overlay.agents.editErr)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +57,14 @@ type tuiHost struct {
 	catalogSource    string
 	catalogFetchedAt time.Time
 	models           []tui.ModelChoice
-	agents           *agent.AgentCatalog
+	// agents is the effective catalog loaded for this process, with the
+	// startup overrides applied. It is what a new run's spawner uses.
+	agents *agent.AgentCatalog
+	// baseAgents is the discovered catalog before overrides. The definitions
+	// browser applies the current overrides to a copy for display, so a saved
+	// setting is visible immediately without changing what this process runs.
+	baseAgents     *agent.AgentCatalog
+	agentOverrides map[string]agent.AgentOverride
 
 	mu             sync.Mutex
 	info           tui.Info
@@ -226,12 +234,125 @@ func (h *tuiHost) TakeModelWarning() string {
 
 func (h *tuiHost) Workspace() *tools.Workspace { return h.ws }
 
-// Agents returns the definitions loaded for this process. It is read-only and
-// never re-reads the directory.
+// Agents returns the definitions the browser should show: the declared set
+// with the current operator overrides applied for display. The process keeps
+// the catalog it loaded for running children, so a saved override takes effect
+// on the next process. It never re-reads the definition directory.
 func (h *tuiHost) Agents() []tui.AgentDefView {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return agentViews(h.agents)
+	return agentViews(h.overriddenAgentsLocked())
+}
+
+// overriddenAgentsLocked applies the current overrides to a copy of the
+// declared catalog for the browser. The startup catalog already validated
+// them and a save validates its candidate before writing, so a failure here is
+// unreachable; falling back to the declared set keeps the browser usable.
+func (h *tuiHost) overriddenAgentsLocked() *agent.AgentCatalog {
+	if len(h.agentOverrides) == 0 {
+		return h.baseAgents
+	}
+	catalog, err := agent.ApplyAgentOverrides(h.baseAgents, h.agentOverrides)
+	if err != nil {
+		return h.baseAgents
+	}
+	return catalog
+}
+
+// SetAgentOverride replaces one agent's operator override and persists it to
+// the active config file. An empty override removes the entry. The definition
+// file still owns the tool grant and the prompt body; this surface only routes
+// the model, effort, turn cap, and enabled state. A nil base catalog means no
+// definitions were loaded, so every name is unknown.
+func (h *tuiHost) SetAgentOverride(name string, override agent.AgentOverride) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	path := h.cfg.ConfigPath
+	if path == "" {
+		return errors.New("the config file is disabled (-config \"\"); agent overrides cannot be saved")
+	}
+	if _, ok := h.baseAgents.LookupDefinition(name); !ok {
+		return fmt.Errorf("agent_overrides[%q]: no agent definition with that name", name)
+	}
+	if withinWorkspace(h.ws, path) {
+		return errors.New("the config file is inside the workspace; agent overrides are operator state and are never written there")
+	}
+	// Re-read so an external edit to another key, or to another agent's
+	// override, is preserved by the rewrite.
+	file, err := loadFileConfig(path, false)
+	if err != nil {
+		return err
+	}
+	candidate := file.agentOverrides()
+	if override.Empty() {
+		if _, ok := candidate[name]; !ok {
+			return nil
+		}
+		delete(candidate, name)
+	} else {
+		if candidate == nil {
+			candidate = make(map[string]agent.AgentOverride, 1)
+		}
+		candidate[name] = override
+	}
+	if _, err := agent.ApplyAgentOverrides(h.baseAgents, candidate); err != nil {
+		return err
+	}
+	if len(candidate) == 0 {
+		file.AgentOverrides = nil
+	} else {
+		file.AgentOverrides = make(map[string]fileAgentOverride, len(candidate))
+		for key, value := range candidate {
+			file.AgentOverrides[key] = fromAgent(value)
+		}
+	}
+	if err := writeFileConfig(path, file); err != nil {
+		return err
+	}
+	h.agentOverrides = candidate
+	return nil
+}
+
+// ClearAgentOverrides removes every operator override for one agent.
+func (h *tuiHost) ClearAgentOverrides(name string) error {
+	return h.SetAgentOverride(name, agent.AgentOverride{})
+}
+
+// withinWorkspace reports whether path is the workspace root or inside it. A
+// relative config path is resolved against the process working directory, which
+// is normally the workspace. Symlinks are resolved too, so a path that reaches
+// the workspace through another directory is still refused; the lexical and the
+// resolved forms are both checked.
+func withinWorkspace(ws *tools.Workspace, path string) bool {
+	if ws == nil {
+		return false
+	}
+	root, err := filepath.Abs(ws.Dir())
+	if err != nil {
+		return false
+	}
+	target, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if pathWithin(root, target) {
+		return true
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		return pathWithin(root, resolved)
+	}
+	// The file may not exist yet, so resolve the directory it will be created
+	// in and check the joined path.
+	if resolvedDir, err := filepath.EvalSymlinks(filepath.Dir(target)); err == nil {
+		return pathWithin(root, filepath.Join(resolvedDir, filepath.Base(target)))
+	}
+	return false
+}
+
+// pathWithin reports whether target is root or one of its descendants. Both
+// paths must be absolute and clean.
+func pathWithin(root, target string) bool {
+	return target == root || strings.HasPrefix(target, root+string(filepath.Separator))
 }
 
 // SteerSubagent routes one composer line to a running delegated child. The
@@ -262,24 +383,38 @@ func (h *tuiHost) SubagentHistory(sessionID string) ([]agent.HistoryItem, error)
 
 // agentViews converts the loaded catalog into browser rows: active
 // definitions first, then the invalid files whose parse errors a user needs to
-// see.
+// see. The model, effort, and cap are the effective values after overrides;
+// the declared values and a source label say where each came from.
 func agentViews(catalog *agent.AgentCatalog) []tui.AgentDefView {
 	if catalog == nil {
 		return nil
 	}
 	views := make([]tui.AgentDefView, 0, len(catalog.Agents)+len(catalog.Invalid))
 	for _, def := range catalog.Agents {
+		modelSource, effortSource, maxTurnsSource := agentProvenance(def)
+		status := "active"
+		if def.Disabled {
+			status = "disabled"
+		}
 		views = append(views, tui.AgentDefView{
-			Name:            def.Name,
-			Description:     def.Description,
-			Model:           def.Model,
-			Effort:          def.ThinkingEffort,
-			Source:          def.Source,
-			Path:            def.Path,
-			Tools:           append([]string(nil), def.Tools...),
-			MaxTurns:        def.MaxTurns,
-			Status:          "active",
-			PromptFirstLine: firstLine(def.Prompt),
+			Name:             def.Name,
+			Description:      def.Description,
+			Model:            def.Model,
+			Effort:           def.ThinkingEffort,
+			ModelSource:      modelSource,
+			EffortSource:     effortSource,
+			MaxTurnsSource:   maxTurnsSource,
+			DeclaredModel:    def.DeclaredModel,
+			DeclaredEffort:   def.DeclaredThinkingEffort,
+			DeclaredMaxTurns: def.DeclaredMaxTurns,
+			Override:         def.Override,
+			Enabled:          !def.Disabled,
+			Source:           def.Source,
+			Path:             def.Path,
+			Tools:            append([]string(nil), def.Tools...),
+			MaxTurns:         def.MaxTurns,
+			Status:           status,
+			PromptFirstLine:  firstLine(def.Prompt),
 		})
 	}
 	for _, def := range catalog.Invalid {
@@ -292,6 +427,40 @@ func agentViews(catalog *agent.AgentCatalog) []tui.AgentDefView {
 		})
 	}
 	return views
+}
+
+// agentProvenance labels where an effective routing value came from. The
+// browser shows the label in the expanded row and marks an overridden value
+// with an asterisk.
+func agentProvenance(def agent.AgentDefinition) (model, effort, maxTurns string) {
+	model = "inherit"
+	if def.Model != "" {
+		model = "definition"
+	}
+	maxTurns = "inherit"
+	if def.MaxTurns > 0 {
+		maxTurns = "definition"
+	}
+	effort = "inherit"
+	if def.ThinkingEffort != "" {
+		effort = "definition"
+	}
+	if def.Override != nil {
+		if def.Override.Model != nil {
+			model = "override"
+		}
+		if def.Override.ThinkingEffort != nil {
+			effort = "override"
+		} else if def.Override.Model != nil && def.DeclaredModel != def.Model {
+			// A model override without an effort resets the child to the new
+			// model's default, so the declared effort no longer applies.
+			effort = "model default"
+		}
+		if def.Override.MaxTurns != nil {
+			maxTurns = "override"
+		}
+	}
+	return model, effort, maxTurns
 }
 
 // firstLine collapses the first non-empty prompt line for the expanded row.
@@ -588,8 +757,19 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 
 	// Definitions are loaded once per process from the state directory. The
 	// recorded prompt and grant keep a resumed session's replay exact, so this
-	// catalog only affects new children and the /agents browser.
-	definitions := agent.LoadAgents(cfg.StateDir)
+	// catalog only affects new children and the /agents browser. Operator
+	// overrides are applied to a copy; the declared values stay available for
+	// the browser's provenance view.
+	baseDefinitions := agent.LoadAgents(cfg.StateDir)
+	definitions, overrideErr := agent.ApplyAgentOverrides(baseDefinitions, cfg.AgentOverrides)
+	if overrideErr != nil {
+		prefix := "aharness: agent overrides: "
+		if cfg.ConfigPath != "" {
+			prefix = fmt.Sprintf("aharness: config file %s: ", cfg.ConfigPath)
+		}
+		_, _ = fmt.Fprintf(stderr, "%s%s\n", prefix, tui.SanitizeLine(overrideErr.Error()))
+		return nil, exitConfig
+	}
 	for _, warning := range definitions.Warnings {
 		warn(warning)
 	}
@@ -766,6 +946,8 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		sessionID:      store.ID(),
 		source:         catalogSource,
 		agents:         definitions,
+		baseAgents:     baseDefinitions,
+		agentOverrides: cfg.AgentOverrides,
 		info:           info,
 		pendingWarning: strings.Join(startupWarn, "; "),
 	}
