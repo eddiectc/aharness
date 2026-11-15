@@ -55,6 +55,7 @@ rewriting its conclusions.
 | [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
+| [plans/subagent-build.md](plans/subagent-build.md) | Proposed 2026-11-15; no code changed |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
 | [plans/transcript-folding-build.md](plans/transcript-folding-build.md) | Implemented 2026-11-14; real-provider fold smoke pending |
 | [plans/tui-build.md](plans/tui-build.md) | Implemented 2026-11-10 |
@@ -70,6 +71,7 @@ rewriting its conclusions.
 | [research/agent-harness-minimum.md](research/agent-harness-minimum.md) | 2026-11-09; minimum harness and primary sources |
 | [research/agent-tooling-research.md](research/agent-tooling-research.md) | 2026-11-11; tool set, limits, usage, and evaluation methodology |
 | [research/evaluation-research.md](research/evaluation-research.md) | 2026-11-15; private, harness-agnostic evaluation design, task sourcing, metrics, and experiment options |
+| [research/subagent-research.md](research/subagent-research.md) | 2026-11-15; delegation and multi-agent features in Claude Code, Codex, OMP, and OpenCode, and which fit aharness |
 
 ## Link check
 
