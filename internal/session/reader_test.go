@@ -102,6 +102,32 @@ func TestReadAcceptsFinalLineWithoutNewline(t *testing.T) {
 	assertEventsEqual(t, got, []Event{first, second})
 }
 
+func TestReadSnapshotReturnsAValidPrefix(t *testing.T) {
+	first := makeEvent(1, TypeSessionStart, validData)
+	second := makeEvent(2, TypeUserMessage, `{"text":"hi"}`)
+	content := encodeEventLine(t, first) + encodeEventLine(t, second) + `{"v":2,"seq":3`
+	path := writeLogFile(t, []byte(content))
+
+	got, err := ReadSnapshot(path)
+	if err != nil {
+		t.Fatalf("ReadSnapshot: %v", err)
+	}
+	assertEventsEqual(t, got, []Event{first, second})
+}
+
+func TestReadSnapshotReadsACompleteLog(t *testing.T) {
+	first := makeEvent(1, TypeSessionStart, validData)
+	second := makeEvent(2, TypeUserMessage, `{"text":"hi"}`)
+	content := encodeEventLine(t, first) + encodeEventLine(t, second)
+	path := writeLogFile(t, []byte(content))
+
+	got, err := ReadSnapshot(path)
+	if err != nil {
+		t.Fatalf("ReadSnapshot: %v", err)
+	}
+	assertEventsEqual(t, got, []Event{first, second})
+}
+
 func TestReadToleratesTornFinalLine(t *testing.T) {
 	first := makeEvent(1, TypeSessionStart, validData)
 	firstLine := encodeEventLine(t, first)

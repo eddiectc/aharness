@@ -156,6 +156,7 @@ func (h *tuiHost) NewSession(opts tui.RunOptions) (tui.SessionSnapshot, error) {
 	h.store = store
 	h.sessionID = store.ID()
 	h.info = sessionInfo(cfg, store, agent.State{})
+	h.lastSpawner = nil
 	h.lastStatus = ""
 	h.lastReason = ""
 	h.pendingWarning = ""
@@ -230,6 +231,7 @@ func (h *tuiHost) ResumeSession(id string) (tui.SessionSnapshot, error) {
 	h.store = store
 	h.sessionID = store.ID()
 	h.info = sessionInfo(cfg, store, state)
+	h.lastSpawner = nil
 	h.lastStatus = ""
 	h.lastReason = ""
 	h.pendingWarning = ""

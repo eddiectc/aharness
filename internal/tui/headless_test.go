@@ -757,10 +757,34 @@ type rosterHost struct {
 	release  chan struct{}
 	finished chan struct{}
 	once     sync.Once
+
+	mu      sync.Mutex
+	steers  []steerCall
+	history []agent.HistoryItem
 }
 
 func newRosterHost() *rosterHost {
-	return &rosterHost{fakeHost: newFakeHost(), release: make(chan struct{}), finished: make(chan struct{})}
+	return &rosterHost{
+		fakeHost: newFakeHost(), release: make(chan struct{}), finished: make(chan struct{}),
+		history: []agent.HistoryItem{
+			{Kind: agent.HistoryRun, Run: 1, Model: "deepseek-v4.1-flash"},
+			{Kind: agent.HistoryUser, Run: 1, Source: "delegate", Text: "Find the projection."},
+			{Kind: agent.HistoryAssistant, Run: 1, Text: "The projection lives in context.go."},
+		},
+	}
+}
+
+func (h *rosterHost) SteerSubagent(sessionID, text string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.steers = append(h.steers, steerCall{session: sessionID, text: text})
+	return nil
+}
+
+func (h *rosterHost) SubagentHistory(sessionID string) ([]agent.HistoryItem, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]agent.HistoryItem(nil), h.history...), nil
 }
 
 // releaseRun ends the fake child run when the UI is asked to quit.
@@ -814,6 +838,67 @@ func (h *rosterHost) Close() error {
 	h.releaseRun()
 	<-h.finished
 	return nil
+}
+
+func TestHeadlessAgentHubFocusAndSteer(t *testing.T) {
+	host := newRosterHost()
+	script := strings.Join([]string{
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"text","text":"/agent-hub"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"focus on the parser"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Seed:   &Submission{Text: "delegate the work", Source: "-task"},
+		Width:  120,
+		Height: 30,
+		Stdin:  strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil {
+		t.Fatalf("RunHeadless: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d", exit)
+	}
+	if err := host.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	host.mu.Lock()
+	steers := append([]steerCall(nil), host.steers...)
+	host.mu.Unlock()
+	if len(steers) != 1 || steers[0].session != "child-1" || steers[0].text != "focus on the parser" {
+		t.Fatalf("headless steering = %+v", steers)
+	}
+	focused, steeredFrame := false, false
+	for _, line := range parseOutput(t, out.String()) {
+		if line["type"] != "frame" || line["overlay"] != string(OverlayNone) {
+			continue
+		}
+		rows, _ := line["lines"].([]any)
+		var frame strings.Builder
+		for _, row := range rows {
+			fmt.Fprintf(&frame, "%v\n", row)
+		}
+		body := frame.String()
+		if strings.Contains(body, "focused child explore") {
+			focused = true
+		}
+		if strings.Contains(body, "Find the projection.") && strings.Contains(body, "delegation steer") &&
+			strings.Contains(body, "queued") {
+			steeredFrame = true
+		}
+	}
+	if !focused || !steeredFrame {
+		t.Fatalf("no focused child frame with the queued delegation steer:\n%s", out.String())
+	}
 }
 
 func TestHeadlessAgentHubRoster(t *testing.T) {

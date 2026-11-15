@@ -25,6 +25,7 @@ type hostRun struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	control  *runController
+	spawner  *agent.Spawner
 	done     chan agent.Result
 	finished chan struct{}
 }
@@ -60,6 +61,7 @@ type tuiHost struct {
 	mu             sync.Mutex
 	info           tui.Info
 	active         *hostRun
+	lastSpawner    *agent.Spawner
 	closed         bool
 	lastStatus     agent.StopReason
 	lastReason     string
@@ -230,6 +232,32 @@ func (h *tuiHost) Agents() []tui.AgentDefView {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return agentViews(h.agents)
+}
+
+// SteerSubagent routes one composer line to a running delegated child. The
+// child consumes it at its next turn boundary and records it with
+// source=subagent-steer.
+func (h *tuiHost) SteerSubagent(sessionID, text string) error {
+	h.mu.Lock()
+	run := h.active
+	h.mu.Unlock()
+	if run == nil || run.spawner == nil {
+		return fmt.Errorf("no run is active")
+	}
+	return run.spawner.SteerChild(sessionID, text)
+}
+
+// SubagentHistory reads one delegated child's display transcript. The latest
+// run's spawner is kept after the run ends, so a finished child stays readable
+// until the operator leaves the view.
+func (h *tuiHost) SubagentHistory(sessionID string) ([]agent.HistoryItem, error) {
+	h.mu.Lock()
+	spawner := h.lastSpawner
+	h.mu.Unlock()
+	if spawner == nil {
+		return nil, fmt.Errorf("no delegated child has run in this session")
+	}
+	return spawner.ChildHistory(sessionID)
 }
 
 // agentViews converts the loaded catalog into browser rows: active
@@ -451,10 +479,12 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 		ctx:      runCtx,
 		cancel:   cancel,
 		control:  control,
+		spawner:  spawner,
 		done:     make(chan agent.Result, 1),
 		finished: make(chan struct{}),
 	}
 	h.active = run
+	h.lastSpawner = spawner
 	resumedFrom := lastSeq(h.store.Events())
 	h.mu.Unlock()
 

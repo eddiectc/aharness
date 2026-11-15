@@ -1,9 +1,9 @@
 # aharness subagent build plan
 
 - **Date:** 2026-11-15
-- **Status:** implemented 2026-11-15 (milestone 1). Milestones 2–4 are deferred
-  and recorded in §4.3. Current reference documents win where they disagree;
-  implementation updated them in the same change, and §11 records the
+- **Status:** implemented 2026-11-15 (milestones 1–2). Milestones 3–4 are
+  deferred and recorded in §4.3. Current reference documents win where they
+  disagree; implementation updated them in the same change, and §11 records the
   deviations. The real-provider smoke (§5.4) is **not run** while
   `AHARNESS_PROVIDER_TOKEN` is unset.
 - **Source:** [subagent research](../research/subagent-research.md).
@@ -74,9 +74,9 @@ session, and projection machinery unchanged.
 | Accounting | Child turns, usage, and cost in the tool result `details`; folded into `Inspect` and `run_end`; child tokens count against `-max-total-tokens`. |
 | Prompt contract | `prompt-v1` with the delegation paragraph and the agent catalog; frozen `prompt-v0`; recorded `system_prompt`. |
 | Toolset contract | `toolset-v2`; frozen `toolset-v0` and `toolset-v1`; recorded tool allowlist. |
-| Display | `SubagentStarted`/`SubagentProgress`/`SubagentFinished`; one foldable delegate block; `/agent-hub` live roster overlay; `/agents` read-only definitions browser; `Details` decode on replay. |
+| Display | `SubagentStarted`/`SubagentProgress`/`SubagentFinished`; one foldable delegate block; `/agent-hub` live roster overlay; `Enter` child focus with a read-only `agent.History` transcript and delegation steering; `/agents` read-only definitions browser; `Details` decode on replay. |
 | Configuration | `-max-subagents` (default 8); agent directory derived from the state directory; `delegate` withheld from the `-batch` grant. No config-file writer. |
-| Commands | `/agent-hub` (live roster) and `/agents` (definitions browser, read-only in M1). |
+| Commands | `/agent-hub` (live roster and focused child view) and `/agents` (definitions browser, read-only in M1). |
 | Documentation | README, architecture, limits, configuration, tui, testing strategy, and this plan. |
 
 ### 1.2 What stays the same
@@ -493,7 +493,7 @@ A child is a normal run over a normal store, constructed as follows:
 | `Interactive` | false |
 | `Stream` | false |
 | `Controller` | nil; `Esc` reaches the child through the parent's operation context |
-| `Steering` | nil in M1; M2 routes a focused child's steering channel |
+| `Steering` | The spawner's per-child channel. `/agent-hub` focus routes composer lines to it; they record `source=subagent-steer`. |
 | `Pricing` | Resolved with the model |
 | `Display` | The spawner's adapter (§3.8) |
 | Work directory | `<state>/work/<child-id>`, removed at child run end by the existing rule |
@@ -758,9 +758,11 @@ Behavior:
   inside a parent run. That makes the existing one-second `tickMsg`
   (`internal/tui/app.go:426-430`, gated on `m.run.active`) sufficient to
   refresh elapsed time: no new timer, and no tick when idle.
-- M2 extends the overlay: `Enter` on a row focuses that child, and the
-  composer then steers it. Rows for finished children open their transcript
-  read-only.
+- M2 extends the surface: `Enter` on a row focuses that child, closes the
+  roster, and shows the child's read-only `agent.History` in place of the
+  parent transcript; the composer then steers it. Rows for finished children
+  open their transcript read-only. One `Esc` returns to the parent without
+  interrupting the child.
 
 The delegate transcript block is unchanged and complementary: the block is the
 permanent record of what a `delegate` call did, with each task as one nested
@@ -891,10 +893,11 @@ which is the property the plan's §7 trust discussion depends on.
 | `internal/agent/state.go` | Decode the new fields; fold delegate `details`; expose subagent totals. |
 | `internal/agent/display.go` | `SubagentStarted`, `SubagentProgress`, `SubagentFinished`; throttled forwarding from the child display callback. |
 | `internal/tui/model.go`, `view.go` | Delegate block rendering, nested task lines, replay decode. |
-| `internal/tui/agents_overlay.go` | New: `/agent-hub` roster overlay and `/agents` definitions browser; column fitting, row models, elapsed tick, scroll, expand. |
+| `internal/tui/agents_overlay.go` | New: `/agent-hub` roster overlay and `/agents` definitions browser; column fitting, row models, elapsed tick, scroll, expand; `Enter` row selection opens the focused child. |
+| `internal/tui/child_view.go` | New: focused child transcript rendering, queued delegation-steer markers, scrolling, and Esc-to-parent. |
 | `internal/tui/commands.go`, `widgets.go` | Register `/agent-hub` and `/agents`, help entries, `OverlayAgentHub`/`OverlayAgents` kinds and their push/pop, key handling. |
 | `internal/tui/protocol.go` | Optional `subagent_tasks` on tool events; no version bump. |
-| `internal/tui/app.go`, `cmd/aharness/tui.go` | Resume picker excludes children (M2 adds focus and steering). |
+| `internal/tui/app.go`, `cmd/aharness/tui.go` | Resume picker excludes children; `SubagentFocus` host capability and focus key handling; the host keeps the run spawner for child steering and transcript reads. |
 | `cmd/aharness/config.go` | `-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; agent directory from the state directory. |
 | `cmd/aharness/models.go` | Expose catalog resolution for the spawner's model resolver. |
 | `cmd/aharness/run.go`, `tui.go` | Load definitions, build the spawner, wire it into the registry and the display callback. |
@@ -973,7 +976,7 @@ are the smallest additions the recorded contract needs; see §11.
 
 Acceptance is §1.4 for the items it covers.
 
-**M2 — human steering and the child view.**
+**M2 — human steering and the child view.** Implemented.
 
 - `Enter` on a `/agent-hub` row focuses that child, with composer input routed
   to the child's `Config.Steering` and recorded as `source=subagent-steer`.
@@ -1286,7 +1289,11 @@ text above.
 | `-ui-json` roster | "no new event kind" | roster appears in frames plus optional `tool_started`/`tool_finished.subagent_tasks` | No subagent semantic event was added; the plan already allowed the optional task array and the rendered overlay in frames. |
 | Batch grant | "a grant without `delegate`" | the grant is computed from the recorded toolset version | A resumed or forked `toolset-v0`/`toolset-v1` session must not receive a v2-only name (`web_search`, `web_fetch`, `todo`) in its recorded grant; `Project` would reject it as corrupt. |
 | Agent catalog source | bundled agents "compiled in" | `bundledAgents()` in `internal/agent/agents.go` | Keeps the parser, the catalog, and the definitions in one package with no embedded file system. |
+| Child focus surface (M2) | `Enter` "focuses" a row; a child "view" opened from a row | focus replaces the parent transcript with the child view and closes the roster; the composer stays live | An overlay would swallow the composer, so steering from a focused row needs the composer. Closing the roster makes one `Esc` return to the parent, exactly as the milestone's interruption rule requires. |
+| Child transcript source (M2) | rendering `agent.History` | read from the child log without its lock, through the latest run's spawner | The child holds the exclusive session lock while it runs, so a normal open would report `unavailable`. The reader tolerates a torn final line, and `agent.History` caps the projection. |
+| Steering delivery API (M2) | route composer input to `Config.Steering` | `SubagentFocus.SteerSubagent` → `Spawner.SteerChild` → the child channel, with `Config.SteeringSource` | The TUI cannot reach a child runner directly; the spawner is the only object that owns the live child. The source field is what makes the log record `subagent-steer` instead of `steer`. |
 
-Deferred as planned: `/agent-hub` focus and steering (M2), concurrent read-only
-fan-out (M3), and `agent_overrides` with a config writer (M4). The M1 checklist
-in §1.4 is the shipped scope; the manual real-provider smoke was not run.
+Deferred as planned: concurrent read-only fan-out (M3) and `agent_overrides`
+with a config writer (M4). The M1 checklist in §1.4 is the shipped M1 scope; the
+M2 acceptance paragraph in §4.3 is the shipped M2 scope. The manual
+real-provider smoke was not run.

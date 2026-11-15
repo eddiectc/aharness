@@ -96,6 +96,11 @@ func (m *App) startedChild(ev agent.SubagentStarted) {
 	row.tools = append([]string(nil), ev.Tools...)
 	row.status = "running"
 	row.startedAt = time.Now()
+	if f := m.childFocus; f != nil && f.session == row.session {
+		// A continuation can start a new run for the same child session.
+		f.status = "running"
+		f.readOnly = false
+	}
 	slices.SortStableFunc(m.children, func(a, b *subagentRow) int { return a.index - b.index })
 	m.invalidateDelegateBlock(ev.CallID)
 }

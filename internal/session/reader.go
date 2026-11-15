@@ -52,6 +52,32 @@ func ReadHead(path string, maxEvents int) ([]Event, error) {
 	return readFile(path, maxEvents)
 }
 
+// ReadSnapshot replays a session log as of a byte length captured before the
+// read. It is the lock-free read for a log another process may still append to:
+// bytes written after the capture are ignored, and a partial final line inside
+// the snapshot is treated as torn rather than as corruption of the durable
+// prefix. A whole-log Read would race a concurrent writer and could mistake a
+// line that completes just after EOF for a corrupt non-final line.
+func ReadSnapshot(path string) ([]Event, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open session log %s: %w", path, err)
+	}
+	defer func() {
+		// Read-only close; a failure cannot affect the decoded events.
+		_ = file.Close()
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat session log %s: %w", path, err)
+	}
+	stats, err := readEventsLimit(io.LimitReader(file, info.Size()), path, 0)
+	if err != nil {
+		return nil, err
+	}
+	return stats.events, nil
+}
+
 func readFile(path string, maxEvents int) ([]Event, error) {
 	file, err := os.Open(path)
 	if err != nil {

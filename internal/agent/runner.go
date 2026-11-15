@@ -402,7 +402,11 @@ func (r *Runner) consumeSteering(st *runState) (int, error) {
 			if len(text) > maxSteeringBytes {
 				text = capText(text, maxSteeringBytes)
 			}
-			if err := r.recordUserMessage(st.turns, text, sourceSteer); err != nil {
+			source := r.cfg.SteeringSource
+			if source == "" {
+				source = sourceSteer
+			}
+			if err := r.recordUserMessage(st.turns, text, source); err != nil {
 				return count, err
 			}
 			count++

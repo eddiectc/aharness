@@ -322,6 +322,14 @@ diagnostic, not a gate.
   frame is checked for column drops at 120, 80, 70, and 60 columns, an eight-row
   roster plus `+1 more`, and an intent carrying ANSI/control characters renders
   as one inert capped line.
+- Child focus and steering: `Enter` on a roster row renders the child
+  `agent.History` transcript and routes the next composer submission to that
+  child, leaving the parent transcript unchanged. The child log records the
+  line with `source=subagent-steer`, the view labels it `delegation steer` and
+  drops its queued marker on the next progress refresh, and `Esc` leaves the
+  view without interrupting the parent while a second `Esc` does interrupt. A
+  finished child opens read-only and rejects steering with a notice. A host
+  history error appears inside the view rather than as a transcript item.
 - `-list-models`: assert the tab-separated header and rows, exit 0, no session
   file, no task/token requirement, and stale-cache fallback. The header ends
   with `EFFORT`; rows print the normalized comma-separated values and `-` for a

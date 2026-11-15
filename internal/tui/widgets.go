@@ -195,6 +195,9 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 		}
 		if o.kind == OverlayAgentHub {
 			o.scroll = min(o.scroll, max(0, len(m.children)-1))
+			if key == "enter" {
+				return m.focusAgentHubRow()
+			}
 		}
 		return nil
 	case OverlayTable:
@@ -324,7 +327,7 @@ func (m *App) openHelpOverlay() tea.Cmd {
 		"",
 		t.label.Render("keys"),
 		"",
-		"Enter            submit the composer (steering while a run is active)",
+		"Enter            submit the composer (steers a run or a focused child)",
 		"Esc              close overlay, clear composer, or interrupt the operation",
 		"Ctrl-C           first interrupt, second cancel the run",
 		"Ctrl-D           quit (cancels an active run)",

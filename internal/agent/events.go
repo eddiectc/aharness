@@ -181,6 +181,10 @@ const (
 	sourceStuckHint        = "stuck-hint"
 	sourceSteer            = "steer"
 	sourceInterruptHint    = "interrupt-hint"
+	// SourceSubagentSteer marks a composer line routed to a focused child from
+	// the /agent-hub roster. It is exported because the TUI labels the child
+	// transcript entry by source.
+	SourceSubagentSteer = "subagent-steer"
 )
 
 // Interrupt operations recorded in interrupt events.

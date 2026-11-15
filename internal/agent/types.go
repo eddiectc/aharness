@@ -84,6 +84,10 @@ type Config struct {
 	// Steering delivers TUI steering lines consumed at turn boundaries. A nil
 	// channel disables steering.
 	Steering <-chan string
+	// SteeringSource is the user_message source recorded for each steering
+	// line. Empty means "steer"; a delegated child uses "subagent-steer" so its
+	// log distinguishes a human line addressed to the child.
+	SteeringSource string
 	// Controller registers the in-flight operation so an interactive first
 	// SIGINT can cancel it. A nil controller disables interactivity.
 	Controller Controller

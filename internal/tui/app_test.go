@@ -24,9 +24,20 @@ type manualHost struct {
 	todos    []tools.TodoItem
 	startErr error
 
+	// Child focus capability for the /agent-hub tests.
+	childHistory    map[string][]agent.HistoryItem
+	childHistoryErr error
+	steerErr        error
+	steered         []steerCall
+
 	mu    sync.Mutex
 	run   *manualRun
 	calls []startCall
+}
+
+type steerCall struct {
+	session string
+	text    string
 }
 
 type startCall struct {
@@ -52,6 +63,25 @@ func (h *manualHost) History() ([]agent.HistoryItem, error) { return h.history, 
 func (h *manualHost) TodoItems() []tools.TodoItem           { return cloneTodoItems(h.todos) }
 func (h *manualHost) Close() error                          { return nil }
 func (h *manualHost) Workspace() *tools.Workspace           { return h.ws }
+
+func (h *manualHost) SteerSubagent(sessionID, text string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.steerErr != nil {
+		return h.steerErr
+	}
+	h.steered = append(h.steered, steerCall{session: sessionID, text: text})
+	return nil
+}
+
+func (h *manualHost) SubagentHistory(sessionID string) ([]agent.HistoryItem, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.childHistoryErr != nil {
+		return nil, h.childHistoryErr
+	}
+	return append([]agent.HistoryItem(nil), h.childHistory[sessionID]...), nil
+}
 
 func (h *manualHost) Start(sub Submission, opts RunOptions, steer <-chan string, display func(agent.DisplayEvent) error) (Run, error) {
 	h.mu.Lock()

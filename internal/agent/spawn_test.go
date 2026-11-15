@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -593,6 +594,76 @@ Changed body.
 		if schema.Name == "edit_file" || schema.Name == "delegate" {
 			t.Fatalf("continuation offered %q", schema.Name)
 		}
+	}
+}
+
+func TestSpawnerRoutesSteeringToChild(t *testing.T) {
+	f := newSpawnFixture(t, testConfig())
+	steered := false
+	f.spawner.opts.Display = func(ev DisplayEvent) error {
+		progress, ok := ev.(SubagentProgress)
+		if !ok || steered {
+			return nil
+		}
+		steered = true
+		return f.spawner.SteerChild(progress.Session, "check the parser instead")
+	}
+	f.completer.steps = []scriptStep{
+		{resp: model.Response{
+			ToolCalls:    []model.ToolCall{toolCall("c1", "search", `{"intent":"s","pattern":"projection"}`)},
+			FinishReason: model.FinishToolCalls,
+			Usage:        model.Usage{InputTokens: 5, OutputTokens: 2, Reported: true},
+		}},
+		completedStep("done", model.Usage{InputTokens: 6, OutputTokens: 3, Reported: true}),
+	}
+	report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "explore", Task: "find the projection"}))
+	if report.Status != tools.SubagentCompleted {
+		t.Fatalf("report = %+v", report)
+	}
+	if !steered {
+		t.Fatal("no progress boundary to steer at")
+	}
+	if len(f.completer.requests) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(f.completer.requests))
+	}
+	found := false
+	for _, message := range f.completer.requests[1].Messages {
+		if message.Content == "check the parser instead" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("steering did not reach the next child request: %+v", f.completer.requests[1].Messages)
+	}
+
+	items, err := f.spawner.ChildHistory(report.Session)
+	if err != nil {
+		t.Fatalf("ChildHistory: %v", err)
+	}
+	steers := 0
+	for _, item := range items {
+		if item.Kind == HistoryUser && item.Source == SourceSubagentSteer {
+			steers++
+			if item.Text != "check the parser instead" {
+				t.Fatalf("recorded steer = %q", item.Text)
+			}
+		}
+	}
+	if steers != 1 {
+		t.Fatalf("recorded subagent steers = %d, want 1", steers)
+	}
+	// The channel is gone once the child store closes: a late line cannot be
+	// silently queued for a run that no longer exists.
+	if err := f.spawner.SteerChild(report.Session, "too late"); !errors.Is(err, ErrSubagentNotRunning) {
+		t.Fatalf("late SteerChild = %v, want ErrSubagentNotRunning", err)
+	}
+
+	// A child of another parent is not readable through this spawner.
+	other := newSpawnFixture(t, testConfig())
+	other.spawner.opts.ParentSession = "another-parent"
+	if _, err := other.spawner.ChildHistory(report.Session); err == nil {
+		t.Fatal("ChildHistory accepted a session from another parent")
 	}
 }
 

@@ -115,7 +115,11 @@ opt-in and unlimited by default.
   one foldable delegate block per call and adds two display-only commands:
   `/agent-hub`, a live roster of running children with agent, intent, model,
   effort, elapsed, context tokens, turns, cost, and status, and `/agents`, a
-  read-only browser of the discovered definitions. `-max-subagents` (default 8,
+  read-only browser of the discovered definitions. `Enter` on a roster row
+  focuses that child: its read-only transcript replaces the parent view, and
+  composer input becomes steering for that child, recorded in the child log as
+  `source=subagent-steer`; `Esc` returns to the parent without interrupting it.
+  `-max-subagents` (default 8,
   `0` unlimited) bounds fresh children per run. `-batch` records a grant without
   `delegate`, because an unattended run has no `Esc` and no observer. Sessions
   created before this change keep their recorded `prompt-v0` and

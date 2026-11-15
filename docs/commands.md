@@ -75,7 +75,7 @@ change and frames expose the resulting composer, menu rows, and overlay.
 | `/resume` | none | none | pick a previous session in this workspace and resume it (idle) |
 | `/files`, `/file` | none | `Ctrl-O` | workspace file picker (idle) |
 | `/table` | none | `Ctrl-T` | most recent markdown table |
-| `/agent-hub` | none | none | live delegated-child roster; works during a run |
+| `/agent-hub` | none | none | live delegated-child roster; Enter focuses a child for viewing and steering; works during a run |
 | `/agents` | none | none | read-only agent definitions browser |
 | `/image` | none | `Ctrl-G` | image viewer for the most recent image block |
 | `/rich` | none | `Ctrl-R` toggles | set rich assistant rendering |
@@ -263,6 +263,16 @@ keeps its terminal status for the rest of the run. Idle, it reports that no
 child is running. Trailing words are accepted and ignored, like every
 no-argument command. It adds no protocol event: the roster appears in
 `-ui-json` `frames` and `snapshots`.
+
+`Enter` on a row opens that child's transcript and focuses it. While the child
+runs, composer input is steering for that child rather than the parent: the
+child consumes it at its next turn boundary and records it with
+`source=subagent-steer`, which the child view labels `delegation steer`. The
+parent transcript is unchanged. A finished child opens read-only and rejects
+steering with a notice. `Esc` returns to the parent without interrupting the
+child; with a non-empty composer it clears the draft first, and a second `Esc`
+at the parent interrupts as usual. The focused view is not an overlay, so
+`-ui-json` renders it in frame lines and reports `overlay: "none"`.
 
 ### `/agents`
 

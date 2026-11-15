@@ -121,6 +121,14 @@ func (m *App) View() tea.View {
 }
 
 func (m *App) baseFrame() string {
+	if m.childFocus != nil {
+		parts := []string{m.headerLine(), m.childFocus.view.View()}
+		if suggestions := m.suggestionView(); suggestions != "" {
+			parts = append(parts, suggestions)
+		}
+		parts = append(parts, m.composerView(), m.statusLine())
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	}
 	parts := []string{m.headerLine(), m.viewport.View()}
 	if todo := m.todoView(); todo != "" {
 		parts = append(parts, todo)
@@ -190,7 +198,16 @@ func (m *App) statusLine() string {
 	if runNo == 0 {
 		runNo = m.nextRun
 	}
-	parts := []string{"model " + SanitizeLine(modelName), fmt.Sprintf("run %d", runNo), turnsLabel, tokensLabel, state + extra, renderMode}
+	parts := make([]string, 0, 9)
+	if m.childFocus != nil {
+		status := m.childFocus.status
+		if status == "" {
+			status = "running"
+		}
+		parts = append(parts, "child "+SanitizeLine(m.childFocus.agent)+" "+
+			shortSessionID(m.childFocus.session)+" "+SanitizeLine(status)+" · Esc back")
+	}
+	parts = append(parts, "model "+SanitizeLine(modelName), fmt.Sprintf("run %d", runNo), turnsLabel, tokensLabel, state+extra, renderMode)
 	if m.overlay.kind != OverlayNone {
 		parts = append(parts, "overlay "+string(m.overlay.kind))
 	}

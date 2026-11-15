@@ -1,9 +1,10 @@
 # aharness limits and timeouts
 
 - **Date:** 2026-11-15
-- **Status:** current for v1, the shipped TUI (including transcript folding and
-  the todo widget), model discovery, thinking effort, web search, and the
-  flag/env/config-file configuration layers.
+- **Status:** current for v1, the shipped TUI (including transcript folding, the
+  todo widget, delegated subagents, and the focused child view), model
+  discovery, thinking effort, web search, and the flag/env/config-file
+  configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
   [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
@@ -200,6 +201,8 @@ Other event payloads:
 | Roster | Visible rows | 8 plus header and `+N more` | Keeps `/agent-hub` readable at 24 rows; more is scrollable. |
 | Roster | Intent text | 200 bytes, one line | The full prompt stays in the tool-call arguments. |
 | Roster | Elapsed | TUI clock | Computed from the start event; not carried in events, so throttled progress cannot skew it. |
+| Child view | Tool body | 12 lines / 2 KiB | A focused transcript is a view; the full result stays in the child session log. |
+| Child view | Queued steering markers | 8 | Display only; the child's steering channel still holds up to 64 lines. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration

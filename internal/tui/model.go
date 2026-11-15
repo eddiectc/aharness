@@ -185,6 +185,10 @@ type App struct {
 	// children is the live delegated-child roster for the active run. It is
 	// display-only and rebuilt from SubagentStarted/Progress/Finished.
 	children []*subagentRow
+	// childFocus is the focused delegated child view opened from /agent-hub.
+	// It replaces the parent transcript and routes composer input to the child
+	// until Esc.
+	childFocus *childFocus
 	// todos is the checklist last published by the todo tool. It is
 	// display-only and restored from the session log through TodoProvider.
 	todos []tools.TodoItem
@@ -381,6 +385,7 @@ func (m *App) applySessionSnapshot(snapshot SessionSnapshot) {
 	m.nextRun = 0
 	m.run = liveRun{}
 	m.children = nil
+	m.childFocus = nil
 	m.runStartedCount = 0
 	m.runFinishedCount = 0
 	m.steer = nil
@@ -543,6 +548,9 @@ func (m *App) submit(text, source string) tea.Cmd {
 			m.historyIndex = len(m.inputHistory)
 			return cmd
 		}
+	}
+	if m.childFocus != nil {
+		return m.submitChildSteering(text)
 	}
 	if m.run.active {
 		return m.submitSteering(text)

@@ -442,6 +442,7 @@ internal/tui/
   markdown.go    # Glamour rendering, raw/rich toggle, table extraction
   widgets.go     # table/file/model/effort/session overlays and focus
   agents_overlay.go # /agent-hub roster and /agents definitions browser
+  child_view.go  # focused child transcript and delegation steering view
   image.go       # workspace image resolver, ntcharts picture, viewer
   protocol.go    # -ui-json v1 commands, events, frames, snapshots
   headless.go    # Bubble Tea + fake input/output + x/vt driver
@@ -562,7 +563,10 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   `seq` starts at 1 and increments by 1. `Sync` flushes the file; `Close` syncs,
   unlocks, and closes. `session.Read(path)` replays a whole log;
   `session.ReadHead(path, maxEvents)` validates and returns only its prefix for
-  metadata listing without reading whole logs.
+  metadata listing without reading whole logs; `session.ReadSnapshot(path)`
+  replays the log as of a byte length captured before the read, so a focused
+  child view can read a log another process still appends to without treating a
+  just-completed line as corruption.
 - `agent.Inspect(events) (State, error)` — pure function of the durable log. It
   reconstructs session metadata, cumulative turns and usage, the last run's
   effective configuration (including the latest recorded thinking effort) and
@@ -627,7 +631,9 @@ schema version.
   status, user messages, assistant markdown source, tool calls/results paired by
   call ID (anomalies retained), hints, notices, and partial text. `final` does
   not duplicate the assistant text. Unknown events/fields are ignored; malformed
-  known payloads are errors.
+  known payloads are errors. The `/agent-hub` child focus reuses
+  `agent.History` for a child log, read without taking the child's session lock
+  so a running child stays viewable; a torn final line is ignored.
 - **Run model.** One process owns one active session and one lock at a time.
   Each submitted message while idle starts one run; `run_start.ResumedFromSeq`
   is the current last sequence. Cumulative turns/tokens and the per-run clock
@@ -684,7 +690,9 @@ schema version.
    `interactive`/`stream`; sync. Append the task `user_message` when this run has
    one, with its source, and sync.
 5. Consume any already-pending steering lines as `user_message` events with
-   `source=steer`, then check the cumulative turn/token budgets and the per-run
+   `source=steer` (or `source=subagent-steer` inside a delegated child, where
+   the line was routed from `/agent-hub` focus), then check the cumulative
+   turn/token budgets and the per-run
    wall clock only when the corresponding flag is explicit and positive. A
    reached explicit limit appends `limit` and terminates; otherwise those
    budgets are unlimited.
@@ -737,9 +745,11 @@ never sends a tool result without a preceding call. Multiple tool calls execute
 sequentially in the order returned; correctness does not depend on provider-side
 `parallel_tool_calls` support. `seq` and `turn` continue across runs. In TUI
 mode steering is the composer submission while a run is active; it is consumed
-only at turn boundaries and never interrupts a tool round. Batch has no
-steering. `SIGINT` is the batch interruption mechanism; the TUI uses `Esc`,
-`Ctrl-C`, and its signal handler.
+only at turn boundaries and never interrupts a tool round. A `/agent-hub` child
+focus routes the composer to that child's steering channel instead, and the
+child records it with `source=subagent-steer`; the parent transcript gains
+nothing. Batch has no steering. `SIGINT` is the batch interruption mechanism;
+the TUI uses `Esc`, `Ctrl-C`, and its signal handler.
 
 ### 4.2 Terminal states
 
@@ -1088,7 +1098,7 @@ it on every turn. Compaction never mutates the log.
 |---|---|---|
 | `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `agent` (a child's definition name), optional `tools` (a recorded allowlist; absent means every tool of the version), and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
 | `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`, `require_usage`, and the effective `pricing` snapshot. |
-| `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
+| `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `subagent-steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage with cached/cache-write/reasoning subsets and `reported`, optional `cost_micro_usd`, latency, attempt, `streamed`; 1 MiB total canonical content. |
 | `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |

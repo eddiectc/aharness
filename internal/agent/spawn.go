@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,7 +76,17 @@ type Spawner struct {
 	mu        sync.Mutex
 	spawned   int
 	childUse  model.Usage
+	// steering routes composer lines to a running child by session ID. A child
+	// entry exists only while its run is in flight.
+	steering map[string]chan string
 }
+
+// ErrSubagentNotRunning reports steering addressed to a child that is not in
+// flight, for example after it finished or before it started.
+var ErrSubagentNotRunning = errors.New("the child is not running")
+
+// ErrSubagentSteeringFull reports a child steering channel at capacity.
+var ErrSubagentSteeringFull = errors.New("the child steering queue is full")
 
 // NewSpawner builds the per-run spawner. A nil definition set yields a spawner
 // that reports every task as failed with the available names.
@@ -82,12 +94,96 @@ func NewSpawner(opts SpawnerOptions) *Spawner {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Spawner{opts: opts}
+	return &Spawner{opts: opts, steering: make(map[string]chan string)}
 }
 
 // Agents returns the discovered catalog the delegate tool validates against.
 func (s *Spawner) Agents() []tools.AgentInfo {
 	return s.opts.Definitions.SpawnInfos()
+}
+
+// SteerChild routes one composer line to a running child. It never blocks: a
+// full queue is an error, and a missing child means the run already finished.
+func (s *Spawner) SteerChild(sessionID, text string) error {
+	text = cleanText(text)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch := s.steering[sessionID]
+	if ch == nil {
+		return ErrSubagentNotRunning
+	}
+	select {
+	case ch <- text:
+		return nil
+	default:
+		return ErrSubagentSteeringFull
+	}
+}
+
+// ChildHistory returns the display transcript of one delegated child. It reads
+// the child log without taking the session lock, so it works while the child
+// run still holds it; a torn final line is tolerated by the reader. The session
+// must be a delegated child of this spawner's parent session.
+func (s *Spawner) ChildHistory(sessionID string) ([]HistoryItem, error) {
+	id, err := session.CanonicalID(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("child session %q: %w", sessionID, err)
+	}
+	events, err := session.ReadSnapshot(session.SessionPath(s.opts.Config.StateDir, id))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) && s.childRegistered(id) {
+			// SubagentStarted is emitted before the child store is created, so
+			// an immediate focus can beat the first append.
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(events) == 0 {
+		if s.childRegistered(id) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("session %s has no session_start", id)
+	}
+	if events[0].Type != session.TypeSessionStart {
+		return nil, fmt.Errorf("session %s has no session_start", id)
+	}
+	var start sessionStartData
+	if err := decodeEventData(events[0], &start); err != nil {
+		return nil, fmt.Errorf("session %s has an unreadable session_start: %w", id, err)
+	}
+	if start.ParentSession != s.opts.ParentSession || start.ParentCallID == "" {
+		return nil, fmt.Errorf("session %s is not a child of this session", id)
+	}
+	return History(events)
+}
+
+// registerSteering creates the channel a child consumes at its turn
+// boundaries.
+func (s *Spawner) registerSteering(sessionID string) chan string {
+	ch := make(chan string, 64)
+	s.mu.Lock()
+	if s.steering == nil {
+		s.steering = make(map[string]chan string)
+	}
+	s.steering[sessionID] = ch
+	s.mu.Unlock()
+	return ch
+}
+
+func (s *Spawner) unregisterSteering(sessionID string) {
+	s.mu.Lock()
+	delete(s.steering, sessionID)
+	s.mu.Unlock()
+}
+
+// childRegistered reports whether the child run is in flight.
+func (s *Spawner) childRegistered(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.steering[sessionID] != nil
 }
 
 // Spawn executes the call's tasks in array order and returns one report per
@@ -134,6 +230,10 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 
 	childCfg := s.childConfig(def, modelID, effort, resolution, call)
 	sessionID := session.NewID()
+	steering := s.registerSteering(sessionID)
+	defer s.unregisterSteering(sessionID)
+	childCfg.Steering = steering
+	childCfg.SteeringSource = SourceSubagentSteer
 	childCfg.Display = nil
 	adapter := s.newChildDisplay(call, index, def.Name, sessionID, modelID, effort, childCfg.Tools, resolution.Pricing).withIntent(spec.Task)
 	if err := adapter.started(); err != nil {
@@ -196,6 +296,10 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 		}
 	}
 	childCfg := s.continuedConfig(state, call)
+	steering := s.registerSteering(spec.Session)
+	defer s.unregisterSteering(spec.Session)
+	childCfg.Steering = steering
+	childCfg.SteeringSource = SourceSubagentSteer
 	childCfg.Display = nil
 	agentName := state.Agent
 	if agentName == "" {

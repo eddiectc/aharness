@@ -5,7 +5,8 @@
   picker from [model discovery](plans/model-discovery-build.md), the thinking
   effort controls from [thinking effort](plans/thinking-effort-build.md), the
   transcript folding from [transcript folding](plans/transcript-folding-build.md),
-  and the persistent todo widget.
+  the persistent todo widget, and the delegated-child roster and focus view
+  from [subagent build](plans/subagent-build.md) M1–M2.
   The full contract and milestone rationale are in
   [tui-build.md](plans/tui-build.md); this document records the shipped surface
   and verification status.
@@ -68,6 +69,11 @@ closing the old store; the old log remains durable and resumable.
 | `Ctrl-W`/`Ctrl-K` | delete previous word / to end | delete previous word / to end |
 | `Up`/`Down` | input history | input history |
 | `PgUp`/`PgDn` | scroll the transcript | scroll the transcript |
+
+While an `/agent-hub` child is focused, `Enter` submits the composer as steering
+for that child, `PgUp`/`PgDn` and the wheel scroll the child transcript, and
+`Esc` clears a non-empty composer and then returns to the parent without
+interrupting the child. A second `Esc` at the parent interrupts as usual.
 | Wheel | scroll the transcript or the top overlay | scroll the transcript or the top overlay |
 | `Shift`+drag, `Shift`+middle-click | terminal-side text selection and paste (the mouse capture takes both otherwise) | terminal-side text selection and paste |
 | `Ctrl-R` | toggle rich/raw assistant rendering; in the model picker, refresh the catalog | toggle rich/raw |
@@ -298,6 +304,32 @@ is computed by the TUI from its receipt of the start event, so it keeps moving
 during a long tool call and is unaffected by throttled progress. Every string is
 sanitized; the intent is one capped line and the full prompt stays in the
 tool-call arguments. `Esc` closes the overlay without interrupting a child.
+
+### Child focus and delegation steering
+
+`Enter` on a roster row opens that child's transcript in place of the parent's
+transcript and focuses the child. The view renders `agent.History` for the
+child session: run headers with terminal status, the delegated task, assistant
+text in the active rich/raw mode, tool calls with a capped output excerpt, and
+notices. The child log is read without taking its session lock, so the view
+works while the child still writes; a torn final line is ignored.
+
+While the child is running, a composer submission is routed to that child's
+steering channel instead of the parent's. The child consumes it at its next
+turn boundary and records it as a `user_message` with
+`source=subagent-steer`; the view labels that line `delegation steer`, and the
+parent transcript gains no item. A line sent while a model call is in flight
+shows as `queued…` and becomes a recorded line once the child reaches the next
+boundary. `SubagentProgress` and `SubagentFinished` refresh the view; it never
+polls a timer. A finished child opens read-only and refuses steering with a
+notice.
+
+`Esc` returns to the parent without interrupting the child; with a non-empty
+composer it first clears the draft, like the parent view. A second `Esc` at the
+parent interrupts as usual. `PgUp`/`PgDn` and the wheel scroll the child
+transcript; scrolling up detaches from the live tail and returning to the
+bottom reattaches. The view adds no protocol event: `-ui-json` sees it in frame
+lines, and `frame.overlay` is `none` because focus is not an overlay.
 
 ### `/agents` definitions browser
 

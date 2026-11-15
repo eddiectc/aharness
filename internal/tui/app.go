@@ -195,6 +195,15 @@ type AgentProvider interface {
 	Agents() []AgentDefView
 }
 
+// SubagentFocus is an optional Host capability for the /agent-hub child view.
+// SteerSubagent routes a composer line to a running child and reports why it
+// could not be queued; SubagentHistory reads that child's display transcript.
+// Both are keyed by the child session ID announced in SubagentStarted.
+type SubagentFocus interface {
+	SteerSubagent(sessionID, text string) error
+	SubagentHistory(sessionID string) ([]agent.HistoryItem, error)
+}
+
 // Details is optional host metadata for the details overlay.
 type Details struct {
 	TracePath        string
@@ -499,6 +508,10 @@ func (m *App) handleMouseWheel(msg tea.MouseWheelMsg) tea.Cmd {
 		m.overlay.wheel(up)
 		return nil
 	}
+	if m.childFocus != nil {
+		m.scrollChildFocus(up, mouseWheelLines)
+		return nil
+	}
 	m.scrollTranscript(up, mouseWheelLines)
 	return nil
 }
@@ -542,8 +555,23 @@ func (m *App) layout() {
 		return
 	}
 	header, composerH, status := 1, m.composerHeight(), 1
-	transcript := max(1, m.height-header-composerH-status-m.todoHeight())
+	todoH := m.todoHeight()
+	if m.childFocus != nil {
+		// The child view replaces the parent transcript and hides the parent's
+		// todo widget, so the full transcript area belongs to the child.
+		todoH = 0
+	}
+	transcript := max(1, m.height-header-composerH-status-todoH)
 	m.viewport.SetSize(m.width, transcript)
+	if f := m.childFocus; f != nil {
+		f.view.SetSize(m.width, transcript)
+		if f.width != m.width {
+			m.rebuildChildFocus()
+		}
+		if f.follow {
+			f.view.GotoBottom()
+		}
+	}
 	m.composer.SetWidth(max(1, m.width-2))
 	m.composer.SetHeight(m.editorHeight())
 }
@@ -659,6 +687,28 @@ func (m *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		if isEnterKey(msg) && !enterAddsNewline(msg) {
 			return m.runSuggestion()
+		}
+	}
+
+	if m.childFocus != nil {
+		switch keystroke {
+		case "esc":
+			if m.composer.Value() != "" {
+				m.clearComposer()
+				m.layout()
+				return nil
+			}
+			// Esc leaves focus without touching the parent operation, so the
+			// child keeps running. A second Esc at the parent interrupts.
+			m.clearChildFocus()
+			m.notice = "returned to the parent"
+			return nil
+		case "pgup":
+			m.scrollChildFocus(true, m.childFocus.view.Height())
+			return nil
+		case "pgdown":
+			m.scrollChildFocus(false, m.childFocus.view.Height())
+			return nil
 		}
 	}
 
@@ -854,6 +904,7 @@ func (m *App) startRun(text, source string) tea.Cmd {
 		m.appendNotice(agent.NoticeError, "no session host")
 		return nil
 	}
+	m.childFocus = nil
 	m.nextRun++
 	header := &transcriptItem{kind: itemRun, run: m.nextRun, model: m.nextModel, dialect: string(m.nextDialect)}
 	userItem := &transcriptItem{kind: itemUser, run: m.nextRun, source: source, text: text, acked: true}
@@ -1161,9 +1212,15 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.startedChild(ev)
 	case agent.SubagentProgress:
 		m.progressedChild(ev)
+		m.refreshChildFocus(ev.Session)
 		m.ensureContent()
 	case agent.SubagentFinished:
 		m.finishedChild(ev)
+		if f := m.childFocus; f != nil && f.session == ev.Session {
+			f.status = SanitizeLine(ev.Status)
+			f.readOnly = true
+		}
+		m.refreshChildFocus(ev.Session)
 		m.ensureContent()
 	case agent.MessageRecorded:
 		m.ackMessage(ev)
@@ -1278,6 +1335,11 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	// The roster describes a live run only; the delegate block keeps the
 	// recorded table afterwards.
 	m.children = nil
+	if m.childFocus != nil {
+		// The child log's run_end is authoritative for a child that stopped with
+		// the parent; a finished child stays readable until Esc.
+		m.refreshChildFocus(m.childFocus.session)
+	}
 	m.run.pending = map[string]*transcriptItem{}
 	m.run.streamed = nil
 	if thinking := m.run.thinking; thinking != nil {
