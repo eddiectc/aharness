@@ -175,6 +175,58 @@ func Inspect(events []session.Event) (State, error) {
 	return state, nil
 }
 
+// SessionSummary is the metadata a session picker needs from the head of a
+// session log. It is not a replacement for Inspect: it does not validate the
+// rest of the log or reconstruct cumulative counters.
+type SessionSummary struct {
+	Workspace    string
+	Provider     string
+	Model        string
+	FirstMessage string
+}
+
+// Summarize decodes the session_start event and the first user message from a
+// log head produced by session.ReadHead. Unknown event types are ignored. A
+// missing session_start or a malformed known payload is a corrupt-log error.
+func Summarize(events []session.Event) (SessionSummary, error) {
+	if len(events) == 0 || events[0].Type != session.TypeSessionStart {
+		return SessionSummary{}, fmt.Errorf("%w: session_start event missing", session.ErrCorrupt)
+	}
+	var summary SessionSummary
+	found := false
+	messageFound := false
+	for _, ev := range events {
+		switch ev.Type {
+		case session.TypeSessionStart:
+			if found {
+				return SessionSummary{}, fmt.Errorf("%w: session_start appears more than once", session.ErrCorrupt)
+			}
+			var data sessionStartData
+			if err := decodeEventData(ev, &data); err != nil {
+				return SessionSummary{}, fmt.Errorf("%w: %w", session.ErrCorrupt, err)
+			}
+			found = true
+			summary.Workspace = data.Workspace
+			summary.Provider = data.Provider
+			summary.Model = data.Model
+		case session.TypeUserMessage:
+			if messageFound {
+				continue
+			}
+			var data userMessageData
+			if err := decodeEventData(ev, &data); err != nil {
+				return SessionSummary{}, fmt.Errorf("%w: %w", session.ErrCorrupt, err)
+			}
+			messageFound = true
+			summary.FirstMessage = data.Text
+		}
+	}
+	if !found {
+		return SessionSummary{}, fmt.Errorf("%w: session_start event missing", session.ErrCorrupt)
+	}
+	return summary, nil
+}
+
 // RestoreTodo returns the checklist recorded by the last successful todo tool
 // result in the log, so a resumed, forked, or follow-up run starts with the
 // list the model last set instead of an empty one. The rendered tool output is

@@ -253,6 +253,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Markdown nesting | 16 levels | Deeper input falls back to plain text with a notice. |
 | Table columns / rows | 12 / 500 displayed | Column width cap 40 cells; excess scrolls/folds with a marker. |
 | Widget list / file picker entries | 1,000 / 2,000 per directory | File picker does not recurse, read contents, follow symlinks, or list `.git`; filter query is 64 bytes. |
+| Resume picker sessions / head | 100 per workspace / 64 events | Same canonical workspace only; the active session is excluded; unreadable, linked, or corrupt logs are skipped; each row preview is sanitized and cut to 160 bytes. |
 | Overlay stack | 4 | Deeper requests close the oldest non-modal overlay with a notice. |
 | Image file / dimensions | 8 MiB / 4096×4096 | Larger files are rejected with a placeholder. `image.DecodeConfig` runs first. |
 | Decoded image pixels | 16 Mi (4096×4096 max) | Larger images are rejected before full decode. |
@@ -296,7 +297,9 @@ constant:
   only when those explicit flags are set.
 - Thinking effort values; bounded by the model's normalized catalog list (at
   most 16 values, 32 bytes each). No run budget is added.
-- Number of concurrent sessions; one process per session, no global cap.
+- Number of concurrent sessions; one process holds one active session and one
+  lock at a time. `/new` and `/resume` replace the active session while idle;
+  there is no global cap.
 - Child process memory and CPU; external isolation is the boundary.
 - Workspace size; file tools enforce their own file-size caps.
 - Provider token length; held in memory only.

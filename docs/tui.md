@@ -44,8 +44,10 @@ TUI and `-ui-json`:
   a terminal/setup/sync/internal failure.
 
 The session log and the CLI batch contract are unchanged. A TUI process owns
-one session, one exclusive `flock`, and one writer for its lifetime; each
-submitted message while idle starts one run.
+one active session, one exclusive `flock`, and one writer at a time; each
+submitted message while idle starts one run. `/new` and `/resume` replace that
+session in place while idle, opening and validating the next session before
+closing the old store; the old log remains durable and resumable.
 
 ## Keys
 
@@ -110,9 +112,26 @@ completes, `Enter` runs the highlighted command, and `Esc` dismisses. Command
 names are case-insensitive; a space starts argument mode; unknown `/text` is
 sent as a normal message, and `-task`/`-task-file` text is always literal.
 While a run is active, commands still work, but actions that only affect the
-next run are disabled with a notice. The full reference — syntax, arguments,
-key equivalents, idle/active behavior, `-ui-json` mapping, and examples — is
-in [commands.md](commands.md). The help overlay (`F1`) lists every command.
+next run and session switching are disabled with a notice. `/new` starts a
+fresh session in the current workspace; `/resume` opens a picker of previous
+sessions recorded for the same workspace, excluding the active one. The full
+reference — syntax, arguments, key equivalents, idle/active behavior,
+`-ui-json` mapping, and examples — is in [commands.md](commands.md). The help
+overlay (`F1`) lists every command.
+
+## Session picker
+
+`/new` replaces the active session with a fresh log in the same workspace and
+resets the transcript and counters. `/resume` opens a filtered list of previous
+sessions recorded for the same canonical workspace, newest first and excluding
+the active session. Each row shows the first task, session ID prefix,
+modification time, and recorded model; `Up`/`Down` select, `Enter` resumes, and
+`Esc` closes the picker. Both commands are idle-only. A successful switch
+replays the target's history and counters and emits a display-only `notice`
+with kind `session`; a locked, corrupt, or other-workspace target reports the
+error and leaves the active session open. See
+[commands.md § `/new`](commands.md#new) and
+[commands.md § `/resume`](commands.md#resume).
 
 ## Model picker
 
@@ -311,8 +330,9 @@ Output lines:
   (`row`, `col`, `visible`, `shape`), `lines` (exactly height entries), `styles`
   (coalesced `row`, `col`, `width`, `text`, `fg`, `bg`, `attrs`), `images`
   (`id`, `path`, `alt`, `row`, `col`, `width`, `height`, `protocol`),
-  `color_profile`, `no_color`, `image_protocol`, `styles_truncated`. Frames
-  contain no ANSI and no raw image bytes.
+  `color_profile`, `no_color`, `image_protocol`, `styles_truncated`. `overlay`
+  is `none`, `help`, `details`, `table`, `file`, `model`, `effort`, `session`,
+  or `image`. Frames contain no ANSI and no raw image bytes.
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
   `model_changed`, `notice`, `error`, with the fields documented in
   [tui-build.md §2.7](plans/tui-build.md#27-machine-readable-ui-mode---ui-json).
@@ -352,6 +372,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Markdown source / blocks / nesting | 64 KiB / 4,000 / 16 | Over-cap input falls back to plain text with a notice. |
 | Table columns / rows | 12 / 500 | Column width cap 40 cells; the overlay scrolls horizontally. |
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
+| Resume picker sessions / head | 100 per workspace / 64 events | Same canonical workspace only; the active session is excluded; unreadable or corrupt logs are skipped; the first-message preview is sanitized and cut to 160 bytes. |
 | Overlay stack | 4 | Deeper requests close the oldest overlay. |
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |

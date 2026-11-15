@@ -75,7 +75,9 @@ real timeouts for subprocess and signal tests.
   file; unknown fields and event types; run/control payloads; `seq`/`session`
   validation; UUID validation; exclusive and shared `flock`; torn-final repair
   versus corrupt-final rejection; valid final line without a newline; fork copy
-  with new session/seq and preserved payloads/timestamps; `session_repair`.
+  with new session/seq and preserved payloads/timestamps; `session_repair`;
+  `ReadHead` limit, corrupt-prefix rejection, and a summary that decodes only
+  `session_start` plus the first user message.
 - Resume/fork state: cumulative turns/usage reconstruction; recorded run
   budgets (`max_turns`, `max_total_tokens`, `session_timeout_ms`,
   `model_timeout_ms`) ignored for enforcement; pending-call detection;
@@ -142,10 +144,13 @@ real timeouts for subprocess and signal tests.
 - TUI slash commands: parser case/aliases/arguments, `/help` lists the
   registry, known commands execute without starting a run, unknown `/text` and
   seeded tasks fall through as messages, `/model`/`/effort` arguments and
-  active-run notices, and `/interrupt`/`/cancel`/`/quit` run control. The
-  completion menu covers prefix matching, alias de-duplication, Up/Down
-  selection and windowing, Tab completion, Enter execution, Esc precedence,
-  history-recall suppression, and the minimum-size layout cap.
+  active-run notices, and `/interrupt`/`/cancel`/`/quit` run control. `/new`
+  and `/resume` are idle-only, pass the next-run settings, replace the
+  transcript and counters from the host snapshot, open the session picker, and
+  emit the display-only `session` notice. The completion menu covers prefix
+  matching, alias de-duplication, Up/Down selection and windowing, Tab
+  completion, Enter execution, Esc precedence, history-recall suppression, and
+  the minimum-size layout cap.
 - TUI thinking effort: `F2` opens and closes the next-run picker; it is
   disabled with a notice during a run; entries are `provider default` then the
   model's values in canonical order; a model with no effort values shows a
@@ -365,7 +370,11 @@ diagnostic, not a gate.
   frames. Include catalog-backed picker contents, model-switch effects on the
   next run, `Ctrl-R` refresh success/selection preservation/failure notice and
   in-flight cancellation on close, and the offline-resume one-entry fallback
-  that `Ctrl-R` expands.
+  that `Ctrl-R` expands. `/new` and `/resume` switch the live store: the picker
+  lists only same-workspace sessions, the resumed transcript and counters are
+  replayed, a second run appends to the resumed log, and the newly created
+  session remains an empty `session_start`; workspace mismatches, locked
+  targets, and failed switches leave the current session active.
 - Batch: preserve the v1 stdout/stderr, streaming, resume/fork, and exit codes;
   non-TTY invocations batch automatically; `-interactive` is an unknown flag.
 - TUI terminal safety: resize mid-stream, model/tool text containing OSC 52,
@@ -426,7 +435,10 @@ URL/limits and that new sessions use the documented
 
 For each dialect: run a non-streamed batch task and a streamed batch task,
 then run the TUI through new, stream, tool round, steer, `Esc`/first `Ctrl-C`,
-second `Ctrl-C`, a second message, quit, resume, and fork. In the TUI, open the
+second `Ctrl-C`, a second message, quit, resume, and fork. In the TUI, use
+`/new` to confirm the transcript resets; use `/resume` to confirm only sessions
+recorded for the current directory are listed, that the selected transcript and
+counters return, and that a subsequent message appends to that log. In the TUI, open the
 model picker, confirm the name/ID/dialect/context/input/advertised-output/
 status/translated metadata, switch models and confirm the next run's values,
 and use `Ctrl-R` to refresh in place. Drive `-ui-json` as

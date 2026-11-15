@@ -340,6 +340,48 @@ func (m *App) loadHistory(items []agent.HistoryItem) {
 	m.rebuildImages()
 }
 
+// applySessionSnapshot installs a successfully created or resumed session. The
+// current transcript belongs to the old store and is replaced by the new
+// history; counters, overlays, and pending per-run state are reset so the app
+// behaves exactly as if it had started on this session.
+func (m *App) applySessionSnapshot(snapshot SessionSnapshot) {
+	m.cancelModelRefresh()
+	m.overlay = overlayState{kind: OverlayNone}
+	m.items = nil
+	m.rowOf = nil
+	m.textSize = 0
+	m.imageRefs = nil
+	m.images = nil
+	m.imageCache = make(map[string]*imageBlock)
+	m.dirty = true
+	m.imagesDirty = true
+	m.coalesceScheduled = false
+	m.info = snapshot.Info
+	m.models = snapshot.Models
+	m.nextModel = snapshot.Info.Model
+	m.nextDialect = model.Dialect(snapshot.Info.Dialect)
+	m.nextEffort = snapshot.Info.ThinkingEffort
+	m.nextRun = 0
+	m.run = liveRun{}
+	m.runStartedCount = 0
+	m.runFinishedCount = 0
+	m.steer = nil
+	m.steerCh = nil
+	m.follow = true
+	m.historyIndex = len(m.inputHistory)
+	m.draft = ""
+	m.suggestions = nil
+	m.suggestionIndex = 0
+	m.suggestionPrefix = ""
+	m.suggestionDismissed = false
+	m.loadHistory(snapshot.History)
+	for _, text := range snapshot.Notices {
+		m.appendNotice(agent.NoticeWarning, text)
+	}
+	m.ensureContent()
+	m.layout()
+}
+
 func (m *App) addItem(it *transcriptItem) {
 	m.dirty = true
 	m.imagesDirty = true

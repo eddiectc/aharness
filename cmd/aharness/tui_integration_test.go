@@ -130,6 +130,131 @@ func TestBinaryUIJSONScriptedSession(t *testing.T) {
 	}
 }
 
+// TestBinaryUIJSONNewAndResumeSession proves the composer can replace the
+// active session with a fresh log and then reopen a previous session in the
+// same workspace. The resumed session appends its second run; the new session
+// remains an empty session_start.
+func TestBinaryUIJSONNewAndResumeSession(t *testing.T) {
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		switch call {
+		case 1:
+			sseFinal(t, w, "first session answer")
+		case 2:
+			sseFinal(t, w, "second session answer")
+		default:
+			t.Errorf("unexpected provider call %d", call)
+			http.Error(w, "unexpected call", http.StatusInternalServerError)
+		}
+	})
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+	script := strings.Join([]string{
+		`{"v":1,"type":"text","text":"first session task"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"text","text":"/new"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"text","text":"/resume"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"text","text":"second session task"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":20000}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	stdout, stderr, exit := runHarnessRaw(t, bin, workspace, stateDir, f.url, strings.NewReader(script),
+		"-ui-json", "-ui-size", "100x30", "-model", "deepseek-v4.1-flash",
+		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+	if f.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", f.calls)
+	}
+	type frame struct {
+		Overlay string   `json:"overlay"`
+		Lines   []string `json:"lines"`
+	}
+	var frames []frame
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := jsonv2.Unmarshal([]byte(line), &head); err != nil {
+			t.Fatalf("decode protocol line: %v\n%s", err, line)
+		}
+		if head.Type != "frame" {
+			continue
+		}
+		var got frame
+		if err := jsonv2.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("decode frame: %v\n%s", err, line)
+		}
+		frames = append(frames, got)
+	}
+	pickerFrame := -1
+	for i, got := range frames {
+		if got.Overlay == "session" {
+			pickerFrame = i
+			break
+		}
+	}
+	if pickerFrame < 0 {
+		t.Fatalf("no session picker frame\nstdout:\n%s", stdout)
+	}
+	pickerText := strings.Join(frames[pickerFrame].Lines, "\n")
+	if !strings.Contains(pickerText, "first session task") {
+		t.Fatalf("session picker lacks the previous task:\n%s", pickerText)
+	}
+	lastText := strings.Join(frames[len(frames)-1].Lines, "\n")
+	if !strings.Contains(lastText, "first session answer") ||
+		!strings.Contains(lastText, "second session answer") {
+		t.Fatalf("final frame lacks the resumed transcript:\n%s", lastText)
+	}
+	if !strings.Contains(lastText, "first session task") || !strings.Contains(lastText, "second session task") {
+		t.Fatalf("final frame lacks a task from the resumed session:\n%s", lastText)
+	}
+
+	files := sessionFiles(t, stateDir)
+	if len(files) != 2 {
+		t.Fatalf("session files = %v, want 2", files)
+	}
+	var resumedEvents, freshEvents []session.Event
+	for _, path := range files {
+		events := readSessionEvents(t, path)
+		users := 0
+		for _, ev := range events {
+			if ev.Type == session.TypeUserMessage {
+				users++
+			}
+		}
+		switch users {
+		case 2:
+			resumedEvents = events
+		case 0:
+			freshEvents = events
+		default:
+			t.Fatalf("%s has %d user messages, want 0 or 2", path, users)
+		}
+	}
+	if resumedEvents == nil || freshEvents == nil {
+		t.Fatalf("session logs do not split into resumed and fresh: %v", files)
+	}
+	if got := countEventType(freshEvents, session.TypeSessionStart); got != 1 || len(freshEvents) != 1 {
+		t.Fatalf("fresh session events = %+v, want only session_start", freshEvents)
+	}
+	if got := countEventType(resumedEvents, session.TypeRunStart); got != 2 {
+		t.Fatalf("resumed session run_start events = %d, want 2", got)
+	}
+}
+
 func sseFinal(t *testing.T, w http.ResponseWriter, text string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(http.StatusOK)

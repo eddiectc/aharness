@@ -117,12 +117,14 @@ opt-in and unlimited by default.
   wheel scrolling. The wheel capture also takes the terminal's own selection,
   so an empty transcript and the help overlay point at the escape hatch:
   `Shift`+drag to select and `Shift`+middle-click or `Ctrl+Shift+V` to paste.
-  One process owns one session and may execute one run per submitted message.
+  One process holds one active session and may execute one run per submitted
+  message; `/new` replaces it with a fresh session and `/resume` reopens a
+  previous session in the same workspace while idle.
   Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
-  `/provider`, `/details`, `/files`, `/table`, `/image`, `/rich`/`/raw`,
-  `/repaint`, `/refresh`, `/interrupt`, `/cancel`, `/quit`); typing `/` opens
-  a filtered completion menu (`Tab` completes, `Enter` runs), and unrecognized
-  `/text` is sent as a normal message. See the
+  `/provider`, `/details`, `/new`, `/resume`, `/files`, `/table`, `/image`,
+  `/rich`/`/raw`, `/repaint`, `/refresh`, `/interrupt`, `/cancel`, `/quit`);
+  typing `/` opens a filtered completion menu (`Tab` completes, `Enter` runs),
+  and unrecognized `/text` is sent as a normal message. See the
   [slash-command reference](docs/commands.md).
 - `-batch` forces the one-shot stdout contract. Non-TTY invocations batch
   automatically. `-ui-json` runs the same Bubble Tea program headlessly over a

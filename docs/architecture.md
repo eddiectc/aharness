@@ -32,15 +32,17 @@ flowchart LR
   model <--> api[(opencode-go API)]
 ```
 
-One process, one session, no daemon, no worker pool. The runner owns turn state
-and is the only component that advances the loop. Tools do not call the model.
-The model adapters do not touch the workspace. The v2 event log is append-only
-and is the only persisted truth. A session is the durable conversation. In
-batch mode a run is one process invocation; in TUI/`-ui-json` mode a run is one
-submitted message and a process may execute several runs over the same session.
-Resume appends to the same log; fork copies a session into a new self-contained
-log. The TUI is a display-only front end over the same runner, host, and store;
-it adds no durable event type.
+One process, one active session, no daemon, no worker pool. The runner owns
+turn state and is the only component that advances the loop. Tools do not call
+the model. The model adapters do not touch the workspace. The v2 event log is
+append-only and is the only persisted truth. A session is the durable
+conversation. In batch mode a run is one process invocation; in TUI/`-ui-json`
+mode a run is one submitted message, a process may execute several runs over
+the same session, and idle `/new` or `/resume` may replace the active session
+with another log under the same state directory. Resume appends to the same
+log; fork copies a session into a new self-contained log. The TUI is a
+display-only front end over the same runner, host, and store; it adds no
+durable event type.
 
 
 ## 2. Provider and model
@@ -434,7 +436,7 @@ internal/tui/
   model.go       # transcript, composer, status, steering, caps
   view.go        # Lip Gloss layout, transcript/tool/notice views
   markdown.go    # Glamour rendering, raw/rich toggle, table extraction
-  widgets.go     # table/file/model overlays and focus
+  widgets.go     # table/file/model/effort/session overlays and focus
   image.go       # workspace image resolver, ntcharts picture, viewer
   protocol.go    # -ui-json v1 commands, events, frames, snapshots
   headless.go    # Bubble Tea + fake input/output + x/vt driver
@@ -543,12 +545,17 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   `Append` assigns `v=2`, `seq`, `ts`, and `session`; forked copies preserve the
   source timestamps and payloads while renumbering `seq` and the session ID.
   `seq` starts at 1 and increments by 1. `Sync` flushes the file; `Close` syncs,
-  unlocks, and closes.
+  unlocks, and closes. `session.Read(path)` replays a whole log;
+  `session.ReadHead(path, maxEvents)` validates and returns only its prefix for
+  metadata listing without reading whole logs.
 - `agent.Inspect(events) (State, error)` — pure function of the durable log. It
   reconstructs session metadata, cumulative turns and usage, the last run's
   effective configuration (including the latest recorded thinking effort) and
   terminal status, and every unpaired tool call.
   Unknown event types and fields within v2 are ignored.
+- `agent.Summarize(events) (SessionSummary, error)` — decodes only the
+  `session_start` metadata and first user message from a log head for the
+  `/resume` picker. It is not a substitute for `Inspect`.
 - `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
   once-per-session `session_start` event for a new or forked session.
 - `agent.Project(events []session.Event, limits Limits) (Projection, error)` —
@@ -592,12 +599,14 @@ schema version.
   call ID (anomalies retained), hints, notices, and partial text. `final` does
   not duplicate the assistant text. Unknown events/fields are ignored; malformed
   known payloads are errors.
-- **Run model.** One process owns one session and one lock. Each submitted
-  message while idle starts one run; `run_start.ResumedFromSeq` is the current
-  last sequence. Cumulative turns/tokens and the per-run clock are tracked;
-  their budgets are enforced only when explicitly configured; the model/dialect
-  are per-run and recorded in `run_start`. The model picker changes only the
-  next run.
+- **Run model.** One process owns one active session and one lock at a time.
+  Each submitted message while idle starts one run; `run_start.ResumedFromSeq`
+  is the current last sequence. Cumulative turns/tokens and the per-run clock
+  are tracked; their budgets are enforced only when explicitly configured; the
+  model/dialect are per-run and recorded in `run_start`. The model picker
+  changes only the next run. Idle `/new` creates a fresh log and `/resume`
+  reopens a previous same-workspace log; both validate the target before
+  closing the current store, so a failure leaves the active session intact.
 - **Modes.** Terminal default is TUI; `-batch` forces the v1 one-shot CLI;
   `-ui-json` runs the same Bubble Tea program with fake input/output and an
   `x/vt` emulator. TTY/`TERM` checks run before session creation for the TUI.

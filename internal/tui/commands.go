@@ -27,6 +27,8 @@ var slashCommands = []slashCommand{
 	{names: []string{"provider"}, usage: "/provider", summary: "active provider and configuration"},
 	{names: []string{"effort"}, usage: "/effort [value]", summary: "pick a thinking effort for the next run", hasArg: true},
 	{names: []string{"details"}, usage: "/details", summary: "session, terminal, and config details"},
+	{names: []string{"new"}, usage: "/new", summary: "start a new session (idle)"},
+	{names: []string{"resume"}, usage: "/resume", summary: "resume a previous session (idle)"},
 	{names: []string{"files", "file"}, usage: "/files", summary: "workspace file picker (idle)"},
 	{names: []string{"table"}, usage: "/table", summary: "latest markdown table"},
 	{names: []string{"image"}, usage: "/image", summary: "image viewer"},
@@ -212,6 +214,10 @@ func (m *App) handleSlashCommand(text string) (tea.Cmd, bool) {
 		return m.commandEffort(args), true
 	case "details":
 		return m.openDetailsOverlay(), true
+	case "new":
+		return m.commandNewSession(), true
+	case "resume":
+		return m.openResumeOverlay(), true
 	case "files":
 		if m.run.active {
 			m.notice = "the file picker is disabled while a run is active"
@@ -329,6 +335,64 @@ func (m *App) commandInterrupt() {
 		return
 	}
 	m.interruptOperation()
+}
+
+// commandNewSession replaces the active session with a fresh one. It is
+// idle-only: a run owns the store until it finishes.
+func (m *App) commandNewSession() tea.Cmd {
+	if m.run.active {
+		m.notice = "session switching is disabled while a run is active"
+		return nil
+	}
+	manager, ok := m.host.(SessionManager)
+	if !ok {
+		m.notice = "session switching is unavailable"
+		return nil
+	}
+	snapshot, err := manager.NewSession(RunOptions{
+		Model:             m.nextModel,
+		ThinkingEffort:    m.nextEffort,
+		ThinkingEffortSet: true,
+	})
+	if err != nil {
+		m.notice = "new session: " + CapText(SanitizeLine(err.Error()), 512)
+		return nil
+	}
+	m.applySessionSnapshot(snapshot)
+	return m.sessionSwitched("new session ", snapshot.Info.SessionID)
+}
+
+// resumeSession opens one previous session selected from the /resume picker.
+func (m *App) resumeSession(id string) tea.Cmd {
+	manager, ok := m.host.(SessionManager)
+	if !ok {
+		m.notice = "session switching is unavailable"
+		return nil
+	}
+	snapshot, err := manager.ResumeSession(id)
+	if err != nil {
+		m.notice = "resume session: " + CapText(SanitizeLine(err.Error()), 512)
+		return nil
+	}
+	m.applySessionSnapshot(snapshot)
+	return m.sessionSwitched("resumed session ", snapshot.Info.SessionID)
+}
+
+// sessionSwitched reports a successful switch in the status line and protocol.
+func (m *App) sessionSwitched(action, id string) tea.Cmd {
+	text := action + shortSessionID(id)
+	m.notice = text
+	m.emit(EventNotice{Kind: "session", Text: text})
+	return nil
+}
+
+// shortSessionID is the stable display prefix for a session UUID.
+func shortSessionID(id string) string {
+	id = SanitizeLine(id)
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 func (m *App) commandCancel() {

@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"aharness/internal/agent"
 	"aharness/internal/model"
 	"aharness/internal/tools"
 )
@@ -14,6 +17,43 @@ func submitComposer(t *testing.T, app *App, text string) tea.Cmd {
 	t.Helper()
 	typeText(t, app, text)
 	return press(t, app, "enter")
+}
+
+type switchingHost struct {
+	*manualHost
+
+	choices     []PreviousSession
+	listErr     error
+	newSnapshot SessionSnapshot
+	newErr      error
+	resume      map[string]SessionSnapshot
+	resumeErr   error
+
+	newCalls []RunOptions
+	resumed  []string
+}
+
+func (h *switchingHost) ListSessions() ([]PreviousSession, error) {
+	return h.choices, h.listErr
+}
+
+func (h *switchingHost) NewSession(opts RunOptions) (SessionSnapshot, error) {
+	h.newCalls = append(h.newCalls, opts)
+	if h.newErr != nil {
+		return SessionSnapshot{}, h.newErr
+	}
+	return h.newSnapshot, nil
+}
+
+func (h *switchingHost) ResumeSession(id string) (SessionSnapshot, error) {
+	h.resumed = append(h.resumed, id)
+	if h.resumeErr != nil {
+		return SessionSnapshot{}, h.resumeErr
+	}
+	if snapshot, ok := h.resume[id]; ok {
+		return snapshot, nil
+	}
+	return SessionSnapshot{}, errors.New("session not found")
 }
 
 func TestParseSlashCommand(t *testing.T) {
@@ -63,7 +103,8 @@ func TestSlashHelpListsCommandsAndDoesNotRun(t *testing.T) {
 	text := strings.Join(app.overlay.help, "\n")
 	for _, want := range []string{
 		"commands", "/help", "/model [id]", "/provider", "/effort [value]",
-		"/files", "/table", "/image", "/rich", "/raw", "/repaint", "/refresh", "/quit",
+		"/details", "/new", "/resume", "/files", "/table", "/image", "/rich",
+		"/raw", "/repaint", "/refresh", "/quit",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("help is missing %q:\n%s", want, text)
@@ -252,6 +293,138 @@ func TestSlashShortcutSurfaces(t *testing.T) {
 	}
 }
 
+func TestSlashResumePicksPreviousSession(t *testing.T) {
+	host := &switchingHost{manualHost: newManualHost()}
+	const previousID = "0190a0c4-0000-7000-8000-0000000000bb"
+	host.choices = []PreviousSession{{
+		ID: previousID, Modified: time.Date(2026, 11, 14, 12, 30, 0, 0, time.UTC),
+		Model: "crunchy-alpha", Summary: "earlier task",
+	}}
+	resumedInfo := Info{
+		SessionID: previousID, TracePath: "/tmp/previous", Model: "crunchy-alpha",
+		Dialect: string(model.DialectResponses), Workspace: "/tmp/ws",
+		Turns: 4, ThinkingEffort: "high",
+	}
+	host.resume = map[string]SessionSnapshot{previousID: {
+		Info:    resumedInfo,
+		History: []agent.HistoryItem{{Kind: agent.HistoryUser, Run: 1, Source: "tui", Text: "earlier task"}},
+		Models:  host.models,
+		Notices: []string{"inherited effort cleared"},
+	}}
+	app, events := newTestAppWithEvents(t, host)
+
+	submitComposer(t, app, "/resume")
+	if app.overlay.kind != OverlaySession {
+		t.Fatalf("overlay = %q, want session (notice %q)", app.overlay.kind, app.notice)
+	}
+	item, ok := app.overlay.session.list.SelectedItem().(sessionItem)
+	if !ok || item.choice.ID != previousID {
+		t.Fatalf("selected item = %#v", app.overlay.session.list.SelectedItem())
+	}
+	if item.Title() != "earlier task" {
+		t.Fatalf("title = %q", item.Title())
+	}
+	if !strings.Contains(item.Description(), "2026-11-14 12:30") ||
+		!strings.Contains(item.Description(), "crunchy-alpha") {
+		t.Fatalf("description = %q", item.Description())
+	}
+
+	press(t, app, "enter")
+	if len(host.resumed) != 1 || host.resumed[0] != previousID {
+		t.Fatalf("resumed = %v", host.resumed)
+	}
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay = %q after resume", app.overlay.kind)
+	}
+	if app.info.SessionID != previousID || app.nextModel != "crunchy-alpha" ||
+		app.nextEffort != "high" || app.nextDialect != model.DialectResponses {
+		t.Fatalf("resumed app state: info=%+v model=%q effort=%q dialect=%q",
+			app.info, app.nextModel, app.nextEffort, app.nextDialect)
+	}
+	if len(app.items) != 2 || app.items[0].text != "earlier task" || app.items[1].kind != itemNotice {
+		t.Fatalf("items = %v, want history then warning", itemKinds(app.items))
+	}
+	if app.notice != "resumed session 0190a0c4" {
+		t.Fatalf("notice = %q", app.notice)
+	}
+	select {
+	case event := <-events:
+		notice, ok := event.(EventNotice)
+		if !ok || notice.Kind != "session" || !strings.Contains(notice.Text, "resumed session") {
+			t.Fatalf("event = %+v, want session notice", event)
+		}
+	default:
+		t.Fatal("no session notice event")
+	}
+	if _, _, ok := host.last(); ok {
+		t.Fatal("/resume started a run")
+	}
+}
+
+func TestSlashNewStartsFreshSessionWithNextRunSettings(t *testing.T) {
+	host := &switchingHost{manualHost: newManualHost()}
+	const newID = "0190a0c4-0000-7000-8000-0000000000cc"
+	host.newSnapshot = SessionSnapshot{
+		Info: Info{
+			SessionID: newID, TracePath: "/tmp/new", Model: "crunchy-alpha",
+			Dialect: string(model.DialectResponses), Workspace: "/tmp/ws",
+		},
+		Models: host.models,
+	}
+	app := newTestApp(t, host)
+	app.addItem(&transcriptItem{kind: itemUser, text: "old task"})
+	app.nextModel = "crunchy-alpha"
+	app.nextDialect = model.DialectResponses
+	app.nextEffort = "high"
+
+	submitComposer(t, app, "/new")
+	if len(host.newCalls) != 1 {
+		t.Fatalf("NewSession calls = %d", len(host.newCalls))
+	}
+	want := RunOptions{Model: "crunchy-alpha", ThinkingEffort: "high", ThinkingEffortSet: true}
+	if host.newCalls[0] != want {
+		t.Fatalf("NewSession options = %+v, want %+v", host.newCalls[0], want)
+	}
+	if app.info.SessionID != newID || app.nextModel != "crunchy-alpha" || app.nextEffort != "" {
+		t.Fatalf("new app state: info=%+v model=%q effort=%q", app.info, app.nextModel, app.nextEffort)
+	}
+	if len(app.items) != 0 {
+		t.Fatalf("new session kept the old transcript: %+v", app.items)
+	}
+	if app.notice != "new session 0190a0c4" {
+		t.Fatalf("notice = %q", app.notice)
+	}
+	if _, _, ok := host.last(); ok {
+		t.Fatal("/new started a run")
+	}
+}
+
+func TestSlashResumeWithoutPreviousSessions(t *testing.T) {
+	host := &switchingHost{manualHost: newManualHost()}
+	app := newTestApp(t, host)
+
+	submitComposer(t, app, "/resume")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("overlay = %q, want none", app.overlay.kind)
+	}
+	if app.notice != "no previous sessions in this workspace" {
+		t.Fatalf("notice = %q", app.notice)
+	}
+}
+
+func TestSlashSessionSwitchUnavailable(t *testing.T) {
+	app := newTestApp(t, newManualHost())
+
+	submitComposer(t, app, "/new")
+	if app.notice != "session switching is unavailable" {
+		t.Fatalf("/new notice = %q", app.notice)
+	}
+	submitComposer(t, app, "/resume")
+	if app.notice != "session switching is unavailable" {
+		t.Fatalf("/resume notice = %q", app.notice)
+	}
+}
+
 func TestSlashCommandsDuringRun(t *testing.T) {
 	host := newManualHost()
 	host.models[0].ReasoningEfforts = []string{"high"}
@@ -271,6 +444,22 @@ func TestSlashCommandsDuringRun(t *testing.T) {
 		t.Fatal("effort changed during a run")
 	}
 	if !strings.Contains(app.notice, "disabled while a run is active") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+
+	submitComposer(t, app, "/new")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("new-session command opened overlay %q during a run", app.overlay.kind)
+	}
+	if !strings.Contains(app.notice, "session switching is disabled while a run is active") {
+		t.Fatalf("notice = %q", app.notice)
+	}
+
+	submitComposer(t, app, "/resume")
+	if app.overlay.kind != OverlayNone {
+		t.Fatalf("resume picker opened during a run: %q", app.overlay.kind)
+	}
+	if !strings.Contains(app.notice, "session switching is disabled while a run is active") {
 		t.Fatalf("notice = %q", app.notice)
 	}
 

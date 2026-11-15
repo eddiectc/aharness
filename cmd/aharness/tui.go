@@ -275,38 +275,11 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 	}
 	var warnings []string
 	warn := func(text string) { warnings = append(warnings, text) }
-	modelName := opts.Model
-	if modelName == "" {
-		modelName = h.info.Model
+	modelName, dialect, err := h.prepareRunLocked(opts, warn)
+	if err != nil {
+		h.mu.Unlock()
+		return nil, err
 	}
-	if modelName == "" {
-		modelName = h.cfg.Model
-	}
-	if modelName != h.cfg.Model {
-		m, ok := h.catalog[modelName]
-		if !ok {
-			h.mu.Unlock()
-			return nil, fmt.Errorf("model %q is not in the loaded catalog", modelName)
-		}
-		if err := applyCatalogModel(&h.cfg, m, warn); err != nil {
-			h.mu.Unlock()
-			return nil, err
-		}
-		h.cfg.Pricing = m.Pricing(h.catalogSource, h.catalogFetchedAt)
-		if m.Deprecated {
-			warn("model " + m.ID + " is deprecated")
-		}
-		if err := validateEffective(&h.cfg); err != nil {
-			h.mu.Unlock()
-			return nil, err
-		}
-	}
-	// An explicit picker/option value replaces the inherited effort; either
-	// way, a value the effective catalog model does not advertise is cleared
-	// with a notice so the provider default is used instead of sending an
-	// unsupported field.
-	resolveRunThinkingEffort(&h.cfg, h.catalog, modelName, opts, warn)
-	dialect := h.cfg.Dialect
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	control := newRunController(cancel)
@@ -599,22 +572,7 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		return fail(exitSetup)
 	}
 	_ = history
-	info := tui.Info{
-		SessionID:      store.ID(),
-		TracePath:      store.Path(),
-		Model:          cfg.Model,
-		Dialect:        string(cfg.Dialect),
-		Workspace:      cfg.Workspace,
-		MaxTurns:       cfg.MaxTurns,
-		MaxTotalTokens: cfg.MaxTotalTokens,
-		Turns:          state.Turns,
-		Usage:          state.Usage,
-		ContextTokens:  state.ContextTokens,
-		ContextLimit:   cfg.MaxContextTokens,
-		CostMicroUSD:   state.CostMicroUSD,
-		CostComplete:   state.CostComplete,
-		ThinkingEffort: cfg.ThinkingEffort,
-	}
+	info := sessionInfo(cfg, store, state)
 	ctx := context.Background()
 	if catalogSource == nil {
 		if src, err := newCatalogSource(cfg); err == nil {

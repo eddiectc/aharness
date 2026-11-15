@@ -10,9 +10,10 @@
 
 Batch mode has no composer and therefore no slash commands. A command is
 display/control input and does not append a command event of its own.
-Next-run commands change the next `run_start`; run-control commands
-(`/interrupt`, `/cancel`, `/quit`) act through the runner and produce the same
-durable events as their key equivalents.
+Next-run commands change the next `run_start`; session commands replace the
+active store; run-control commands (`/interrupt`, `/cancel`, `/quit`) act
+through the runner and produce the same durable events as their key
+equivalents.
 
 ## Invocation
 
@@ -28,12 +29,14 @@ durable events as their key equivalents.
   trimmed. `/model` and `/effort` validate their argument; other commands
   ignore extra words.
 - The normal 64 KiB composer/submission cap applies.
-- Commands work while a run is active. Next-run settings and editor-only
-  actions (`/model`, `/effort`, `/files`, `/refresh`) are disabled with a
-  status-line notice; display and run-control commands still work.
+- Commands work while a run is active. Next-run settings, editor-only actions,
+  and session switching (`/model`, `/effort`, `/files`, `/refresh`, `/new`,
+  `/resume`) are disabled with a status-line notice; display and run-control
+  commands still work.
 - Command feedback uses the status line or an overlay. `/model` and `/effort`
   also emit display-only `model_changed` and `notice` events in `-ui-json`
-  mode; neither is written to the session log.
+  mode; `/new` and `/resume` emit a display-only `notice` event with kind
+  `session`. None is written to the session log.
 
 ## Autocomplete
 
@@ -68,6 +71,8 @@ change and frames expose the resulting composer, menu rows, and overlay.
 | `/effort [value]` | optional effort value, or `default` | `F2` | next-run thinking effort |
 | `/provider` | none | `Ctrl-X` | active provider plus configuration details |
 | `/details` | none | `Ctrl-X` | session, terminal, and configuration details |
+| `/new` | none | none | replace the active session with a fresh local session (idle) |
+| `/resume` | none | none | pick a previous session in this workspace and resume it (idle) |
 | `/files`, `/file` | none | `Ctrl-O` | workspace file picker (idle) |
 | `/table` | none | `Ctrl-T` | most recent markdown table |
 | `/image` | none | `Ctrl-G` | image viewer for the most recent image block |
@@ -102,6 +107,42 @@ model and dialect, thinking effort, cumulative turns and tokens, terminal
 capabilities, provider and base URL, prompt/toolset/harness versions, state
 directory, context and output limits, and configured run/model timeouts.
 Works while idle or running. `Esc` closes the overlay.
+
+### `/new`
+
+Creates a fresh session log in the same state directory and workspace,
+replacing the active session for the rest of the process. The transcript,
+cumulative counters, run numbering, and display caches are reset. The current
+next-run model and thinking effort are written into the new `session_start`, so
+the first run starts with the settings shown in the status line. The previous
+session is closed and remains available to `/resume` (or `-resume` in a later
+process). Runs must be idle: while a run is active the command reports that
+session switching is disabled and changes nothing.
+
+`/new` writes only the new session's `session_start`; it emits no command event
+and does not copy history or todo state from the old session.
+
+### `/resume`
+
+Opens a picker of previous sessions recorded for the current workspace, newest
+first. The active session is excluded. Each row shows the first user message
+(or a short session ID when there is none), the session ID prefix, the last
+modification time, and the recorded model. Typing filters the rows; `Up`/`Down`
+select, `Enter` resumes, and `Esc` closes the picker without switching.
+
+On selection the harness opens the log under `<state>/sessions` with an
+exclusive lock, validates it, and loads its history and cumulative counters.
+Only after those steps succeed does it close the current log and install the
+resumed session, so a locked, corrupt, or incompatible session leaves the
+active one untouched and reports the failure in the status line. A session
+whose recorded workspace differs from the current canonical workspace is not
+listed and cannot be resumed here.
+
+The resumed session inherits its recorded model, dialect, base URL, context and
+output limits, and thinking effort. Explicit run budgets and timeouts from the
+current invocation remain in effect, matching the `-resume` CLI precedence.
+A display-only `notice` event with kind `session` reports success. Idle only;
+the active run keeps the lock and store.
 
 ### `/quit` and `/exit`
 
@@ -227,6 +268,8 @@ to idle. Idle: reports that no run is active.
 /model deepseek-v4.1-flash  select a catalog model for the next run
 /effort high                set the next run's thinking effort
 /effort default             clear the effort and use the provider default
+/new                        start a fresh session in this workspace
+/resume                     pick a previous session for this workspace
 /files                      insert a workspace-relative path into the composer
 /interrupt                  stop the current model call; the run continues
 /cancel                     end the active run and return to idle
@@ -244,14 +287,18 @@ Commands are composer text, not a new protocol command. Send:
 
 The same text/key stream drives autocomplete (`tab`, `up`, `down`, `esc`).
 Resulting overlays appear in `frame.overlay` (`help`, `details`, `model`,
-`effort`, `file`, `table`, or `image`); status feedback appears in the frame
-lines. `/model` and `/effort` also emit the existing `model_changed` and
-`notice` events. The protocol version stays 1.
+`effort`, `session`, `file`, `table`, or `image`); status feedback appears in
+the frame lines. `/model` and `/effort` also emit the existing `model_changed`
+and `notice` events. `/new` and `/resume` emit a `notice` event with kind
+`session` after a successful switch. The protocol version stays 1.
 
 ## Caps
 
 The command surface adds no durable cap. Composer submissions use the existing
 64 KiB task/steering cap, the completion menu is a display-only list, and
-overlays, tables, and images keep their existing display caps. The canonical
-values live in [limits.md §6](limits.md#6-tui-and--ui-json). Commands write no
-command event; run-control commands cause the documented runner events.
+overlays, tables, and images keep their existing display caps. The `/resume`
+picker scans at most 64 events from each candidate log and returns at most 100
+sessions per workspace; longer first messages are sanitized and cut for the row
+preview. The canonical values live in [limits.md §6](limits.md#6-tui-and--ui-json).
+Commands write no command event; run-control commands cause the documented
+runner events, and session commands write only a new session's `session_start`.

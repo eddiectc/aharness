@@ -28,11 +28,12 @@ type overlayState struct {
 	help   []string
 	scroll int
 
-	table  *tableOverlay
-	file   *fileOverlay
-	model  *modelOverlay
-	effort *effortOverlay
-	image  *imageOverlay
+	table   *tableOverlay
+	file    *fileOverlay
+	model   *modelOverlay
+	effort  *effortOverlay
+	session *sessionOverlay
+	image   *imageOverlay
 }
 
 func (o *overlayState) push(kind OverlayKind) {
@@ -89,6 +90,11 @@ func (o *overlayState) insert(m *App, text string) bool {
 			o.effort.insertFilter(text)
 			return true
 		}
+	case OverlaySession:
+		if o.session != nil {
+			o.session.insertFilter(text)
+			return true
+		}
 	}
 	return false
 }
@@ -107,6 +113,9 @@ func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
 	}
 	if o.effort != nil {
 		o.effort.resize(innerW, innerH)
+	}
+	if o.session != nil {
+		o.session.resize(innerW, innerH)
 	}
 	if o.table != nil {
 		o.table.resize(innerW, innerH)
@@ -143,6 +152,10 @@ func (o *overlayState) wheel(up bool) {
 	case OverlayEffort:
 		if o.effort != nil {
 			o.effort.wheel(up)
+		}
+	case OverlaySession:
+		if o.session != nil {
+			o.session.wheel(up)
 		}
 	}
 }
@@ -182,6 +195,10 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	case OverlayEffort:
 		if o.effort != nil {
 			return o.effort.update(m, msg)
+		}
+	case OverlaySession:
+		if o.session != nil {
+			return o.session.update(m, msg)
 		}
 	case OverlayImage:
 		if o.image != nil {
@@ -225,6 +242,11 @@ func (o *overlayState) view(m *App) string {
 		title = "thinking effort · F2"
 		if o.effort != nil {
 			content = o.effort.view()
+		}
+	case OverlaySession:
+		title = "resume session"
+		if o.session != nil {
+			content = o.session.view()
 		}
 	case OverlayImage:
 		title = "image · Ctrl-G"
@@ -916,6 +938,108 @@ func (eo *effortOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	}
 	updated, cmd := eo.list.Update(msg)
 	eo.list = updated
+	return cmd
+}
+
+// sessionOverlay is the /resume picker. Rows are previous sessions recorded
+// for the current workspace, newest first.
+type sessionOverlay struct {
+	list   list.Model
+	width  int
+	height int
+}
+
+type sessionItem struct {
+	choice PreviousSession
+}
+
+func (si sessionItem) Title() string {
+	if summary := SanitizeLine(si.choice.Summary); summary != "" {
+		return summary
+	}
+	return "session " + shortSessionID(si.choice.ID)
+}
+
+func (si sessionItem) Description() string {
+	parts := []string{shortSessionID(si.choice.ID)}
+	if !si.choice.Modified.IsZero() {
+		parts = append(parts, si.choice.Modified.UTC().Format("2006-01-02 15:04"))
+	}
+	if modelName := SanitizeLine(si.choice.Model); modelName != "" {
+		parts = append(parts, modelName)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (si sessionItem) FilterValue() string {
+	return strings.Join([]string{SanitizeLine(si.choice.Summary), SanitizeLine(si.choice.Model), si.choice.ID}, " ")
+}
+
+func sessionItems(choices []PreviousSession) []list.Item {
+	items := make([]list.Item, len(choices))
+	for i, choice := range choices {
+		items[i] = sessionItem{choice: choice}
+	}
+	return items
+}
+
+func (m *App) openResumeOverlay() tea.Cmd {
+	if m.run.active {
+		m.notice = "session switching is disabled while a run is active"
+		return nil
+	}
+	manager, ok := m.host.(SessionManager)
+	if !ok {
+		m.notice = "session switching is unavailable"
+		return nil
+	}
+	choices, err := manager.ListSessions()
+	if err != nil {
+		m.notice = "list sessions: " + CapText(SanitizeLine(err.Error()), 512)
+		return nil
+	}
+	if len(choices) == 0 {
+		m.notice = "no previous sessions in this workspace"
+		return nil
+	}
+	sl := list.New(sessionItems(choices), list.NewDefaultDelegate(), 40, 8)
+	sl.SetShowFilter(true)
+	sl.SetShowStatusBar(false)
+	sl.SetShowHelp(false)
+	sl.SetShowPagination(false)
+	sl.Title = "previous sessions in this workspace"
+	m.overlay.session = &sessionOverlay{list: sl}
+	m.overlay.push(OverlaySession)
+	m.overlay.resize(m, m.width, m.height)
+	return nil
+}
+
+func (so *sessionOverlay) insertFilter(text string) {
+	so.list.SetFilteringEnabled(true)
+	so.list.SetFilterText(so.list.FilterInput.Value() + text)
+}
+
+func (so *sessionOverlay) resize(width, height int) {
+	so.width, so.height = width, height
+	so.list.SetSize(width, max(1, height-1))
+}
+
+func (so *sessionOverlay) view() string {
+	return strings.Join([]string{so.list.View(), "Enter resume · Esc close"}, "\n")
+}
+
+func (so *sessionOverlay) wheel(up bool) { wheelList(&so.list, up) }
+
+func (so *sessionOverlay) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
+	if msg.Keystroke() == "enter" {
+		item, ok := so.list.SelectedItem().(sessionItem)
+		if !ok {
+			return nil
+		}
+		return m.resumeSession(item.choice.ID)
+	}
+	updated, cmd := so.list.Update(msg)
+	so.list = updated
 	return cmd
 }
 

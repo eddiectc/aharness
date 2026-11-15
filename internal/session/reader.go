@@ -38,6 +38,21 @@ type readStats struct {
 // accepted. A torn final line is ignored; an invalid line followed by more
 // data is an error. The file is opened read-only and is never rewritten.
 func Read(path string) ([]Event, error) {
+	return readFile(path, 0)
+}
+
+// ReadHead replays at most maxEvents events from the start of a session log.
+// It validates the delivered prefix exactly like Read, including event
+// sequence numbers and the session ID, but does not inspect the remainder of
+// the log. It is used to list session metadata without reading whole logs.
+func ReadHead(path string, maxEvents int) ([]Event, error) {
+	if maxEvents <= 0 {
+		return nil, fmt.Errorf("read session head %s: max events must be positive", path)
+	}
+	return readFile(path, maxEvents)
+}
+
+func readFile(path string, maxEvents int) ([]Event, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open session log %s: %w", path, err)
@@ -46,7 +61,7 @@ func Read(path string) ([]Event, error) {
 		// Read-only close; a failure cannot affect the decoded events.
 		_ = file.Close()
 	}()
-	stats, err := readEvents(file, path)
+	stats, err := readEventsLimit(file, path, maxEvents)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +71,12 @@ func Read(path string) ([]Event, error) {
 // readEvents replays r, tracking byte offsets so a torn final line can be
 // truncated without touching the durable prefix.
 func readEvents(r io.Reader, path string) (readStats, error) {
+	return readEventsLimit(r, path, 0)
+}
+
+// readEventsLimit replays r and stops after maxEvents decoded events when
+// maxEvents is positive.
+func readEventsLimit(r io.Reader, path string, maxEvents int) (readStats, error) {
 	br := bufio.NewReaderSize(r, readBufferSize)
 	var (
 		stats     readStats
@@ -109,6 +130,9 @@ func readEvents(r io.Reader, path string) (readStats, error) {
 		stats.events = append(stats.events, ev)
 		stats.goodBytes = offset
 		stats.missingNewline = !terminated
+		if maxEvents > 0 && len(stats.events) >= maxEvents {
+			return stats, nil
+		}
 	}
 }
 

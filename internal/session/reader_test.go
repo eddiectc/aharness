@@ -62,6 +62,33 @@ func TestReadRoundTrip(t *testing.T) {
 	assertEventsEqual(t, got, []Event{first, second})
 }
 
+func TestReadHeadStopsAtLimit(t *testing.T) {
+	first := makeEvent(1, TypeSessionStart, `{"model":"m"}`)
+	second := makeEvent(2, TypeUserMessage, `{"text":"hi"}`)
+	third := makeEvent(3, TypeModelResponse, `{}`)
+	content := encodeEventLine(t, first) + encodeEventLine(t, second) + encodeEventLine(t, third)
+	path := writeLogFile(t, []byte(content))
+
+	got, err := ReadHead(path, 2)
+	if err != nil {
+		t.Fatalf("ReadHead: %v", err)
+	}
+	assertEventsEqual(t, got, []Event{first, second})
+
+	if _, err := ReadHead(path, 0); err == nil {
+		t.Fatal("ReadHead accepted a zero limit")
+	}
+}
+
+func TestReadHeadRejectsCorruptPrefix(t *testing.T) {
+	first := encodeEventLine(t, makeEvent(1, TypeSessionStart, validData))
+	bad := `{"v":2,"seq":3,"session":"` + testSession + `","type":"user_message","data":{}}`
+	path := writeLogFile(t, []byte(first+bad+"\n"))
+	if _, err := ReadHead(path, 4); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("ReadHead: got %v, want ErrCorrupt", err)
+	}
+}
+
 func TestReadAcceptsFinalLineWithoutNewline(t *testing.T) {
 	first := makeEvent(1, TypeSessionStart, validData)
 	second := makeEvent(2, TypeUserMessage, `{"text":"hi"}`)

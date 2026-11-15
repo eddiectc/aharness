@@ -35,6 +35,7 @@ const (
 	OverlayFile    OverlayKind = "file"
 	OverlayModel   OverlayKind = "model"
 	OverlayEffort  OverlayKind = "effort"
+	OverlaySession OverlayKind = "session"
 	OverlayImage   OverlayKind = "image"
 )
 
@@ -124,6 +125,34 @@ type Host interface {
 	History() ([]agent.HistoryItem, error)
 	Start(sub Submission, opts RunOptions, steer <-chan string, display func(agent.DisplayEvent) error) (Run, error)
 	Close() error
+}
+
+// PreviousSession is one resumable session in the current workspace.
+type PreviousSession struct {
+	ID       string
+	Modified time.Time
+	Model    string
+	Summary  string
+}
+
+// SessionSnapshot is the state installed by a successful session switch.
+type SessionSnapshot struct {
+	Info    Info
+	History []agent.HistoryItem
+	Models  []ModelChoice
+	// Notices are non-fatal warnings produced while opening the session, such
+	// as an inherited thinking effort the effective model no longer supports.
+	Notices []string
+}
+
+// SessionManager is an optional Host capability for the TUI session switcher.
+// NewSession starts a fresh session with the supplied next-run settings;
+// ResumeSession opens a previous session under the same state directory and
+// workspace. Both are idle-only.
+type SessionManager interface {
+	ListSessions() ([]PreviousSession, error)
+	NewSession(opts RunOptions) (SessionSnapshot, error)
+	ResumeSession(id string) (SessionSnapshot, error)
 }
 
 // WorkspaceProvider is an optional Host capability used by the file picker and
