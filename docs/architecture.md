@@ -429,7 +429,7 @@ internal/agent/
   events.go      # event payloads and caps
   context.go     # projection, token estimate, compaction
   agents.go      # strict definition parser, bundled set, discovery, precedence
-  prompt.go      # frozen prompt-v0, prompt-v1, environment block, catalog
+  prompt.go      # frozen prompt-v0/v1, prompt-v2, environment block, catalog
   spawn.go       # subagent spawner: child sessions, budgets, display, accounting
   retry.go       # retry policy and streaming-aware model calls
   types.go
@@ -790,15 +790,18 @@ one function; do not scatter exit-code decisions through the loop.
 
 ### 4.3 System prompt
 
-The system prompt is versioned and recorded in `session_start`. `prompt-v0` is
-frozen for replay. `prompt-v1` keeps the v0 clauses and adds the delegation
-paragraph and, for a parent session, the available-agents catalog (one
-`- name: description` line per agent, capped at 4 KiB with an
-`[N agents omitted]` marker). A child's prompt is its agent body plus the
-environment block, with no catalog and no delegation guidance because a child
-cannot delegate. The recorded text is authoritative for projection, so editing
-an agent file never rewrites an existing session's prompt. New sessions record
-`prompt-v1` and `toolset-v2`. It states, briefly:
+The system prompt is versioned and recorded in `session_start`. `prompt-v0` and
+`prompt-v1` are frozen for replay. `prompt-v2` keeps the v0 clauses, adds
+guidance for `todo` and `delegate`, and, as in `prompt-v1`, carries the
+available-agents catalog for a parent session (one `- name: description` line
+per agent, capped at 4 KiB with an `[N agents omitted]` marker). `prompt-v1`
+remains replayable as the previous parent contract; its template still renders
+the shorter delegation paragraph and the catalog. A child's prompt is its agent
+body plus the environment block and shared rules. A child gets no catalog and no
+delegation guidance because it cannot delegate; a prompt-v2 child whose grant
+includes `todo` also gets the todo guidance. The recorded text is authoritative
+for projection, so editing an agent file never rewrites an existing session's
+prompt. New sessions record `prompt-v2` and `toolset-v2`. It states, briefly:
 
 - The workspace root, and that tools are the only way to act.
 - Search and read before editing; keep changes minimal; run the relevant tests.
@@ -806,11 +809,17 @@ an agent file never rewrites an existing session's prompt. New sessions record
   approval step.
 - Tool errors are data; adapt rather than escalate.
 - Stop by replying without a tool call when the task is complete or blocked.
+- Use `todo` for multi-step work: write the checklist first, keep one item in
+  progress, and mark items completed as they finish.
+- Use `delegate` for independent, self-contained work that would otherwise
+  flood the conversation with tool output; state the goal, constraints, and
+  required report because the child has no history.
 
-Tool-specific guidance belongs in tool descriptions, not duplicated in the
-system prompt. Steering instructions are user messages and recovery notes are
-tool results, not prompt changes. Any prompt change bumps the version and must
-keep the old version replayable or explicitly refuse resume/fork for it.
+Tool mechanics belong in tool descriptions; the system prompt states only when a
+coordination tool is worth a turn. Steering instructions are user messages and
+recovery notes are tool results, not prompt changes. Any prompt change bumps the
+version and must keep the old version replayable or explicitly refuse
+resume/fork for it.
 
 ## 5. Tools
 
@@ -1411,8 +1420,8 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   silent clear. `default` always clears and never conflicts with a model
   change.
 - Prompt and toolset versions are selected from `session_start` and must be
-  supported by the binary. v1 ships `prompt-v0`/`prompt-v1` and
-  `toolset-v0`/`toolset-v1`/`toolset-v2`; new sessions record `prompt-v1` and
+  supported by the binary. v1 ships `prompt-v0`/`prompt-v1`/`prompt-v2` and
+  `toolset-v0`/`toolset-v1`/`toolset-v2`; new sessions record `prompt-v2` and
   `toolset-v2`. The recorded prompt, agent name, and tool grant are inherited
   verbatim on resume and fork, so an older session cannot delegate and an edited
   agent file never rewrites an existing session.
@@ -1480,7 +1489,7 @@ Defaults are deliberately conservative and easy to change:
 | Thinking effort | unset (provider/model default; `-thinking-effort` / `AHARNESS_THINKING_EFFORT`) |
 | Usage strictness | permissive (`-require-usage` off; missing buffered usage records `reported=false`) |
 | Toolset version | `toolset-v2` for new sessions; `toolset-v0`/`toolset-v1` replay supported |
-| Prompt version | `prompt-v1` for new sessions; `prompt-v0` replay supported |
+| Prompt version | `prompt-v2` for new sessions; `prompt-v0`/`prompt-v1` replay supported |
 | Max subagents | 8 fresh children per run (`-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; `0` unlimited) |
 | Agent definitions | `<state-dir>/agents/*.md`; five bundled defaults; at most 32 |
 | Agent overrides | `agent_overrides` in the config file; model, effort, `max_turns`, and `enabled` only; definition grant and prompt are never overridable |

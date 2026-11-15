@@ -178,7 +178,7 @@ Other event payloads:
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
 | Toolset version | `toolset-v2` for new sessions | `toolset-v0` and `toolset-v1` declarations are frozen for replay; `toolset-v2` adds `delegate` to v1. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, and an older session cannot delegate. |
-| Prompt version | `prompt-v1` for new sessions | `prompt-v0` stays frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
+| Prompt version | `prompt-v2` for new sessions | `prompt-v0` and `prompt-v1` stay frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
 | `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Results always appear in array order. |
 | `delegate` | Concurrent children per call | 4 | A call runs concurrently only when every task's effective grant is a subset of `read_file`, `search`, `web_search`, and `web_fetch`; any write-capable task forces the whole call sequential. The cap matches `maxItems`. |
 | `delegate` | Recorded execution mode | `concurrent` or `sequential` in `details` | `execution_reason` explains a sequential choice. A call that cannot reserve every fresh child under `-max-subagents` runs sequentially so the rejected spawn is deterministic. |

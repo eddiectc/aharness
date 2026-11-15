@@ -320,7 +320,7 @@ func removePending(pending []PendingCall, id string) []PendingCall {
 
 // SupportsPrompt reports whether this binary can replay a prompt version.
 func SupportsPrompt(version string) bool {
-	return version == PromptVersionV0 || version == PromptVersion
+	return version == PromptVersionV0 || version == PromptVersionV1 || version == PromptVersion
 }
 
 // SupportsToolset reports whether this binary can replay a toolset version.

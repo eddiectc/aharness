@@ -18,21 +18,44 @@ func TestRenderPromptVersions(t *testing.T) {
 	if !strings.Contains(v0, `"/workspace"`) {
 		t.Fatalf("v0 prompt does not include the workspace: %q", v0)
 	}
-	if strings.Contains(v0, "delegate") {
-		t.Fatalf("frozen v0 prompt mentions delegate: %q", v0)
+	if strings.Contains(v0, "delegate") || strings.Contains(v0, "todo") {
+		t.Fatalf("frozen v0 prompt mentions a v1/v2 tool: %q", v0)
 	}
-	v1, err := renderPrompt(PromptVersion, "/workspace", nil)
+	v1, err := renderPrompt(PromptVersionV1, "/workspace", nil)
 	if err != nil {
 		t.Fatalf("renderPrompt(v1): %v", err)
 	}
 	if !strings.Contains(v1, "`delegate` starts an agent with no conversation history") {
-		t.Fatalf("v1 prompt lacks the delegation paragraph: %q", v1)
+		t.Fatalf("frozen v1 prompt lacks its delegation paragraph: %q", v1)
+	}
+	if strings.Contains(v1, "todo") {
+		t.Fatalf("frozen v1 prompt mentions todo: %q", v1)
 	}
 	if !strings.HasPrefix(v1, strings.TrimSuffix(v0, "\n")) {
 		t.Fatal("v1 prompt does not keep the v0 clauses")
 	}
+	v2, err := renderPrompt(PromptVersion, "/workspace", nil)
+	if err != nil {
+		t.Fatalf("renderPrompt(v2): %v", err)
+	}
+	for _, want := range []string{"`todo` tracks multi-step work", "`delegate` runs independent work in a child agent"} {
+		if !strings.Contains(v2, want) {
+			t.Fatalf("v2 prompt lacks %q: %q", want, v2)
+		}
+	}
+	if !strings.HasPrefix(v2, strings.TrimSuffix(v0, "\n")) {
+		t.Fatal("v2 prompt does not keep the v0 clauses")
+	}
 	if _, err := renderPrompt("prompt-v9", "/workspace", nil); err == nil {
 		t.Fatal("renderPrompt accepted an unknown version")
+	}
+	for _, version := range []string{PromptVersionV0, PromptVersionV1, PromptVersion} {
+		if !SupportsPrompt(version) {
+			t.Fatalf("SupportsPrompt(%q) = false, want replay support", version)
+		}
+	}
+	if SupportsPrompt("prompt-v9") {
+		t.Fatal("SupportsPrompt accepted an unknown version")
 	}
 }
 
@@ -41,12 +64,14 @@ func TestRenderPromptCatalog(t *testing.T) {
 		{Name: "explore", Description: "Read-only exploration."},
 		{Name: "reviewer", Description: "Review a change."},
 	}
-	text, err := renderPrompt(PromptVersion, "/workspace", agents)
-	if err != nil {
-		t.Fatalf("renderPrompt: %v", err)
-	}
-	if !strings.Contains(text, "Available agents:\n- explore: Read-only exploration.\n- reviewer: Review a change.\n") {
-		t.Fatalf("catalog is missing or malformed: %q", text)
+	for _, version := range []string{PromptVersionV1, PromptVersion} {
+		text, err := renderPrompt(version, "/workspace", agents)
+		if err != nil {
+			t.Fatalf("renderPrompt(%s): %v", version, err)
+		}
+		if !strings.Contains(text, "Available agents:\n- explore: Read-only exploration.\n- reviewer: Review a change.\n") {
+			t.Fatalf("%s catalog is missing or malformed: %q", version, text)
+		}
 	}
 
 	// A catalog that does not fit the 4 KiB budget ends with an omission marker.
@@ -202,14 +227,31 @@ func TestChildSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAgentDefinition: %v", err)
 	}
-	prompt := childSystemPrompt(def, "/workspace")
-	for _, want := range []string{"reviewer", "/workspace", "Review the assigned change", "Tools are your only way to act"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("child prompt missing %q: %q", want, prompt)
+	for _, version := range []string{PromptVersionV0, PromptVersionV1, PromptVersion} {
+		prompt := childSystemPrompt(def, "/workspace", version)
+		for _, want := range []string{"reviewer", "/workspace", "Review the assigned change", "Tools are your only way to act"} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s child prompt missing %q: %q", version, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "Available agents:") || strings.Contains(prompt, "`delegate`") || strings.Contains(prompt, "`todo`") {
+			t.Fatalf("%s child prompt carries parent-only material: %q", version, prompt)
 		}
 	}
-	if strings.Contains(prompt, "Available agents:") || strings.Contains(prompt, "`delegate` starts") {
-		t.Fatalf("child prompt carries parent-only material: %q", prompt)
+
+	// A child that is actually granted todo gets the v2 todo guidance. Only
+	// prompt-v2 children do; a v1 parent keeps its frozen child contract.
+	def.Tools = []string{"read_file", "todo"}
+	v2 := childSystemPrompt(def, "/workspace", PromptVersion)
+	if !strings.Contains(v2, "`todo` tracks multi-step work") {
+		t.Fatalf("v2 child with todo grant lacks the todo guidance: %q", v2)
+	}
+	if strings.Contains(v2, "`delegate`") || strings.Contains(v2, "Available agents:") {
+		t.Fatalf("v2 child prompt carries parent-only material: %q", v2)
+	}
+	v1 := childSystemPrompt(def, "/workspace", PromptVersionV1)
+	if strings.Contains(v1, "`todo`") {
+		t.Fatalf("v1 child prompt gained v2 todo guidance: %q", v1)
 	}
 }
 

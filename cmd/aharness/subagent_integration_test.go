@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"aharness/internal/agent"
 	"aharness/internal/tools"
 )
 
@@ -173,7 +174,7 @@ func TestSubagentEndToEnd(t *testing.T) {
 	if childStart.ParentSession != parentID || childStart.ParentCallID != "call_d1" {
 		t.Fatalf("child parent ref = %+v, want parent %s call call_d1", childStart, parentID)
 	}
-	if childStart.Agent != "explore" || childStart.PromptVersion != "prompt-v1" || childStart.ToolsetVersion != tools.Version {
+	if childStart.Agent != "explore" || childStart.PromptVersion != agent.PromptVersion || childStart.ToolsetVersion != tools.Version {
 		t.Fatalf("child contract = %+v", childStart)
 	}
 	if strings.Join(childStart.Tools, ",") != "read_file,search" {

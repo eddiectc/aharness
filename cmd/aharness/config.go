@@ -120,7 +120,7 @@ type config struct {
 	Tools        []string
 	SystemPrompt string
 	Agent        string
-	// Agents is the discovered definition catalog rendered into a prompt-v1
+	// Agents is the discovered definition catalog rendered into the current
 	// parent prompt.
 	Agents []agent.AgentInfo
 

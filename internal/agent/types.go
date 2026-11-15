@@ -50,7 +50,7 @@ type Config struct {
 	// Tools is the recorded tool-name grant. Nil means every tool of the
 	// recorded ToolsetVersion; a non-nil list narrows it.
 	Tools []string
-	// Agents is the catalog rendered into a prompt-v1 parent prompt.
+	// Agents is the catalog rendered into the current parent prompt.
 	Agents []AgentInfo
 
 	// MaxTurns is the cumulative model-turn budget; 0 means unlimited.

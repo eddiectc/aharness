@@ -568,7 +568,7 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 		PromptVersion:  parent.PromptVersion,
 		ToolsetVersion: parent.ToolsetVersion,
 		HarnessVersion: parent.HarnessVersion,
-		SystemPrompt:   childSystemPrompt(def, parent.Workspace),
+		SystemPrompt:   childSystemPrompt(def, parent.Workspace, promptVersion(parent)),
 		Agent:          def.Name,
 		Tools:          append([]string(nil), def.Tools...),
 		MaxTurns:       maxTurns,
