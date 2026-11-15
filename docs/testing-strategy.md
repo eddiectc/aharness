@@ -310,6 +310,18 @@ diagnostic, not a gate.
   turns leave the parent's `-max-turns` counter alone. Assert that `Inspect`
   on the parent reconstructs the subagent totals, that `/resume` omits child
   sessions, and that `-resume <child-id>` opens one as a normal session.
+- Subagent fan-out: a fake-provider end-to-end run with three `explore` tasks
+  holds each child request until all three are in flight, then records
+  `execution=concurrent` with three completed tasks. In a `synctest` bubble,
+  three read-only tasks each reach their model call before
+  any returns, so their start times overlap; a
+  write-capable task in the same call forces array order and no overlap. A
+  continuation joins the fan-out only when its recorded grant is read-only, and
+  a call that cannot reserve every fresh child under `-max-subagents` falls back
+  to sequential order. Display callbacks from concurrent children are
+  serialized, and canceling mid-call interrupts every child, leaves one
+  `run_end` and one `final` in each child log, and pairs the delegate result
+  with `canceled`.
 - Definitions: a user definition under `<state-dir>/agents/` replaces the
   bundled agent of the same name and its prompt, tools, model, and effort are
   what the child records; a malformed file does not replace a bundled agent and

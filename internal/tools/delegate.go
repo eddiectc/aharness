@@ -86,10 +86,28 @@ type SubagentReport struct {
 	Text          string
 }
 
+// Execution modes recorded in delegate details. A call whose every task holds
+// a read-only grant runs concurrently; any other call preserves array order and
+// runs sequentially.
+const (
+	ExecutionConcurrent = "concurrent"
+	ExecutionSequential = "sequential"
+)
+
+// SpawnResult is one call's outcome: exactly one report per task, in array
+// order, plus how the spawner executed them.
+type SpawnResult struct {
+	Reports []SubagentReport
+	// Execution is ExecutionConcurrent or ExecutionSequential.
+	Execution string
+	// ExecutionReason explains a sequential choice; empty when concurrent.
+	ExecutionReason string
+}
+
 // Spawning runs delegated tasks. agent implements it; a nil implementation
 // keeps delegate registered and returns an actionable unavailable result.
 type Spawning interface {
-	Spawn(ctx context.Context, call Call, specs []SubagentSpec) []SubagentReport
+	Spawn(ctx context.Context, call Call, specs []SubagentSpec) SpawnResult
 	Agents() []AgentInfo
 }
 
@@ -115,6 +133,8 @@ type DelegateTaskDetails struct {
 // tool_result.details.
 type DelegateDetails struct {
 	Tasks                []DelegateTaskDetails `json:"tasks"`
+	Execution            string                `json:"execution,omitempty"`
+	ExecutionReason      string                `json:"execution_reason,omitempty"`
 	Status               string                `json:"status"`
 	SubagentTurns        int                   `json:"subagent_turns"`
 	SubagentUsage        model.Usage           `json:"subagent_usage"`
@@ -165,8 +185,8 @@ func (r *Registry) executeDelegate(ctx context.Context, args []byte, call Call) 
 	if rejected != nil {
 		return *rejected
 	}
-	reports := r.opts.Spawning.Spawn(ctx, call, specs)
-	return delegateResult(specs, reports, ctx.Err() != nil)
+	outcome := r.opts.Spawning.Spawn(ctx, call, specs)
+	return delegateResult(specs, outcome, ctx.Err() != nil)
 }
 
 // validateDelegateTasks rejects the whole call before any task runs: a bad
@@ -231,13 +251,19 @@ func resultPtr(r Result) *Result { return &r }
 // delegateResult consolidates per-task reports into one result. The call is OK
 // when at least one task produced a report, matching the rule that a non-zero
 // command exit is still ok=true with an exit_code.
-func delegateResult(specs []SubagentSpec, reports []SubagentReport, canceled bool) Result {
+func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Result {
+	reports := outcome.Reports
 	if len(reports) < len(specs) {
 		// A spawner must report one entry per task; a short list is an
 		// internal invariant violation, not a provider failure.
 		return Failure(CodeInternal, "delegate: the spawner returned fewer reports than tasks")
 	}
-	details := DelegateDetails{Tasks: make([]DelegateTaskDetails, 0, len(specs)), SubagentCostComplete: true}
+	details := DelegateDetails{
+		Tasks:                make([]DelegateTaskDetails, 0, len(specs)),
+		Execution:            sanitizeUTF8(outcome.Execution),
+		ExecutionReason:      sanitizeUTF8(outcome.ExecutionReason),
+		SubagentCostComplete: true,
+	}
 	sections := make([]string, 0, len(specs))
 	produced, failed := 0, 0
 	limited := false

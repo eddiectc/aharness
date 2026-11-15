@@ -77,9 +77,11 @@ type Config struct {
 
 	Interactive bool
 	Stream      bool
-	// Display receives display-only progress on the runner goroutine. It must
-	// not block, call the runner, or write the session log. A nil callback
-	// disables display events.
+	// Display receives display-only progress. The runner calls it on its own
+	// goroutine; a spawner serializes delegated children's callbacks before
+	// forwarding them, so the callback never runs concurrently even while
+	// read-only child tasks fan out. It must not block, call the runner, or
+	// write the session log. A nil callback disables display events.
 	Display func(DisplayEvent) error
 	// Steering delivers TUI steering lines consumed at turn boundaries. A nil
 	// channel disables steering.

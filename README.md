@@ -110,6 +110,10 @@ opt-in and unlimited by default.
   `key: value` header and a markdown prompt body. Each child records its own
   resolved prompt, tool grant, model, effort, provider, and pricing, so its log
   is self-describing and resumable; it cannot delegate, and a test asserts that.
+  A call whose every task's grant is within `read_file`, `search`, `web_search`,
+  and `web_fetch` runs its tasks concurrently (up to four); any write-capable
+  task in the same call forces the whole call sequential, and `details` records
+  which mode ran and why.
   Child input+output tokens count against `-max-total-tokens`; child turns do
   not count against `-max-turns` but seed a child's default cap. The TUI renders
   one foldable delegate block per call and adds two display-only commands:

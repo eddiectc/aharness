@@ -527,7 +527,9 @@ func renderDelegateTaskRow(index int, agentName, status, modelName, effort strin
 	return ansi.Truncate("  "+strings.Join(parts, " · "), width, "")
 }
 
-// liveDelegateRows renders the roster rows belonging to one delegate call.
+// liveDelegateRows renders the roster rows belonging to one delegate call in
+// task order. Concurrent children may start in a different order, so the block
+// sorts by index rather than relying on event arrival.
 func (m *App) liveDelegateRows(callID string) []*subagentRow {
 	var rows []*subagentRow
 	for _, row := range m.children {
@@ -535,6 +537,7 @@ func (m *App) liveDelegateRows(callID string) []*subagentRow {
 			rows = append(rows, row)
 		}
 	}
+	slices.SortStableFunc(rows, func(a, b *subagentRow) int { return a.index - b.index })
 	return rows
 }
 

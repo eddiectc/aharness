@@ -11,22 +11,24 @@ import (
 
 // fakeSpawner records one delegate call and returns scripted reports.
 type fakeSpawner struct {
-	agents  []AgentInfo
-	reports []SubagentReport
-	fn      func(ctx context.Context, call Call, specs []SubagentSpec) []SubagentReport
-	got     []SubagentSpec
-	gotCall Call
-	calls   int
+	agents    []AgentInfo
+	reports   []SubagentReport
+	execution string
+	reason    string
+	fn        func(ctx context.Context, call Call, specs []SubagentSpec) SpawnResult
+	got       []SubagentSpec
+	gotCall   Call
+	calls     int
 }
 
-func (f *fakeSpawner) Spawn(ctx context.Context, call Call, specs []SubagentSpec) []SubagentReport {
+func (f *fakeSpawner) Spawn(ctx context.Context, call Call, specs []SubagentSpec) SpawnResult {
 	f.calls++
 	f.got = specs
 	f.gotCall = call
 	if f.fn != nil {
 		return f.fn(ctx, call, specs)
 	}
-	return f.reports
+	return SpawnResult{Reports: f.reports, Execution: f.execution, ExecutionReason: f.reason}
 }
 
 func (f *fakeSpawner) Agents() []AgentInfo { return f.agents }
@@ -89,6 +91,34 @@ func TestDelegateRunsTasksInOrder(t *testing.T) {
 	}
 	if len(res.Details) > maxDelegateDetails {
 		t.Fatalf("details are %d bytes, want <= %d", len(res.Details), maxDelegateDetails)
+	}
+}
+
+func TestDelegateRecordsExecutionMode(t *testing.T) {
+	spawner := defaultSpawner(delegatedReport("explore", SubagentCompleted))
+	spawner.execution = ExecutionConcurrent
+	registry := newDelegateRegistry(t, spawner)
+	res := executeRaw(t, registry, "delegate", `{"intent":"x","tasks":[{"agent":"explore","task":"t"}]}`)
+	if !res.OK {
+		t.Fatalf("delegate failed: %s", res.Error)
+	}
+	details, ok := ParseDelegateDetails(res.Details)
+	if !ok || details.Execution != ExecutionConcurrent || details.ExecutionReason != "" {
+		t.Fatalf("details execution = %+v", details)
+	}
+
+	spawner = defaultSpawner(delegatedReport("explore", SubagentCompleted), delegatedReport("implementer", SubagentCompleted))
+	spawner.agents = append(spawner.agents, AgentInfo{Name: "implementer", Description: "implement"})
+	spawner.execution = ExecutionSequential
+	spawner.reason = `task 2: agent "implementer" is not read-only`
+	registry = newDelegateRegistry(t, spawner)
+	res = executeRaw(t, registry, "delegate", `{"intent":"x","tasks":[{"agent":"explore","task":"1"},{"agent":"implementer","task":"2"}]}`)
+	if !res.OK {
+		t.Fatalf("delegate failed: %s", res.Error)
+	}
+	details, ok = ParseDelegateDetails(res.Details)
+	if !ok || details.Execution != ExecutionSequential || !strings.Contains(details.ExecutionReason, "implementer") {
+		t.Fatalf("details execution = %+v", details)
 	}
 }
 
@@ -191,9 +221,9 @@ func TestDelegateResultCodePrecedence(t *testing.T) {
 			if tc.cancelDuring {
 				// Cancel mid-call, after the spawner produced its reports, which
 				// is the case that must keep ok=true with a canceled code.
-				spawner.fn = func(context.Context, Call, []SubagentSpec) []SubagentReport {
+				spawner.fn = func(context.Context, Call, []SubagentSpec) SpawnResult {
 					cancel()
-					return tc.reports
+					return SpawnResult{Reports: tc.reports, Execution: ExecutionSequential}
 				}
 			}
 			res := registry.ExecuteCall(ctx, call, "delegate",
@@ -332,8 +362,8 @@ func FuzzDelegateArguments(f *testing.F) {
 	}
 	spawner := &fakeSpawner{
 		agents: []AgentInfo{{Name: "explore"}},
-		fn: func(context.Context, Call, []SubagentSpec) []SubagentReport {
-			return []SubagentReport{{Agent: "explore", Status: SubagentCompleted, Text: "ok"}}
+		fn: func(context.Context, Call, []SubagentSpec) SpawnResult {
+			return SpawnResult{Reports: []SubagentReport{{Agent: "explore", Status: SubagentCompleted, Text: "ok"}}, Execution: ExecutionSequential}
 		},
 	}
 	registry := NewRegistry(nil, Options{Spawning: spawner})

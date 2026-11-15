@@ -43,7 +43,9 @@ type ToolOptionsFunc func(sessionID, workDir, tmpDir string) tools.Options
 
 // SpawnerOptions configures one per-run spawner. The spawner is created with
 // the host's effective configuration and reused for every delegate call in the
-// run, so its child counters are per-run.
+// run, so its child counters are per-run. A read-only fan-out calls Resolve,
+// NewCompleter, NewToolOptions, ParentSeq, and Now from several child
+// goroutines, so each must be safe for concurrent use.
 type SpawnerOptions struct {
 	Config         Config
 	Workspace      *tools.Workspace
@@ -67,8 +69,27 @@ type SpawnerOptions struct {
 	Now func() time.Time
 }
 
-// Spawner runs delegated tasks as child sessions. Tasks execute in order in
-// this milestone; the parent run is suspended for the whole call.
+// maxConcurrentChildren caps the children one delegate call may run at once.
+// It matches the schema's maxItems of 4.
+const maxConcurrentChildren = 4
+
+// isReadOnlyTool reports whether name is safe to run while sibling children
+// share the workspace. The set is deliberately explicit: web_search and
+// web_fetch reach the network but never write the workspace, while every other
+// tool either writes or carries per-child state that fan-out should not share.
+func isReadOnlyTool(name string) bool {
+	switch name {
+	case "read_file", "search", "web_search", "web_fetch":
+		return true
+	default:
+		return false
+	}
+}
+
+// Spawner runs delegated tasks as child sessions. A call whose every task
+// holds a read-only grant executes its tasks concurrently under
+// maxConcurrentChildren; any other call executes in array order. The parent run
+// is suspended for the whole call either way.
 type Spawner struct {
 	opts SpawnerOptions
 
@@ -186,20 +207,148 @@ func (s *Spawner) childRegistered(sessionID string) bool {
 	return s.steering[sessionID] != nil
 }
 
-// Spawn executes the call's tasks in array order and returns one report per
-// task. A canceled parent context stops the loop: the remaining tasks report
-// that they were not started.
-func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.SubagentSpec) []tools.SubagentReport {
+// Spawn executes the call's tasks and returns one report per task in array
+// order. A call whose every task holds a read-only grant runs its tasks
+// concurrently; any other call keeps array order and runs sequentially. A
+// canceled parent context stops the loop and reports the remaining tasks as
+// not started.
+func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.SubagentSpec) tools.SpawnResult {
 	reports := make([]tools.SubagentReport, len(specs))
+	execution, reason := s.executionMode(specs)
+	if execution == tools.ExecutionConcurrent && !s.reserveFits(specs) {
+		// Keep array order and deterministic budget assignment when the call
+		// cannot reserve every fresh child.
+		execution = tools.ExecutionSequential
+		reason = fmt.Sprintf("the call needs more than the remaining -max-subagents budget (%d)", s.opts.MaxSubagents)
+	}
+	if execution != tools.ExecutionConcurrent {
+		for i, spec := range specs {
+			if ctx.Err() != nil {
+				reports[i] = notStartedReport(spec)
+				continue
+			}
+			reports[i] = s.spawnOne(ctx, call, i, spec)
+		}
+		return tools.SpawnResult{Reports: reports, Execution: tools.ExecutionSequential, ExecutionReason: reason}
+	}
+
+	// Every task writes a distinct report index, so the slice needs no lock.
+	// maxConcurrentChildren currently equals the schema cap, but the semaphore
+	// keeps the bound explicit if either changes.
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, maxConcurrentChildren)
 	for i, spec := range specs {
 		if ctx.Err() != nil {
-			reports[i] = failedReport(spec, tools.CodeCanceled, tools.SubagentInterrupted,
-				"not started: the run was canceled")
+			reports[i] = notStartedReport(spec)
 			continue
 		}
-		reports[i] = s.spawnOne(ctx, call, i, spec)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				reports[i] = notStartedReport(spec)
+				return
+			}
+			if ctx.Err() != nil {
+				reports[i] = notStartedReport(spec)
+				return
+			}
+			reports[i] = s.spawnOne(ctx, call, i, spec)
+		}()
 	}
-	return reports
+	wg.Wait()
+	return tools.SpawnResult{Reports: reports, Execution: tools.ExecutionConcurrent}
+}
+
+// executionMode reports whether the call's tasks may run concurrently and why
+// not when they may not. Every task must have a recorded or declared grant made
+// only of read-only tools; an unreadable continuation grant is not classified
+// optimistically.
+func (s *Spawner) executionMode(specs []tools.SubagentSpec) (string, string) {
+	for i, spec := range specs {
+		grant, name, ok := s.taskGrant(spec)
+		if !ok {
+			return tools.ExecutionSequential, fmt.Sprintf("task %d has no readable read-only tool grant", i+1)
+		}
+		if !isReadOnlyGrant(grant) {
+			return tools.ExecutionSequential, fmt.Sprintf("task %d: agent %q is not read-only", i+1, name)
+		}
+	}
+	return tools.ExecutionConcurrent, ""
+}
+
+// taskGrant returns the effective tool grant for one task. A fresh task uses
+// its definition; a continuation uses the child's recorded grant, because the
+// definition may have changed since that child started.
+func (s *Spawner) taskGrant(spec tools.SubagentSpec) ([]string, string, bool) {
+	if spec.Session != "" {
+		path := session.SessionPath(s.opts.Config.StateDir, spec.Session)
+		head, err := session.ReadHead(path, 1)
+		if err != nil || len(head) == 0 || head[0].Type != session.TypeSessionStart {
+			return nil, spec.Agent, false
+		}
+		var start sessionStartData
+		if err := decodeEventData(head[0], &start); err != nil {
+			return nil, spec.Agent, false
+		}
+		if start.ParentSession != s.opts.ParentSession || start.ParentCallID == "" {
+			return nil, start.Agent, false
+		}
+		name := start.Agent
+		if name == "" {
+			name = spec.Agent
+		}
+		// A nil recorded grant means every tool of the recorded version,
+		// including writers; only an explicit read-only list is safe.
+		return start.Tools, name, start.Tools != nil
+	}
+	def, ok := s.opts.Definitions.Lookup(spec.Agent)
+	if !ok {
+		return nil, spec.Agent, false
+	}
+	return def.Tools, def.Name, true
+}
+
+// isReadOnlyGrant reports whether every granted tool is read-only. A nil or
+// empty grant is never read-only: nil means the full recorded toolset.
+func isReadOnlyGrant(grant []string) bool {
+	if len(grant) == 0 {
+		return false
+	}
+	for _, name := range grant {
+		if !isReadOnlyTool(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// reserveFits reports whether the fresh tasks in the call fit the remaining
+// -max-subagents budget. It lets a concurrent call fall back to array order
+// before any child starts, so the spawn a limit rejects is deterministic.
+func (s *Spawner) reserveFits(specs []tools.SubagentSpec) bool {
+	if s.opts.MaxSubagents <= 0 {
+		return true
+	}
+	fresh := 0
+	for _, spec := range specs {
+		if spec.Session == "" {
+			fresh++
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.spawned+fresh <= s.opts.MaxSubagents
+}
+
+// notStartedReport reports one task skipped because the parent operation was
+// already canceled.
+func notStartedReport(spec tools.SubagentSpec) tools.SubagentReport {
+	return failedReport(spec, tools.CodeCanceled, tools.SubagentInterrupted,
+		"not started: the run was canceled")
 }
 
 func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec tools.SubagentSpec) tools.SubagentReport {

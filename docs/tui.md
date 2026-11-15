@@ -282,12 +282,13 @@ act on it.
 A `delegate` call renders as one folded tool block, like every other call. Under
 its header, each task gets one nested status line:
 `[N] <agent> · <status> · [elapsed] · <model> · effort <value> · <turns> turns · ctx <tokens> · <tokens> tok · cost <estimate>`.
-While the call runs the lines come from the live roster; after `tool_result` is
-durable they come from the recorded `details`, so a resumed session shows the
-same table with no claim that anything is live. Reports stay in the folded body
-(one `[task N agent=… status=… session=…]` section each). The block is the
-permanent record; `/agent-hub` is the live view, and a `SubagentProgress` event
-updates both without adding a transcript item.
+A read-only call may run up to four children concurrently; rows still appear in
+task-index order. While the call runs the lines come from the live roster; after
+`tool_result` is durable they come from the recorded `details`, so a resumed
+session shows the same table with no claim that anything is live. Reports stay
+in the folded body (one `[task N agent=… status=… session=…]` section each). The
+block is the permanent record; `/agent-hub` is the live view, and a
+`SubagentProgress` event updates both without adding a transcript item.
 
 ### `/agent-hub` roster
 

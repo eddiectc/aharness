@@ -273,6 +273,160 @@ func TestSubagentEndToEnd(t *testing.T) {
 	}
 }
 
+func TestSubagentReadOnlyFanOutEndToEnd(t *testing.T) {
+	bin := buildHarness(t)
+	workspace := t.TempDir()
+	stateDir := t.TempDir()
+
+	var (
+		mu       sync.Mutex
+		children int
+		once     sync.Once
+	)
+	release := make(chan struct{})
+	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		switch call {
+		case 1:
+			writeJSON(w, 200, chatDelegateResponse("call_d1",
+				`{"intent":"fan out the reads","tasks":[`+
+					`{"agent":"explore","task":"one"},`+
+					`{"agent":"explore","task":"two"},`+
+					`{"agent":"explore","task":"three"}]}`))
+		case 2, 3, 4:
+			// Hold every child until all three are in flight. A sequential
+			// implementation would deadlock here; the timeout turns that into a
+			// fast failure instead of a hung test.
+			mu.Lock()
+			children++
+			if children == 3 {
+				once.Do(func() { close(release) })
+			}
+			mu.Unlock()
+			select {
+			case <-release:
+				writeJSON(w, 200, chatFinalResponse("child report"))
+			case <-time.After(10 * time.Second):
+				writeJSON(w, 500, map[string]any{"error": "children did not overlap"})
+			}
+		case 5:
+			writeJSON(w, 200, chatFinalResponse("parent done"))
+		default:
+			writeJSON(w, 500, map[string]any{"error": "unexpected model call"})
+		}
+	})
+
+	script := strings.Join([]string{
+		`{"v":1,"type":"text","text":"fan out the reads"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"wait","until":"idle","timeout_ms":45000}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin,
+		"-ui-json", "-model", "deepseek-v4.1-flash",
+		"-provider-base-url", provider.url,
+		"-max-turns", "5")
+	cmd.Dir = workspace
+	env := make([]string, 0, len(os.Environ())+3)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "AHARNESS_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env,
+		"AHARNESS_STATE_DIR="+stateDir,
+		"AHARNESS_PROVIDER_TOKEN=test-token",
+		testCatalogEnv(),
+	)
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader(script)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("run harness: %v\nstderr:\n%s", err, stderr.String())
+		}
+	}
+
+	files, err := filepath.Glob(filepath.Join(stateDir, "sessions", "*.jsonl"))
+	if err != nil || len(files) != 4 {
+		t.Fatalf("session logs = %v (%v), want a parent and three children", files, err)
+	}
+	var parentPath string
+	childSessions := make(map[string]bool, 3)
+	for _, path := range files {
+		events := readSessionEvents(t, path)
+		var start struct {
+			ParentCallID string `json:"parent_call_id"`
+		}
+		if err := json.Unmarshal(events[0].Data, &start); err != nil {
+			t.Fatalf("decode session_start: %v", err)
+		}
+		if start.ParentCallID == "" {
+			parentPath = path
+			continue
+		}
+		childSessions[strings.TrimSuffix(filepath.Base(path), ".jsonl")] = true
+		final := 0
+		for _, ev := range events {
+			if ev.Type == "final" {
+				final++
+			}
+		}
+		if final != 1 {
+			t.Fatalf("child %s final events = %d, want 1", path, final)
+		}
+	}
+	if parentPath == "" || len(childSessions) != 3 {
+		t.Fatalf("parent = %q, children = %v", parentPath, childSessions)
+	}
+
+	var details tools.DelegateDetails
+	found := false
+	for _, ev := range readSessionEvents(t, parentPath) {
+		if ev.Type != "tool_result" {
+			continue
+		}
+		var data struct {
+			Name    string          `json:"name"`
+			Details json.RawMessage `json:"details"`
+		}
+		if err := json.Unmarshal(ev.Data, &data); err != nil {
+			t.Fatalf("decode tool_result: %v", err)
+		}
+		if data.Name != "delegate" {
+			continue
+		}
+		parsed, ok := tools.ParseDelegateDetails(data.Details)
+		if !ok {
+			t.Fatalf("delegate details did not decode: %s", data.Details)
+		}
+		details = parsed
+		found = true
+	}
+	if !found {
+		t.Fatal("the parent log has no delegate tool_result")
+	}
+	if details.Execution != tools.ExecutionConcurrent {
+		t.Fatalf("execution = %q (%q), want concurrent", details.Execution, details.ExecutionReason)
+	}
+	if len(details.Tasks) != 3 || details.SubagentTurns != 3 {
+		t.Fatalf("details = %+v, want three completed tasks", details)
+	}
+	for _, task := range details.Tasks {
+		if task.Status != tools.SubagentCompleted {
+			t.Fatalf("task = %+v, want completed", task)
+		}
+		if !childSessions[task.Session] {
+			t.Fatalf("task session %q is not a recorded child", task.Session)
+		}
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

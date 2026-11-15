@@ -179,8 +179,9 @@ Other event payloads:
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
 | Toolset version | `toolset-v2` for new sessions | `toolset-v0` and `toolset-v1` declarations are frozen for replay; `toolset-v2` adds `delegate` to v1. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, and an older session cannot delegate. |
 | Prompt version | `prompt-v1` for new sessions | `prompt-v0` stays frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
-| `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Tasks run in array order. |
-| `delegate` | Concurrent children per call | 1 | Milestone 1 executes sequentially; the concurrency cap of 4 belongs to the deferred read-only fan-out. |
+| `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Results always appear in array order. |
+| `delegate` | Concurrent children per call | 4 | A call runs concurrently only when every task's effective grant is a subset of `read_file`, `search`, `web_search`, and `web_fetch`; any write-capable task forces the whole call sequential. The cap matches `maxItems`. |
+| `delegate` | Recorded execution mode | `concurrent` or `sequential` in `details` | `execution_reason` explains a sequential choice. A call that cannot reserve every fresh child under `-max-subagents` runs sequentially so the rejected spawn is deterministic. |
 | `delegate` | `task` field | 16 KiB | A longer self-contained prompt is `invalid_args`; it is a delegation prompt, not a document. |
 | `delegate` | Child report | 16 KiB | Head-capped with `[truncated N bytes]`, marked once when instruction-shaped, and never rewritten. An empty report becomes `(no report)`. |
 | `delegate` | `details` | 4 KiB | Exceeding it is `internal_error`: the spawner controls the size. |

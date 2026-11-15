@@ -1,7 +1,7 @@
 # aharness subagent build plan
 
 - **Date:** 2026-11-15
-- **Status:** implemented 2026-11-15 (milestones 1–2). Milestones 3–4 are
+- **Status:** implemented 2026-11-15 (milestones 1–3). Milestone 4 is
   deferred and recorded in §4.3. Current reference documents win where they
   disagree; implementation updated them in the same change, and §11 records the
   deviations. The real-provider smoke (§5.4) is **not run** while
@@ -990,7 +990,7 @@ boundary; the child log records it with the new source and the TUI labels it as
 a delegation steer, not a human steer; the parent's transcript is unchanged
 except for its own events.
 
-**M3 — read-only fan-out.**
+**M3 — read-only fan-out.** Implemented.
 
 - Execute a call's tasks concurrently when every named agent's grant is a
   subset of `read_file`, `search`, `web_search`, `web_fetch`; otherwise keep
@@ -1273,14 +1273,15 @@ When implemented, update:
 
 ## 11. Implementation deviations
 
-Milestone 1 was implemented in one change. The current reference documents
-(architecture, limits, configuration, commands, tui, testing strategy) carry the
-shipped contract; this section records where the code differs from the plan
-text above.
+Milestone 1 was implemented in one change. Milestone 2 added child focus and
+steering, and milestone 3 added read-only fan-out. The current reference
+documents (architecture, limits, configuration, commands, tui, testing
+strategy) carry the shipped contract; this section records where the code
+differs from the plan text above.
 
 | Area | Plan | Shipped | Why |
 |---|---|---|---|
-| Spawn interface | `Spawn(ctx, specs)` | `Spawn(ctx, Call, specs)` plus `Agents()` | A child must record the parent tool-call ID (`parent_call_id`) and inherit the parent's remaining token budget; the tool must reject an unknown agent before any task runs and list the available names. Both facts are only available at the call site. |
+| Spawn interface | `Spawn(ctx, specs) []SubagentReport` | `Spawn(ctx, Call, specs) SpawnResult` plus `Agents()` | A child must record the parent tool-call ID (`parent_call_id`) and inherit the parent's remaining token budget; the tool must reject an unknown agent before any task runs and list the available names. Both facts are only available at the call site. M3 extends the return value with the execution mode because only the spawner knows the effective grants. |
 | `delegate` `intent` | no `maxLength` | `maxLength: 200` | Every current tool schema declares the shared, capped `intent` argument, and a unit test enforces it. The schema is new in `toolset-v2`, so the cap adds no replay risk. |
 | Progress and finish payloads | no cost-completeness field | `CostComplete` on `SubagentProgress` and `SubagentFinished` | Without it the roster cannot distinguish a free child from an unpriced one; the column would have to claim `$0.000000` for an unknown cost. |
 | Resumed child turns | "the same 40-turn cap" | definition `max_turns`, else parent `-max-turns`, else unlimited | §1.4 and §6 define the budget and reject a fixed constant; §3.5's 40 was a leftover and is superseded. |
@@ -1292,8 +1293,12 @@ text above.
 | Child focus surface (M2) | `Enter` "focuses" a row; a child "view" opened from a row | focus replaces the parent transcript with the child view and closes the roster; the composer stays live | An overlay would swallow the composer, so steering from a focused row needs the composer. Closing the roster makes one `Esc` return to the parent, exactly as the milestone's interruption rule requires. |
 | Child transcript source (M2) | rendering `agent.History` | read from the child log without its lock, through the latest run's spawner | The child holds the exclusive session lock while it runs, so a normal open would report `unavailable`. The reader tolerates a torn final line, and `agent.History` caps the projection. |
 | Steering delivery API (M2) | route composer input to `Config.Steering` | `SubagentFocus.SteerSubagent` → `Spawner.SteerChild` → the child channel, with `Config.SteeringSource` | The TUI cannot reach a child runner directly; the spawner is the only object that owns the live child. The source field is what makes the log record `subagent-steer` instead of `steer`. |
+| Execution reporting (M3) | `execution` in `details` | `execution` plus `execution_reason` | `execution` alone says what ran; the short reason says which task disqualified the call, which is the diagnostic an operator needs from a sequential fallback. |
+| Read-only classification (M3) | "every named agent's grant" | fresh tasks use the definition; continuations read the recorded `session_start.tools`, require a non-nil grant, and are never classified optimistically | A continuation must not become concurrent because a definition file changed after the child started. A nil recorded grant means the whole toolset, including writers. |
+| Reservation under `-max-subagents` (M3) | not specified | a concurrent call falls back to sequential when its fresh tasks do not all fit the remaining `-max-subagents` budget | Otherwise several goroutines race for the last slot and the task that loses is nondeterministic. Falling back keeps array order and the M1 result shape. |
+| `toolset-v2` text (M3) | "no schema change later" | unchanged, including "Tasks run in order" | The schema is recorded prompt material and M3 promised no version bump. Read-only concurrent execution is behavior, not a new tool declaration; it is documented in the reference docs and `details` carries the actual mode. |
 
-Deferred as planned: concurrent read-only fan-out (M3) and `agent_overrides`
-with a config writer (M4). The M1 checklist in §1.4 is the shipped M1 scope; the
-M2 acceptance paragraph in §4.3 is the shipped M2 scope. The manual
-real-provider smoke was not run.
+Deferred as planned: `agent_overrides` with a config writer (M4). The M1
+checklist in §1.4 is the shipped M1 scope, the M2 acceptance paragraph in §4.3
+is the shipped M2 scope, and the M3 paragraph above is the shipped M3 scope.
+The manual real-provider smoke was not run.
