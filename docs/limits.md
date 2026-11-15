@@ -1,9 +1,9 @@
 # aharness limits and timeouts
 
-- **Date:** 2026-11-13
-- **Status:** current for v1, the shipped TUI (including transcript folding),
-  model discovery, thinking effort, web search, and the flag/env/config-file
-  configuration layers.
+- **Date:** 2026-11-15
+- **Status:** current for v1, the shipped TUI (including transcript folding and
+  the todo widget), model discovery, thinking effort, web search, and the
+  flag/env/config-file configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
   [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
@@ -261,6 +261,7 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Image thumbnail | 60×20 cells or available width | Half-block glyph preview; Kitty only in the viewer. |
 | Tool output | 4 KiB or 40 lines expanded | Collapsed shows the last seven rendered rows of the full result; expanded output never exceeds the logged tool-result cap. |
 | Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky, display-only, and not persisted. |
+| Todo widget | 8 rows | One header plus up to seven one-line items, each truncated to the available width. The window keeps the in-progress (or first pending) item visible and reports hidden items as a count. Hidden when the list is empty, there is no room, or the slash-command menu is open. Derived from the last successful `todo` result's `details`; not a new durable event. |
 | Tool intent title | 200 bytes | Shared display-only `intent`, trimmed and cut on a rune boundary. A missing intent falls back to the raw argument preview and never fails a call. |
 | Tool arguments preview | 2 KiB or 8 lines | Full arguments remain in `model_response`/the log. |
 | Input history | 100 entries | In-memory only; not persisted. |

@@ -179,6 +179,9 @@ type App struct {
 	rich      bool
 	expandAll bool
 	headless  bool
+	// todos is the checklist last published by the todo tool. It is
+	// display-only and restored from the session log through TodoProvider.
+	todos []tools.TodoItem
 
 	run         liveRun
 	nextRun     int
@@ -273,6 +276,9 @@ func New(opts Options) *App {
 		}
 		if history, err := opts.Host.History(); err == nil {
 			app.loadHistory(history)
+		}
+		if provider, ok := opts.Host.(TodoProvider); ok {
+			app.setTodos(provider.TodoItems())
 		}
 		// The host may have resolved the session with a warning (for example,
 		// an inherited effort cleared by a model change). It is consumed here
@@ -374,7 +380,11 @@ func (m *App) applySessionSnapshot(snapshot SessionSnapshot) {
 	m.suggestionIndex = 0
 	m.suggestionPrefix = ""
 	m.suggestionDismissed = false
+	m.todos = nil
 	m.loadHistory(snapshot.History)
+	if provider, ok := m.host.(TodoProvider); ok {
+		m.setTodos(provider.TodoItems())
+	}
 	for _, text := range snapshot.Notices {
 		m.appendNotice(agent.NoticeWarning, text)
 	}

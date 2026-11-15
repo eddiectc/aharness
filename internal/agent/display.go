@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -86,6 +87,10 @@ type ToolCompleted struct {
 	Duration  time.Duration
 	TimedOut  bool
 	Truncated bool
+	// Details is the structured tool result payload recorded in the log (for
+	// example, the todo checklist). It is display-only metadata for consumers
+	// that can use it; it is never logged by the display path.
+	Details json.RawMessage
 }
 
 // MessageRecorded acknowledges a task, steering line, or hint after its

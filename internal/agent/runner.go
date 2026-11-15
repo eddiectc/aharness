@@ -1177,6 +1177,7 @@ func toolCompletedEvent(turn int, call model.ToolCall, payload toolResultData) T
 		Duration:  time.Duration(payload.DurationMS) * time.Millisecond,
 		TimedOut:  payload.TimedOut,
 		Truncated: payload.Truncated,
+		Details:   payload.Details,
 	}
 }
 

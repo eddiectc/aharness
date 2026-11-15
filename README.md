@@ -11,7 +11,8 @@ opt-in and unlimited by default.
   contract with `toolset-v1` replay, search/command improvements, and builtin
   SearXNG-backed web search. The
   default TUI, provider/model discovery, per-model thinking effort,
-  display-only thinking text, and folded thinking/tool output are implemented.
+  display-only thinking text, folded thinking/tool output, and the persistent
+  todo checklist widget are implemented.
   The TUI is
   the default in a terminal;
   `-batch` keeps the one-shot CLI and `-ui-json` is the headless automation
@@ -98,7 +99,9 @@ opt-in and unlimited by default.
   items to replace it, omit items to read it, or send an empty list to clear
   it. At most one item may be `in_progress`; the list is returned after every
   call, recorded with the tool result, and restored at run start, so a resumed
-  or follow-up run keeps it.
+  or follow-up run keeps it. The TUI shows the current checklist in a persistent
+  capped panel above the composer, updated from the recorded details and
+  restored on resume, fork, and session switch.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
   exclusive/shared `flock`, torn-final-line repair, and a per-run `final`.
 - `-resume <id>` continues a session in place; `-fork <id>` creates a new
@@ -110,13 +113,14 @@ opt-in and unlimited by default.
 - The default interactive TUI: a full-screen transcript, a growing multi-line
   composer (`Shift-Enter`/`Alt-Enter` inserts a newline, `F4` opens
   `$VISUAL`/`$EDITOR`), streaming text, a display-only `thinking` block for
-  model reasoning, folded thinking/tool blocks (`F3`), tool activity,
-  steering, interrupt/cancel, rich/raw markdown with table overlays,
-  a workspace file picker, catalog-backed next-run model and thinking-effort
-  pickers, details and help overlays, workspace-contained images, and mouse
-  wheel scrolling. The wheel capture also takes the terminal's own selection,
-  so an empty transcript and the help overlay point at the escape hatch:
-  `Shift`+drag to select and `Shift`+middle-click or `Ctrl+Shift+V` to paste.
+  model reasoning, folded thinking/tool blocks (`F3`), a persistent todo
+  checklist panel, tool activity, steering, interrupt/cancel, rich/raw markdown
+  with table overlays, a workspace file picker, catalog-backed next-run model
+  and thinking-effort pickers, details and help overlays, workspace-contained
+  images, and mouse wheel scrolling. The wheel capture also takes the terminal's
+  own selection, so an empty transcript and the help overlay point at the escape
+  hatch: `Shift`+drag to select and `Shift`+middle-click or `Ctrl+Shift+V` to
+  paste.
   One process holds one active session and may execute one run per submitted
   message; `/new` replaces it with a fresh session and `/resume` reopens a
   previous session in the same workspace while idle.

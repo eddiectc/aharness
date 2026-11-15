@@ -1,16 +1,18 @@
 # aharness TUI (shipped)
 
-- **Date:** 2026-11-14
+- **Date:** 2026-11-15
 - **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
   picker from [model discovery](plans/model-discovery-build.md), the thinking
-  effort controls from [thinking effort](plans/thinking-effort-build.md), and
-  the transcript folding from [transcript folding](plans/transcript-folding-build.md).
+  effort controls from [thinking effort](plans/thinking-effort-build.md), the
+  transcript folding from [transcript folding](plans/transcript-folding-build.md),
+  and the persistent todo widget.
   The full contract and milestone rationale are in
   [tui-build.md](plans/tui-build.md); this document records the shipped surface
   and verification status.
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
-  steering, interrupts, resume, fork, signals, and `F3` folding), headless
-  `x/vt` frames and SVG snapshots, race tests, and a manual PTY smoke under
+  steering, interrupts, resume, fork, signals, `F3` folding, and the todo
+  widget's render/restore path), headless `x/vt` frames and SVG snapshots, race
+  tests, and a manual PTY smoke under
   `script(1)` at 80x24. The real-provider TUI smoke with a reasoning-capable
   model remains pending provider credentials.
 - **Not verified:** Kitty graphics and the real-terminal 200x60/tmux matrix
@@ -36,6 +38,8 @@ TUI and `-ui-json`:
 - always stream assistant text; `-stream=false` is a config error;
 - show model thinking as a separate, display-only `thinking` transcript block
   under the run it belongs to, folded by default (see [Thinking](#thinking));
+- show the checklist published by the `todo` tool in a persistent capped panel
+  above the composer (see [Todo widget](#todo-widget));
 - auto-submit `-task`/`-task-file` after the first frame;
 - allow new/resume/fork, with `-fork` optionally having no task;
 - never print final assistant text to stdout;
@@ -267,6 +271,32 @@ act on it.
   newlines flatten to spaces, tabs expand, and the value is capped at 200 bytes
   on a rune boundary. A missing intent never fails a tool call.
 
+## Todo widget
+
+The TUI keeps the checklist published by the `todo` tool in a persistent widget
+between the transcript and the composer. It is display-only and is rebuilt from
+the structured `details` of the last successful `todo` result, never by parsing
+the rendered tool output.
+
+- While the list is non-empty the widget shows a `todo · <done>/<total> done`
+  header and one row per visible item (`[ ]`, `[~]`, `[x]`). Completed rows are
+  dim, the in-progress row is accented, and each item is one line, truncated to
+  the available width; the full text stays in the tool transcript.
+- The widget is capped at eight rows including its header. When the list is
+  longer, the window includes the in-progress item, or the first pending item
+  when none is in progress, and the header reports the hidden count as
+  `· N more`.
+- An empty list hides the widget. It is also hidden while the slash-command
+  completion menu is open, so the transient menu keeps its rows; the widget
+  returns when the menu closes.
+- A resumed or forked session and a `/resume` switch restore the widget from
+  the last successful `todo` result recorded in the log before the first new
+  run; a follow-up run keeps the list already shown. The transcript's tool block
+  remains the durable history.
+- The widget adds no durable event, protocol event, or protocol version. It
+  appears in `-ui-json` `frame` lines and snapshots like other frame text, so a
+  client scraping frames sees the current checklist.
+
 ## Status line and details
 
 The header line shows `effort <value>` for the next run, or `effort default`
@@ -351,8 +381,9 @@ Frames are emitted after every view-changing command, after a completed
 `wait`, and after each non-text semantic transition. Text deltas update the
 model but do not emit a frame; request `frame` to snapshot streaming text.
 Collapsed thinking and tool blocks contribute fewer `lines` to a frame; send
-`key` `f3` to expand them. This is a display-only content change, not a new
-event or protocol version.
+`key` `f3` to expand them. The todo widget also contributes frame `lines` when
+the checklist is non-empty; it emits no semantic `event`. This is a
+display-only content change, not a new event or protocol version.
 Frames and snapshots are deterministic for a fixed provider/tool response,
 size, color profile, and image protocol: `-ui-json` hides the session ID,
 elapsed time, and durations. `-ui-json` always uses glyph image mode.
@@ -378,6 +409,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |
 | Images per transcript / thumbnail | 32 / 60×20 cells | Older images fall off; thumbnails are half-block glyphs. |
 | Tool output | 4 KiB or 40 lines expanded | Collapsed tool blocks show the last seven rendered rows of the full result; expanded output is bounded to the first 40 lines / 4 KiB, and the remainder stays in the log. |
+| Todo widget | 8 rows | One header plus up to seven one-line items; the window keeps the in-progress (or first pending) item visible and reports hidden items as a count. Hidden when the list is empty, there is no room, or the slash-command menu is open. |
 | Tool intent title | 200 bytes | Shared display-only `intent` argument, trimmed and cut on a rune boundary; a missing intent falls back to the 2 KiB raw argument preview and never fails the call. |
 | Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last seven wrapped rows. `F3` expands all folds; the mode is sticky and not persisted. |
 | Tool arguments preview | 2 KiB | Full arguments remain in `model_response`. |

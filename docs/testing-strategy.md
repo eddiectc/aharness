@@ -1,8 +1,8 @@
 # aharness v1 testing strategy
 
-- **Date:** 2026-11-13
-- **Status:** normative testing strategy for v1, the shipped TUI, model
-  discovery, thinking effort, and the builtin tool set
+- **Date:** 2026-11-15
+- **Status:** normative testing strategy for v1, the shipped TUI (including the
+  todo widget), model discovery, thinking effort, and the builtin tool set
 - **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md), [web search build plan](plans/web-search-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
@@ -340,7 +340,12 @@ diagnostic, not a gate.
   statuses; the binary records exactly one paired `tool_result` with the
   rendered checklist, the next provider request carries that list, and the
   workspace stays empty. A resume in a new process issues a `todo` read and
-  receives the list recorded by the earlier run.
+  receives the list recorded by the earlier run. The TUI path also proves the
+  widget: the `-ui-json` final frame shows the checklist header and items after
+  the tool call, and a resumed process restores the widget from the log before
+  any new tool call. Unit tests cover clearing, failed/foreign/malformed
+  details, the in-progress window, the row cap, the completion-menu rule, and
+  the 40×10 minimum terminal.
 - Web extraction fuzz: arbitrary HTML and content types through the extraction
   pipeline (no panic, valid UTF-8, no control characters, bounded output), and
   arbitrary strings through the fetch-target and provider-endpoint validators

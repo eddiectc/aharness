@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -292,6 +293,45 @@ func TestDisplayNonStreamingReasoningEmitted(t *testing.T) {
 	}
 	if len(reasoning) != 1 || reasoning[0] != "buffered thought" {
 		t.Fatalf("reasoning deltas = %v, want one buffered block", reasoning)
+	}
+}
+
+func TestDisplayToolCompletedCarriesDetails(t *testing.T) {
+	cfg := testConfig()
+	var completed []ToolCompleted
+	cfg.Display = func(ev DisplayEvent) error {
+		if tc, ok := ev.(ToolCompleted); ok {
+			completed = append(completed, tc)
+		}
+		return nil
+	}
+	comp := &fakeCompleter{steps: []scriptStep{
+		{resp: model.Response{
+			FinishReason: model.FinishToolCalls,
+			ToolCalls: []model.ToolCall{{
+				ID: "call_todo", Name: "todo",
+				Arguments: []byte(`{"intent":"plan the work","items":[{"content":"write tests","status":"in_progress"}]}`),
+			}},
+		}},
+		{resp: model.Response{Text: "done", FinishReason: model.FinishStop}},
+	}}
+	ts := &fakeToolset{exec: func(context.Context, string, json.RawMessage) tools.Result {
+		return tools.Result{
+			OK:      true,
+			Code:    tools.CodeOK,
+			Output:  "Todo list updated\n[~] write tests\n",
+			Details: json.RawMessage(`{"items":[{"content":"write tests","status":"in_progress"}]}`),
+		}
+	}}
+	if _, res, err := runTask(t, cfg, comp, ts); err != nil || res.Status != StopCompleted {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	if len(completed) != 1 {
+		t.Fatalf("tool completions = %d, want 1", len(completed))
+	}
+	got := string(completed[0].Details)
+	if !strings.Contains(got, `"items"`) || !strings.Contains(got, "write tests") {
+		t.Fatalf("ToolCompleted.Details = %q, want the structured todo payload", got)
 	}
 }
 

@@ -21,6 +21,7 @@ type manualHost struct {
 	history  []agent.HistoryItem
 	models   []ModelChoice
 	ws       *tools.Workspace
+	todos    []tools.TodoItem
 	startErr error
 
 	mu    sync.Mutex
@@ -48,6 +49,7 @@ func (r *manualRun) Done() <-chan agent.Result { return r.done }
 func (h *manualHost) Info() Info                            { return h.info }
 func (h *manualHost) Models() []ModelChoice                 { return h.models }
 func (h *manualHost) History() ([]agent.HistoryItem, error) { return h.history, nil }
+func (h *manualHost) TodoItems() []tools.TodoItem           { return cloneTodoItems(h.todos) }
 func (h *manualHost) Close() error                          { return nil }
 func (h *manualHost) Workspace() *tools.Workspace           { return h.ws }
 

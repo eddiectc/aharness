@@ -223,6 +223,14 @@ func (h *tuiHost) TakeModelWarning() string {
 
 func (h *tuiHost) Workspace() *tools.Workspace { return h.ws }
 
+// TodoItems returns the checklist recorded by the active session log so the
+// TUI widget can show it before the next todo call and after a session switch.
+func (h *tuiHost) TodoItems() []tools.TodoItem {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return agent.RestoreTodo(h.store.Events())
+}
+
 func (h *tuiHost) Details() tui.Details {
 	h.mu.Lock()
 	defer h.mu.Unlock()

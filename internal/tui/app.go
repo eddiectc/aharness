@@ -162,6 +162,13 @@ type WorkspaceProvider interface {
 	Workspace() *tools.Workspace
 }
 
+// TodoProvider is an optional Host capability that reports the checklist
+// restored from the active session log. The TUI uses it to show the todo widget
+// before the next todo tool call and after a session switch.
+type TodoProvider interface {
+	TodoItems() []tools.TodoItem
+}
+
 // Details is optional host metadata for the details overlay.
 type Details struct {
 	TracePath        string
@@ -504,7 +511,7 @@ func (m *App) layout() {
 		return
 	}
 	header, composerH, status := 1, m.composerHeight(), 1
-	transcript := max(1, m.height-header-composerH-status)
+	transcript := max(1, m.height-header-composerH-status-m.todoHeight())
 	m.viewport.SetSize(m.width, transcript)
 	m.composer.SetWidth(max(1, m.width-2))
 	m.composer.SetHeight(m.editorHeight())
@@ -1087,6 +1094,11 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.timedOut = ev.TimedOut
 		it.toolTime = ev.Duration
 		it.invalidateLines()
+		if ev.OK && ev.Name == "todo" {
+			if items, ok := todoFromDetails(ev.Details); ok {
+				m.setTodos(items)
+			}
+		}
 		delete(m.run.pending, it.callID)
 		m.dirty = true
 		m.emit(EventToolFinished{

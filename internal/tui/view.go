@@ -122,6 +122,9 @@ func (m *App) View() tea.View {
 
 func (m *App) baseFrame() string {
 	parts := []string{m.headerLine(), m.viewport.View()}
+	if todo := m.todoView(); todo != "" {
+		parts = append(parts, todo)
+	}
 	if suggestions := m.suggestionView(); suggestions != "" {
 		parts = append(parts, suggestions)
 	}
@@ -260,10 +263,9 @@ func (m *App) cursor() *tea.Cursor {
 	if cur == nil {
 		return nil
 	}
-	header, composerH, status := 1, m.composerHeight(), 1
-	transcript := max(1, m.height-header-composerH-status)
+	header := 1
 	x := cur.X
-	y := header + transcript + m.visibleSuggestionCount() + cur.Y
+	y := header + m.viewport.Height() + m.todoHeight() + m.visibleSuggestionCount() + cur.Y
 	if x < 0 || x >= m.width || y < 0 || y >= m.height {
 		return nil
 	}
