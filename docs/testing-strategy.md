@@ -194,13 +194,11 @@ real timeouts for subprocess and signal tests.
   loss; a single over-budget line prefix with its marker and no continuation;
   empty files, trailing newlines, CRLF, multibyte UTF-8, offset past EOF, and
   no index panics.
-- Eval driver: manifest/meta validation, setup-failure exclusion, verifier
-  failure, arm interleaving and recorded order, metrics from a hand-built
-  session fixture, price-table and peak-window cost, catalog-pricing fallback,
-  missing usage not averaged as zero, bootstrap determinism, and summary
-  ordering. The shipped suite test asserts 30 tasks, at least three clusters,
-  executable setup/verify scripts, the price snapshot, and the honest
-  `baseline.json` status.
+- Evaluation is external and dev-only. The removed eval driver is not a test
+  surface; the current proposal is in
+  [evaluation-research.md](research/evaluation-research.md). Until that
+  proposal is implemented, the test layers above are the only automated
+  regression gate.
 - Toolset selection: frozen v0 schemas, current v1 schemas, unknown version
   error, `Projection.Schemas` and the token estimate using the recorded set,
   and a seeded v0 session resuming with v0 descriptions.

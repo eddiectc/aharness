@@ -69,6 +69,7 @@ rewriting its conclusions.
 |---|---|
 | [research/agent-harness-minimum.md](research/agent-harness-minimum.md) | 2026-11-09; minimum harness and primary sources |
 | [research/agent-tooling-research.md](research/agent-tooling-research.md) | 2026-11-11; tool set, limits, usage, and evaluation methodology |
+| [research/evaluation-research.md](research/evaluation-research.md) | 2026-11-15; private, harness-agnostic evaluation design, task sourcing, metrics, and experiment options |
 
 ## Link check
 
