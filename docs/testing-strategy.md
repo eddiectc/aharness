@@ -296,6 +296,32 @@ diagnostic, not a gate.
   the catalog server down and no explicit model still starts from the recorded
   values; an explicit model change resolves through the catalog; an explicit
   provider mismatch exits 2.
+- Subagents end to end: a parent's fake-provider response calls `delegate`; the
+  spawner runs the child over its own store in the same state directory. Assert
+  that the child log validates as v2, starts with `session_start` carrying
+  `parent_session`/`parent_call_id`/`agent`/`tools`/`system_prompt`, has exactly
+  one `final`, and that the parent log contains no child events. A scripted
+  child response that calls `edit_file` outside its grant returns
+  `unknown_tool` and leaves the file unchanged; a child that calls `delegate`
+  gets the same result because the tool is absent from its schemas and plan.
+  Continue a child with `session`, assert a second `run_start` in the same log
+  and that the cumulative turn cap applies. Assert that child input+output
+  tokens push a parent with `-max-total-tokens` into `token_limit` while child
+  turns leave the parent's `-max-turns` counter alone. Assert that `Inspect`
+  on the parent reconstructs the subagent totals, that `/resume` omits child
+  sessions, and that `-resume <child-id>` opens one as a normal session.
+- Definitions: a user definition under `<state-dir>/agents/` replaces the
+  bundled agent of the same name and its prompt, tools, model, and effort are
+  what the child records; a malformed file does not replace a bundled agent and
+  appears as an `invalid` row in `/agents`. A batch session records a grant
+  without `delegate`, and a resumed batch session keeps it.
+- Delegation display: `SubagentStarted` precedes `SubagentFinished` precedes
+  `ToolCompleted`; a replayed delegate block is reconstructed from `details`
+  alone; a headless `-ui-json` run opens `/agent-hub` mid-run and a frame lists
+  every child's agent, intent, model, effort, and elapsed. A second deterministic
+  frame is checked for column drops at 120, 80, 70, and 60 columns, an eight-row
+  roster plus `+1 more`, and an intent carrying ANSI/control characters renders
+  as one inert capped line.
 - `-list-models`: assert the tab-separated header and rows, exit 0, no session
   file, no task/token requirement, and stale-cache fallback. The header ends
   with `EFFORT`; rows print the normalized comma-separated values and `-` for a
@@ -407,7 +433,11 @@ include usage detail objects and malformed subset bounds: no panic, no unbounded
 allocation, deterministic normalization, and invalid subsets rejected as
 `protocol_error`. Seeds live under
 `internal/model/testdata/fuzz` and `internal/session/testdata/fuzz`; the
-TUI/history targets use built-in seeds. `FuzzSearchJSON` decodes arbitrary
+TUI/history targets use built-in seeds. `FuzzParseAgentDefinition` covers the header/body split, newline forms, header
+grams, and large inputs: no panic, no unbounded allocation, and an error for
+anything outside the grammar. `FuzzDelegateArguments` includes nested arrays
+and duplicate child sessions and asserts every result is rejected or normalized
+within the delegate caps. `FuzzSearchJSON` decodes arbitrary
 SearXNG JSON through the same filter/sanitize path: no panic, at most ten
 results, http(s)-only URLs with no fragment, snippets within 1,200 runes, and a
 200-rune unresponsive warning. The unit test run executes the seeds; a
@@ -435,6 +465,17 @@ resume without an explicit model works with the catalog server down. Confirm
 `session_start`/`run_start` record the catalog's provider/model/dialect/base
 URL/limits and that new sessions use the documented
 `https://opencode.ai/inference/go/openai/v1` base.
+
+Subagent smoke (requires provider credentials; it is a release prerequisite
+when `AHARNESS_PROVIDER_TOKEN` is unset, not a claim): run an `explore`
+delegation against this repository, then a `reviewer` delegation on the working
+tree. Record the parent's estimated input growth per turn, child turns, child
+cost, and report sizes; that measurement decides whether the 16 KiB report cap
+and the bundled read-only grants are right. `Esc` during a long `explore` child
+must leave the child log `interrupted` with one `final`, continue the parent,
+and leave no child process behind. Override `reviewer` in
+`<state-dir>/agents/reviewer.md` with a different model and effort and confirm
+the child records the new values.
 
 For each dialect: run a non-streamed batch task and a streamed batch task,
 then run the TUI through new, stream, tool round, steer, `Esc`/first `Ctrl-C`,

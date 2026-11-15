@@ -13,10 +13,11 @@ import (
 // Display history caps. They bound the UI projection only; the log is
 // unchanged.
 const (
-	maxHistoryItems     = 20_000
-	maxHistoryTextBytes = 16 << 20
-	maxHistoryItemBytes = 64 << 10
-	maxHistoryArgsBytes = 2 << 10
+	maxHistoryItems        = 20_000
+	maxHistoryTextBytes    = 16 << 20
+	maxHistoryItemBytes    = 64 << 10
+	maxHistoryArgsBytes    = 2 << 10
+	maxHistoryDetailsBytes = 4 << 10
 )
 
 // HistoryKind classifies one display-only transcript item.
@@ -50,13 +51,17 @@ type HistoryItem struct {
 	ExitCode  int
 	Truncated bool
 	TimedOut  bool
-	Status    StopReason
-	Reason    string
-	Model     string
-	Dialect   string
-	Duration  time.Duration
-	Turns     int
-	Usage     model.Usage
+	// Details is the structured tool result payload recorded in the log. The
+	// TUI decodes a delegate result from it to render the recorded per-task
+	// table after a resume.
+	Details  json.RawMessage
+	Status   StopReason
+	Reason   string
+	Model    string
+	Dialect  string
+	Duration time.Duration
+	Turns    int
+	Usage    model.Usage
 }
 
 // History reconstructs a capped, display-only transcript from v2 events. It
@@ -282,6 +287,7 @@ func (b *historyBuilder) fillToolResult(data toolResultData, turn int) *HistoryI
 		item.ExitCode = historyExitCode(data.ExitCode)
 		item.Truncated = data.Truncated
 		item.TimedOut = data.TimedOut
+		item.Details = capHistoryDetails(data.Details)
 		item.Duration = time.Duration(data.DurationMS) * time.Millisecond
 		item.Turn = turn
 		return item
@@ -294,6 +300,16 @@ func historyExitCode(code *int) int {
 		return 0
 	}
 	return *code
+}
+
+// capHistoryDetails keeps a decode-able delegate summary without letting a
+// hostile log grow the display projection. Larger payloads are dropped; the
+// durable log is unchanged.
+func capHistoryDetails(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || len(raw) > maxHistoryDetailsBytes {
+		return nil
+	}
+	return slices.Clone(raw)
 }
 
 // capHistoryArguments keeps tool arguments viewable without letting a hostile

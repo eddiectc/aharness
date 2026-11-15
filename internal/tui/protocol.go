@@ -226,6 +226,8 @@ type toolStartedLine struct {
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
 	Arguments any    `json:"arguments"`
+	// SubagentTasks is the optional per-task summary of a delegate call.
+	SubagentTasks []SubagentTaskLine `json:"subagent_tasks,omitempty"`
 }
 
 type toolFinishedLine struct {
@@ -239,6 +241,8 @@ type toolFinishedLine struct {
 	ExitCode  int    `json:"exit_code"`
 	Truncated bool   `json:"truncated"`
 	TimedOut  bool   `json:"timed_out"`
+	// SubagentTasks is the optional per-task summary of a delegate call.
+	SubagentTasks []SubagentTaskLine `json:"subagent_tasks,omitempty"`
 }
 
 type modelChangedLine struct {
@@ -287,7 +291,8 @@ func encodeEvent(ev any) ([]byte, error) {
 		out = toolStartedLine{
 			V: protocolVersion, Type: "event", Event: "tool_started",
 			CallID: SanitizeLine(ev.CallID), Name: SanitizeLine(ev.Name),
-			Arguments: protocolArguments(ev.Arguments),
+			Arguments:     protocolArguments(ev.Arguments),
+			SubagentTasks: sanitizeSubagentTasks(ev.SubagentTasks),
 		}
 	case EventToolFinished:
 		out = toolFinishedLine{
@@ -295,6 +300,7 @@ func encodeEvent(ev any) ([]byte, error) {
 			CallID: SanitizeLine(ev.CallID), Name: SanitizeLine(ev.Name),
 			OK: ev.OK, Code: SanitizeLine(ev.Code), ExitCode: ev.ExitCode,
 			Truncated: ev.Truncated, TimedOut: ev.TimedOut,
+			SubagentTasks: sanitizeSubagentTasks(ev.SubagentTasks),
 		}
 	case EventModelChanged:
 		out = modelChangedLine{
@@ -316,6 +322,25 @@ func encodeEvent(ev any) ([]byte, error) {
 		return nil, fmt.Errorf("unknown event %T", ev)
 	}
 	return jsonv2.Marshal(out)
+}
+
+// sanitizeSubagentTasks makes every roster string terminal-safe before it
+// crosses the protocol boundary.
+func sanitizeSubagentTasks(tasks []SubagentTaskLine) []SubagentTaskLine {
+	if len(tasks) == 0 {
+		return nil
+	}
+	out := make([]SubagentTaskLine, len(tasks))
+	copy(out, tasks)
+	for i := range out {
+		out[i].Agent = SanitizeLine(out[i].Agent)
+		out[i].Intent = CapText(SanitizeLine(out[i].Intent), hubIntentBytes)
+		out[i].Session = SanitizeLine(out[i].Session)
+		out[i].Model = SanitizeLine(out[i].Model)
+		out[i].Effort = SanitizeLine(out[i].Effort)
+		out[i].Status = SanitizeLine(out[i].Status)
+	}
+	return out
 }
 
 func protocolArguments(raw string) any {

@@ -31,6 +31,13 @@ type sessionStartData struct {
 	ThinkingEffort   string `json:"thinking_effort,omitempty"`
 	ParentSession    string `json:"parent_session,omitempty"`
 	ParentSeq        uint64 `json:"parent_seq,omitzero"`
+	// The resolved system prompt is authoritative for projection when
+	// present; a session recorded before it existed renders from
+	// PromptVersion instead.
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Agent        string   `json:"agent,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
+	ParentCallID string   `json:"parent_call_id,omitempty"`
 }
 
 type runStartData struct {
@@ -160,6 +167,12 @@ type runEndData struct {
 	CostMicroUSD    int64 `json:"cost_micro_usd,omitempty"`
 	RunCostComplete bool  `json:"run_cost_complete"`
 	CostComplete    bool  `json:"cost_complete"`
+	// Subagent totals are the spend of every delegated child in this run.
+	// Child turns are excluded from the parent's turn budget.
+	SubagentTurns        int         `json:"subagent_turns,omitzero"`
+	SubagentUsage        model.Usage `json:"subagent_usage"`
+	SubagentCostMicroUSD int64       `json:"subagent_cost_micro_usd,omitempty"`
+	SubagentCostComplete bool        `json:"subagent_cost_complete"`
 }
 
 // User-message sources recorded in the event log.

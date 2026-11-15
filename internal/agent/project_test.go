@@ -54,7 +54,7 @@ func TestProjectSystemPromptAndEstimate(t *testing.T) {
 		t.Fatalf("task message = %+v", proj.Messages[1])
 	}
 
-	systemTokens := (len(string(model.RoleSystem))+len(systemPrompt(workspace))+3)/4 + tokensPerMessage
+	systemTokens := (len(string(model.RoleSystem))+len(testSystemPrompt(t, workspace))+3)/4 + tokensPerMessage
 	userTokens := (len(string(model.RoleUser))+len("task")+3)/4 + tokensPerMessage
 	want := systemTokens + userTokens + len(proj.Schemas)*tokensPerTool
 	if proj.BeforeTokens != want || proj.AfterTokens != want || proj.EstimatedInputTokens != want {
@@ -89,7 +89,7 @@ func TestProjectSelectsToolsetSchemas(t *testing.T) {
 			if !reflect.DeepEqual(proj.Schemas, want) {
 				t.Fatalf("projection schemas = %v, want the frozen %s set", schemaNames(proj.Schemas), version)
 			}
-			systemTokens := (len(string(model.RoleSystem))+len(systemPrompt(workspace))+3)/4 + tokensPerMessage
+			systemTokens := (len(string(model.RoleSystem))+len(testSystemPrompt(t, workspace))+3)/4 + tokensPerMessage
 			userTokens := (len(string(model.RoleUser))+len("task")+3)/4 + tokensPerMessage
 			wantTokens := systemTokens + userTokens + len(want)*tokensPerTool
 			if proj.EstimatedInputTokens != wantTokens {
@@ -111,6 +111,18 @@ func TestProjectSelectsToolsetSchemas(t *testing.T) {
 			t.Fatalf("Project error = %v, want the unknown version", err)
 		}
 	})
+}
+
+// testSystemPrompt renders the current prompt for a workspace without a
+// catalog, which is what a start event without a recorded system prompt
+// projects.
+func testSystemPrompt(t *testing.T, workspace string) string {
+	t.Helper()
+	text, err := renderPrompt(PromptVersion, workspace, nil)
+	if err != nil {
+		t.Fatalf("renderPrompt: %v", err)
+	}
+	return text
 }
 
 func startEventForToolset(t *testing.T, workspace, version string) session.Event {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
 	"slices"
@@ -29,6 +30,16 @@ type State struct {
 	HarnessVersion string
 	ParentSession  string
 	ParentSeq      uint64
+	// ParentCallID distinguishes a delegated child from a fork: a child has a
+	// parent call identifier, a fork does not.
+	ParentCallID string
+	// SystemPrompt is the prompt recorded in session_start. Empty for a log
+	// written before the field existed.
+	SystemPrompt string
+	// Agent is the definition name recorded for a child session.
+	Agent string
+	// Tools is the recorded tool grant; nil means every tool of the version.
+	Tools          []string
 	InitialModel   string
 	InitialDialect string
 	Model          string
@@ -61,6 +72,12 @@ type State struct {
 	LastRunStatus StopReason
 	LastEventSeq  uint64
 	Pending       []PendingCall
+	// Subagent totals are folded from every recorded delegate result, so a
+	// resumed parent keeps the spend and the token budget it implies.
+	SubagentTurns        int
+	SubagentUsage        model.Usage
+	SubagentCostMicroUSD int64
+	SubagentCostComplete bool
 }
 
 // Inspect reconstructs the session state used for resume, fork, and the next
@@ -68,10 +85,11 @@ type State struct {
 // payload is a corrupt-log error.
 func Inspect(events []session.Event) (State, error) {
 	var (
-		state        State
-		startFound   bool
-		pending      []PendingCall
-		costComplete = true
+		state                State
+		startFound           bool
+		pending              []PendingCall
+		costComplete         = true
+		subagentCostComplete = true
 	)
 	for _, ev := range events {
 		state.LastEventSeq = ev.Seq
@@ -93,6 +111,10 @@ func Inspect(events []session.Event) (State, error) {
 			state.HarnessVersion = data.HarnessVersion
 			state.ParentSession = data.ParentSession
 			state.ParentSeq = data.ParentSeq
+			state.ParentCallID = data.ParentCallID
+			state.SystemPrompt = data.SystemPrompt
+			state.Agent = data.Agent
+			state.Tools = append([]string(nil), data.Tools...)
 			state.InitialModel = data.Model
 			state.InitialDialect = data.Dialect
 			state.Model = data.Model
@@ -162,6 +184,9 @@ func Inspect(events []session.Event) (State, error) {
 				return State{}, fmt.Errorf("%w: %w", session.ErrCorrupt, err)
 			}
 			pending = removePending(pending, data.CallID)
+			if data.Name == "delegate" {
+				foldDelegateDetails(&state, data.Details, &subagentCostComplete)
+			}
 		}
 	}
 	if !startFound {
@@ -171,8 +196,28 @@ func Inspect(events []session.Event) (State, error) {
 		return State{}, fmt.Errorf("%w: session_start is missing prompt or toolset version", session.ErrCorrupt)
 	}
 	state.CostComplete = costComplete
+	if state.SubagentUsage.Total() > 0 || state.SubagentTurns > 0 {
+		state.SubagentCostComplete = subagentCostComplete
+	}
 	state.Pending = pending
 	return state, nil
+}
+
+// foldDelegateDetails adds a recorded delegate result to the cumulative
+// subagent totals. Malformed or unknown details are ignored, not fatal: a
+// future tool with a different details shape must not break replay.
+func foldDelegateDetails(state *State, raw json.RawMessage, costComplete *bool) {
+	details, ok := tools.ParseDelegateDetails(raw)
+	if !ok || len(details.Tasks) == 0 {
+		return
+	}
+	state.SubagentTurns += details.SubagentTurns
+	state.SubagentUsage.InputTokens += details.SubagentUsage.InputTokens
+	state.SubagentUsage.OutputTokens += details.SubagentUsage.OutputTokens
+	state.SubagentCostMicroUSD += details.SubagentCostMicroUSD
+	if !details.SubagentCostComplete {
+		*costComplete = false
+	}
 }
 
 // SessionSummary is the metadata a session picker needs from the head of a
@@ -183,6 +228,9 @@ type SessionSummary struct {
 	Provider     string
 	Model        string
 	FirstMessage string
+	// ParentSession is non-empty for a delegated child, which the resume
+	// picker excludes.
+	ParentSession string
 }
 
 // Summarize decodes the session_start event and the first user message from a
@@ -209,6 +257,7 @@ func Summarize(events []session.Event) (SessionSummary, error) {
 			summary.Workspace = data.Workspace
 			summary.Provider = data.Provider
 			summary.Model = data.Model
+			summary.ParentSession = data.ParentSession
 		case session.TypeUserMessage:
 			if messageFound {
 				continue
@@ -270,7 +319,9 @@ func removePending(pending []PendingCall, id string) []PendingCall {
 }
 
 // SupportsPrompt reports whether this binary can replay a prompt version.
-func SupportsPrompt(version string) bool { return version == PromptVersion }
+func SupportsPrompt(version string) bool {
+	return version == PromptVersionV0 || version == PromptVersion
+}
 
 // SupportsToolset reports whether this binary can replay a toolset version.
 func SupportsToolset(version string) bool { return tools.SupportsVersion(version) }

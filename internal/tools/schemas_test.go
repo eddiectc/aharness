@@ -67,6 +67,11 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 			args:   todoArgs{},
 			sample: `{"intent":"plan the work","items":[{"content":"read the docs","status":"pending"},{"content":"write the tool","status":"in_progress"}]}`,
 		},
+		{
+			name:   "delegate",
+			args:   delegateArgs{},
+			sample: `{"intent":"delegate the search","tasks":[{"agent":"explore","task":"find the projection","session":""}]}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,6 +123,7 @@ func TestSchemaRequiredFields(t *testing.T) {
 		"web_search":  {"intent", "query"},
 		"web_fetch":   {"intent", "url"},
 		"todo":        {"intent"},
+		"delegate":    {"intent", "tasks"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -166,10 +172,10 @@ func TestEveryCurrentToolDeclaresAnIntent(t *testing.T) {
 }
 
 func TestSchemasForToolsetVersions(t *testing.T) {
-	if Version != "toolset-v1" {
-		t.Fatalf("Version = %q, want toolset-v1", Version)
+	if Version != "toolset-v2" {
+		t.Fatalf("Version = %q, want toolset-v2", Version)
 	}
-	if !SupportsVersion("toolset-v0") || !SupportsVersion("toolset-v1") {
+	if !SupportsVersion("toolset-v0") || !SupportsVersion("toolset-v1") || !SupportsVersion("toolset-v2") {
 		t.Errorf("SupportsVersion rejects a replayable version")
 	}
 	if SupportsVersion("toolset-v9") || SupportsVersion("") {
@@ -187,8 +193,15 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemasFor(toolset-v1): %v", err)
 	}
-	if got := Schemas(); !reflect.DeepEqual(got, v1) {
-		t.Errorf("Schemas() does not return the v1 set")
+	v2, err := SchemasFor("toolset-v2")
+	if err != nil {
+		t.Fatalf("SchemasFor(toolset-v2): %v", err)
+	}
+	if got := Schemas(); !reflect.DeepEqual(got, v2) {
+		t.Errorf("Schemas() does not return the v2 set")
+	}
+	if got, want := names(v2), names(v1)+",delegate"; got != want {
+		t.Errorf("toolset-v2 names = %q, want %q", got, want)
 	}
 	if got, want := names(v0), "read_file,edit_file,search,run_command"; got != want {
 		t.Errorf("toolset-v0 names = %q, want the frozen %q", got, want)

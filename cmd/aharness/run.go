@@ -346,6 +346,9 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		rcfg.Display = textDisplay(sink)
 	}
 	registry := tools.NewRegistry(ws, toolOptions(cfg, tmpDir, workDir))
+	// Enforce the recorded grant at dispatch as well as in the projection, so a
+	// hallucinated call cannot reach a tool the session never granted.
+	registry.SetGrant(batchTools(cfg))
 	registry.SeedTodo(agent.RestoreTodo(store.Events()))
 	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
 
@@ -421,6 +424,13 @@ func runnerConfig(cfg config) agent.Config {
 		HarnessVersion: cfg.HarnessVersion,
 		MaxTurns:       cfg.MaxTurns,
 		MaxTotalTokens: cfg.MaxTotalTokens,
+		// A batch run records a grant without delegate: there is no Esc and no
+		// observer, so an unattended child could spend without anyone able to
+		// judge or stop it.
+		Tools:          batchTools(cfg),
+		SystemPrompt:   cfg.SystemPrompt,
+		Agent:          cfg.Agent,
+		Agents:         cfg.Agents,
 		Limits:         cfg.Limits,
 		SessionTimeout: cfg.SessionTimeout,
 		ModelTimeout:   cfg.ModelTimeout,
@@ -430,6 +440,67 @@ func runnerConfig(cfg config) agent.Config {
 		RequireUsage:   cfg.RequireUsage,
 		Pricing:        cfg.Pricing,
 	}
+}
+
+// batchTools returns the recorded tool grant for this run. A batch session
+// with no recorded grant (a new session, or a TUI session resumed in batch)
+// excludes delegate; a resumed batch session keeps the grant it recorded.
+func batchTools(cfg config) []string {
+	if cfg.Tools != nil {
+		return append([]string(nil), cfg.Tools...)
+	}
+	if cfg.Mode != ModeBatch {
+		// A TUI session records no grant, which means every tool of its
+		// recorded version.
+		return nil
+	}
+	// The batch grant is computed from the recorded version, not the current
+	// one: a resumed or forked old session keeps its frozen schema set, so a
+	// current-only name must not appear in the grant.
+	version := cfg.ToolsetVersion
+	if version == "" {
+		version = tools.Version
+	}
+	schemas, err := tools.SchemasFor(version)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		if schema.Name == "delegate" {
+			continue
+		}
+		names = append(names, schema.Name)
+	}
+	return names
+}
+
+// sessionGrant returns the tool-name allowlist the dispatcher enforces for a
+// TUI run. A recorded grant wins. Without one, the grant is every tool of the
+// recorded toolset version, so a session that recorded v0 or v1 cannot reach
+// delegate even through a hallucinated call; nil means no narrowing.
+func sessionGrant(recordedTools []string, toolsetVersion string) []string {
+	if recordedTools != nil {
+		return append([]string(nil), recordedTools...)
+	}
+	version := toolsetVersion
+	if version == "" {
+		version = tools.Version
+	}
+	schemas, err := tools.SchemasFor(version)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
+		if schema.Name == "delegate" {
+			// The recorded version declares delegate, so the session is not
+			// narrowed at dispatch.
+			return nil
+		}
+		names = append(names, schema.Name)
+	}
+	return names
 }
 
 // openWorkspace opens the configured workspace for a new session.

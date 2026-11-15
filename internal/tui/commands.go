@@ -31,6 +31,8 @@ var slashCommands = []slashCommand{
 	{names: []string{"resume"}, usage: "/resume", summary: "resume a previous session (idle)"},
 	{names: []string{"files", "file"}, usage: "/files", summary: "workspace file picker (idle)"},
 	{names: []string{"table"}, usage: "/table", summary: "latest markdown table"},
+	{names: []string{"agent-hub"}, usage: "/agent-hub", summary: "live delegated-child roster"},
+	{names: []string{"agents"}, usage: "/agents", summary: "agent definitions (read-only)"},
 	{names: []string{"image"}, usage: "/image", summary: "image viewer"},
 	{names: []string{"rich"}, usage: "/rich", summary: "rich markdown rendering"},
 	{names: []string{"raw"}, usage: "/raw", summary: "raw markdown rendering"},
@@ -226,6 +228,10 @@ func (m *App) handleSlashCommand(text string) (tea.Cmd, bool) {
 		return m.openFileOverlay(), true
 	case "table":
 		return m.openTableOverlay(), true
+	case "agent-hub":
+		return m.openAgentHubOverlay(), true
+	case "agents":
+		return m.openAgentsOverlay(), true
 	case "image":
 		return m.toggleImageViewer(), true
 	case "rich":

@@ -12,7 +12,7 @@ import (
 )
 
 // Version is the current toolset/prompt version.
-const Version = "toolset-v1"
+const Version = "toolset-v2"
 
 // Code is a stable, model-visible tool result code.
 type Code string
@@ -43,7 +43,10 @@ const (
 	// CodeContentUnavailable reports a 2xx response with no usable text, such
 	// as a bot challenge, JavaScript shell, or empty extraction.
 	CodeContentUnavailable Code = "content_unavailable"
-	CodeInternal           Code = "internal"
+	// CodeSubagentLimit reports that at least one delegated child stopped at
+	// its own budget, so its report is partial.
+	CodeSubagentLimit Code = "subagent_limit"
+	CodeInternal      Code = "internal"
 )
 
 // Result is the canonical tool result exchanged with the model and logged in
@@ -96,6 +99,9 @@ var (
 // matching test-only seam: it relaxes the address guard so httptest servers are
 // reachable. It is not a flag, environment variable, or config key, and
 // production wiring never sets it.
+//
+// Spawning runs delegated `delegate` tasks. A nil value keeps the tool
+// registered and returns an actionable unavailable result.
 type Options struct {
 	TmpDir           string
 	WorkDir          string
@@ -107,6 +113,7 @@ type Options struct {
 	WebFetchKey      string
 	WebClient        *http.Client
 	WebAllowLoopback bool
+	Spawning         Spawning
 }
 
 // Schema returns the canonical declaration for one tool.

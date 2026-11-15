@@ -34,6 +34,7 @@ type overlayState struct {
 	effort  *effortOverlay
 	session *sessionOverlay
 	image   *imageOverlay
+	agents  *agentsOverlay
 }
 
 func (o *overlayState) push(kind OverlayKind) {
@@ -117,6 +118,9 @@ func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
 	if o.session != nil {
 		o.session.resize(innerW, innerH)
 	}
+	if o.agents != nil {
+		o.agents.resize(innerW, innerH)
+	}
 	if o.table != nil {
 		o.table.resize(innerW, innerH)
 	}
@@ -157,6 +161,16 @@ func (o *overlayState) wheel(up bool) {
 		if o.session != nil {
 			o.session.wheel(up)
 		}
+	case OverlayAgentHub:
+		if up {
+			o.scroll = max(0, o.scroll-1)
+		} else {
+			o.scroll++
+		}
+	case OverlayAgents:
+		if o.agents != nil {
+			o.agents.wheel(up)
+		}
 	}
 }
 
@@ -168,7 +182,7 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch o.kind {
-	case OverlayHelp, OverlayDetails:
+	case OverlayHelp, OverlayDetails, OverlayAgentHub:
 		switch key {
 		case "up", "k":
 			o.scroll = max(0, o.scroll-1)
@@ -178,6 +192,9 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 			o.scroll = max(0, o.scroll-8)
 		case "pgdown":
 			o.scroll += 8
+		}
+		if o.kind == OverlayAgentHub {
+			o.scroll = min(o.scroll, max(0, len(m.children)-1))
 		}
 		return nil
 	case OverlayTable:
@@ -199,6 +216,10 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	case OverlaySession:
 		if o.session != nil {
 			return o.session.update(m, msg)
+		}
+	case OverlayAgents:
+		if o.agents != nil {
+			return o.agents.update(msg)
 		}
 	case OverlayImage:
 		if o.image != nil {
@@ -247,6 +268,14 @@ func (o *overlayState) view(m *App) string {
 		title = "resume session"
 		if o.session != nil {
 			content = o.session.view()
+		}
+	case OverlayAgentHub:
+		title = "agent hub · live roster"
+		content = m.agentHubView(innerW, innerH)
+	case OverlayAgents:
+		title = "agents · definitions · read-only"
+		if o.agents != nil {
+			content = o.agents.view()
 		}
 	case OverlayImage:
 		title = "image · Ctrl-G"

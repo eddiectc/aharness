@@ -403,10 +403,10 @@ above applies to its SDK types, not to `reasoning_content`.
 | Path | Responsibility |
 |---|---|
 | `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. |
-| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction. |
+| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction, agent definitions and prompt templates, the subagent spawner. |
 | `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, composer slash commands and autocomplete, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
 | `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors; models.dev catalog discovery, cache, and SDK-to-dialect mapping. |
-| `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the seven tool implementations. |
+| `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the seven workspace/web tools, and the `delegate` spawn interface. |
 | `internal/session/` | Event envelope, v2 JSONL store, locking, torn-line repair, fork copy, replay-ready reader. |
 
 ```text
@@ -428,6 +428,9 @@ internal/agent/
   state.go       # durable state reconstruction and pending calls
   events.go      # event payloads and caps
   context.go     # projection, token estimate, compaction
+  agents.go      # strict definition parser, bundled set, discovery, precedence
+  prompt.go      # frozen prompt-v0, prompt-v1, environment block, catalog
+  spawn.go       # subagent spawner: child sessions, budgets, display, accounting
   retry.go       # retry policy and streaming-aware model calls
   types.go
 internal/tui/
@@ -438,6 +441,7 @@ internal/tui/
   todo.go        # persistent todo checklist widget, restore decode, layout
   markdown.go    # Glamour rendering, raw/rich toggle, table extraction
   widgets.go     # table/file/model/effort/session overlays and focus
+  agents_overlay.go # /agent-hub roster and /agents definitions browser
   image.go       # workspace image resolver, ntcharts picture, viewer
   protocol.go    # -ui-json v1 commands, events, frames, snapshots
   headless.go    # Bubble Tea + fake input/output + x/vt driver
@@ -466,7 +470,8 @@ internal/tools/
   command_spill.go # per-run oversized-output capture
   command_unix.go
   todo.go       # per-run checklist state and validation
-  schemas.go
+  delegate.go   # delegate arguments, spawn interface, report caps and marking
+  schemas.go    # frozen v0/v1 sets and the current v2 set
   output.go
 internal/session/
   event.go       # v2 envelope and event types
@@ -528,13 +533,22 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   contract. The handler receives display-only text and thinking deltas; the
   returned `Response` is authoritative. The agent falls back to `Complete` when
   an adapter does not implement it.
-- `tools.Registry` — concrete registry with `Schemas() []model.ToolSchema` and
-  `Execute(ctx, name string, args json.RawMessage) tools.Result`. The dispatcher
+- `tools.Registry` — concrete registry with `Schemas() []model.ToolSchema`,
+  `Execute(ctx, name, args) tools.Result`, and
+  `ExecuteCall(ctx, tools.Call, name, args) tools.Result`. The dispatcher
   validates arguments and converts errors into `tools.Result`; a panic is
-  paired with a result and then stops the run with `internal_error`. The package
-  exports sentinel errors for caller decisions: `ErrOutsideWorkspace`,
-  `ErrGitProtected`, `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`,
-  and `ErrTooLarge`.
+  paired with a result and then stops the run with `internal_error`. `SetGrant`
+  narrows the registry to a recorded tool-name allowlist; `Schemas` returns only
+  granted declarations and `Execute` rejects an ungranted name with
+  `unknown_tool` without running it, so a grant is enforced twice. `Call`
+  carries the parent tool-call ID (recorded as a child's `parent_call_id`), the
+  parent turn, and the parent's cumulative usage. The package exports sentinel
+  errors for caller decisions: `ErrOutsideWorkspace`, `ErrGitProtected`,
+  `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`, and `ErrTooLarge`.
+- `tools.Spawning` — the `delegate` seam: `Spawn(ctx, Call, []SubagentSpec)
+  []SubagentReport` plus `Agents() []AgentInfo`. `agent.Spawner` implements it
+  and owns the child stores. A nil implementation keeps `delegate` registered
+  and returns `unavailable`; `-batch` never wires one.
 - `session.Create(stateDir, id)` — creates a new v2 log with mode 0600 and an
   exclusive non-blocking `flock`. `session.Open(stateDir, id)` opens an existing
   log for resume, takes an exclusive `flock`, validates it, truncates only a
@@ -553,17 +567,25 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   reconstructs session metadata, cumulative turns and usage, the last run's
   effective configuration (including the latest recorded thinking effort) and
   terminal status, and every unpaired tool call.
-  Unknown event types and fields within v2 are ignored.
+  It also folds every recorded `delegate` result's `details` into
+  `SubagentTurns`, `SubagentUsage`, and `SubagentCostMicroUSD`, so a resumed
+  parent keeps the spend those children already incurred. Unknown event types
+  and fields within v2 are ignored.
 - `agent.Summarize(events) (SessionSummary, error)` — decodes only the
   `session_start` metadata and first user message from a log head for the
   `/resume` picker. It is not a substitute for `Inspect`.
 - `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
-  once-per-session `session_start` event for a new or forked session.
+  once-per-session `session_start` event for a new, forked, or delegated
+  session. It records the resolved `system_prompt`, the optional `agent` name,
+  the recorded tool grant (`tools`, nil meaning every tool of the version), and
+  `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child.
 - `agent.Project(events []session.Event, limits Limits) (Projection, error)` —
   pure function of events plus limits; no hidden state. `Limits` carries the
   per-call input budget and the compaction target; the
-  prompt and tool schemas are selected from the versions recorded in
-  `session_start` using immutable package constants. Run/control events
+  prompt is the `system_prompt` recorded in `session_start` used verbatim, or
+  the frozen template for the recorded prompt version when the log predates that
+  field; tool schemas are selected from the recorded toolset version and
+  narrowed by the recorded tool grant. Run/control events
   (`run_start`, `run_end`, `interrupt`, `session_repair`, `final`, `limit`,
   `error`, and unknown types) are ignored. The returned `Projection` carries the
   canonical messages, the input-token estimate, and the elided-result count; the
@@ -587,9 +609,13 @@ schema version.
 - **Display.** `agent.Config.Display func(DisplayEvent) error` is the single
   runner-to-UI observation path; it replaces the old `EmitText`. Events are
   `RunStarted`, `ModelStarted`, `ReasoningDelta`, `TextDelta`,
-  `ResponseCompleted`, `ToolStarted`, `ToolCompleted`, `MessageRecorded`,
-  `Notice`, and `RunFinished`, emitted in
-  that contract order around the matching durable events. They are display-only
+  `ResponseCompleted`, `ToolStarted`, `SubagentStarted`, `SubagentProgress`,
+  `SubagentFinished`, `ToolCompleted`, `MessageRecorded`, `Notice`, and
+  `RunFinished`, emitted in that contract order around the matching durable
+  events. The three subagent events carry counters and names only; child text,
+  arguments, and tool output stay in the child's own transcript. `SubagentProgress`
+  is emitted at child model-response boundaries and throttled to one event per
+  second per child. They are display-only
   and carry no provider token or ANSI. `ToolCompleted` also carries the
   structured tool result `details`, which the TUI uses to maintain the todo
   widget without parsing rendered output. A display failure before `RunFinished`
@@ -685,7 +711,12 @@ schema version.
 9. Before executing, reject a response with missing or duplicate tool-call IDs
    (`protocol_error`, Section 8). For each tool call, in response order: resolve
    the tool, validate arguments, execute with a timeout, append exactly one
-   `tool_result` carrying a stable `code`, and sync. A failure is still a result
+   `tool_result` carrying a stable `code`, and sync. A delegated task is an
+   ordinary tool call: `delegate` runs its tasks in array order, each in its own
+   child store, and returns one consolidated result whose `details` record the
+   per-task turns, usage, and cost. The runner folds those totals into the
+   run's subagent counters before the next turn, so `checkLimits` evaluates
+   parent plus child tokens. A failure is still a result
    with the original call ID. A recovered panic is paired before the run stops
    with `internal_error`. A TUI tool interruption pairs the interrupted
    call and every unstarted call in that response with `code=canceled`, appends
@@ -694,8 +725,8 @@ schema version.
     limit is reached, a fatal error occurs, or the run is canceled.
 11. On termination of an initialized run, emit exactly one `final` event with
     the terminal status and the last assistant text emitted in this run, if any,
-    then append `run_end` with the run and cumulative turns/usage and the run
-    duration. Sync and close the log, then remove
+    then append `run_end` with the run and cumulative turns/usage, the folded
+    subagent turns/usage/cost, and the run duration. Sync and close the log, then remove
     `<state>/work/<session-id>` best-effort; a cleanup failure is reported on
     stderr and does not change the terminal status. If the log write itself
     fails, still attempt cleanup and exit `internal_error` without claiming
@@ -741,8 +772,15 @@ one function; do not scatter exit-code decisions through the loop.
 
 ### 4.3 System prompt
 
-The system prompt is versioned (`prompt-v0`) and recorded in `session_start`; v1
-keeps it unchanged. It states, briefly:
+The system prompt is versioned and recorded in `session_start`. `prompt-v0` is
+frozen for replay. `prompt-v1` keeps the v0 clauses and adds the delegation
+paragraph and, for a parent session, the available-agents catalog (one
+`- name: description` line per agent, capped at 4 KiB with an
+`[N agents omitted]` marker). A child's prompt is its agent body plus the
+environment block, with no catalog and no delegation guidance because a child
+cannot delegate. The recorded text is authoritative for projection, so editing
+an agent file never rewrites an existing session's prompt. New sessions record
+`prompt-v1` and `toolset-v2`. It states, briefly:
 
 - The workspace root, and that tools are the only way to act.
 - Search and read before editing; keep changes minimal; run the relevant tests.
@@ -785,7 +823,10 @@ All tools share these rules:
   carries a stable `code`: `ok` on success, and `invalid_args`, `unknown_tool`,
   `not_found`, `ambiguous`, `outside_workspace`, `git_protected`, `binary_file`,
   `too_large`, `timeout`, `canceled`, `panic`, `spawn_failed`, `unavailable`,
-  `http_error`, `fetch_failed`, or `internal` on failure. A non-zero command
+  `http_error`, `fetch_failed`, `subagent_limit`, or `internal` on failure. A
+  `subagent_limit` result means at least one delegated child stopped at its own
+  budget, so its report is partial; the per-task `status` says which
+  (`max_turns`, `token_limit`, or `time_limit`). A non-zero command
   exit is `ok=true` with an `exit_code`; `ok=false` is reserved for dispatch,
   validation, timeout, cancellation, panic, spawn failures, network failures,
   and file restrictions such as binary or too large.
@@ -835,6 +876,7 @@ func (w *Workspace) rel(p string) (string, error) {
 | `read_file` | `intent`, `path`, `offset` (1-based, default 1), `limit` (default 2000, max 4000) | Returns one contiguous numbered line window plus a `lines X–Y of Z` header describing the lines actually delivered; line counting splits on `\n` (a trailing newline adds no line, an empty file has zero lines), and bytes are preserved. When `B < Z`, the result ends with `continue with offset=B+1`. A byte-capped page keeps whole lines and sets `truncated`; a single line that cannot fit is delivered as a rune-safe prefix with `[line N truncated at X bytes]` and no misleading continuation. Result cap 60 KiB, chosen so the rendered result and marker stay under the 64 KiB tool-result field cap. Rejects binary/non-UTF-8 files and files over 2 MiB. |
 | `edit_file` | `intent`, `path`, `old_string`, `new_string`, `replace_all` (default false) | Requires a unique exact byte match unless `replace_all`; zero or multiple matches are actionable errors; `old_string == new_string` is an error. Rejects a symlink anywhere in the path. Writes atomically via an `O_EXCL` temp file in the same directory plus rename; preserves mode with fchmod; preserves bytes, including CRLF. Creates a file only when it does not exist and `old_string` is empty, using mode 0644 and requiring the parent directory to exist; an existing file with an empty `old_string` is an error. Rejects an edit whose resulting file would exceed 2 MiB. Returns a short diff summary. |
 | `todo` | `intent`, `items` (optional array; each item is `content` plus `status` = `pending`, `in_progress`, or `completed`) | Maintains one in-memory checklist for multi-step work, seeded at run start from the last successful `todo` result in the session log. A present `items` replaces the whole list, an empty list clears it, and an omitted `items` reads it; the full list is returned after every call and the same items are recorded in `details` so a later run can restore them without parsing the rendered text. The TUI also renders the current list in a persistent capped widget above the composer, updated from those details and restored on resume, fork, and session switch. At most 50 items, at most 500 bytes per normalized item, and at most one `in_progress` item; violations are `invalid_args`. Content is sanitized to valid UTF-8 with controls replaced and whitespace collapsed to one line. Rendering is `[ ]`, `[~]`, and `[x]` with per-status counts. The list is harness state, not a workspace file; it is not a durable event of its own and does not survive a log without the recorded `details`. |
+| `delegate` | `intent`, `tasks` (1–4 items; each is `agent`, a self-contained `task`, and an optional child `session`) | Runs each task in array order in its own child session under `<state>/sessions`, recording `parent_session`, `parent_seq`, and `parent_call_id`, A child is a normal run: fresh store, own `run_start`/`run_end`, exactly one `final`, recorded prompt, recorded tool grant, resolved model/effort, inherited workspace. The consolidated result has one `[task N agent=… status=… session=…]` section per task and a `details` table with agent, intent, model, effort, turns, context tokens, usage, cost, and report size. `OK` is true when at least one task produced a report. Precedence: `invalid_args`/`not_found` before any task runs (unknown agent, bad or duplicate `session`, over-cap `task`), else `canceled`, else `subagent_limit`, else the failure code when every task failed, else `ok`. A child cannot call `delegate`: the tool is absent from its schemas and its registry grant rejects the call with `unknown_tool`. Depth is one. The report is sanitized, marked once when it matches an instruction-shaped pattern, and capped at 16 KiB; `details` is capped at 4 KiB. |
 | `search` | `intent`, `pattern` (Go RE2 regex), `path` (default `.`), `glob` (optional, matched against workspace-relative paths), `case_sensitive` (default false), `max_results` (default 100, max 200) | Walks the workspace, skipping `.git`, binary files, symlinks, and files over 1 MiB, and reports skipped counts by reason. Returns `path:line: text`, with long lines clipped. Requires a real directory root. Invalid regex, invalid glob, and no matches are distinct results. `**` matches zero or more whole path segments; `*` does not cross `/`. Output is capped at 60 KiB head-only. A result-count cap is marked `[results capped at N]` and does not set `truncated`; dropped bytes do. |
 | `web_search` | `intent`, `query`, `max_results` (default 5, max 10), `categories`, `language`, `time_range` (`day`/`month`/`year`) | Sends one GET to `<searxng_url>/search?format=json` with a fixed 15-second timeout and a 2 MiB response cap. Filters to absolute http(s) result URLs with no userinfo, strips fragments for deduplication, and sanitizes title/URL/snippet: invalid UTF-8 replaced, entities decoded, tags stripped, control characters removed, whitespace collapsed; snippets are capped at 1,200 characters. Returns title/URL/snippet only and never fetches a result page. Output is capped at 60 KiB head-only; when the cap drops results the header count reflects what was delivered and `truncated` is set. A 403 is `unavailable` with JSON-format guidance, other non-2xx is `http_error`, transport/decode failures are `fetch_failed`, and an oversized body is `too_large`. An unset backend returns `unavailable` with the setting names. `details` records delivered results, truncation, and unresponsive engines. |
 | `web_fetch` | `intent`, `url`, `offset` (byte offset into the extracted UTF-8 text, default 0) | One GET through the configured provider. Builtin: absolute http(s) only, no userinfo or fragment, max 8 KiB; every address is resolved and checked at dial time and refused when any is not globally routable unicast (loopback, private, link-local, shared, multicast, documentation, benchmarking, metadata, IPv4-mapped, NAT64). At most 5 redirects; same-host hops are revalidated and followed, HTTPS-to-HTTP and cross-host hops stop and return the target as successful data. The request sends `Accept` and `User-Agent: aharness/<version>`, no cookie jar, no `Authorization`, no `Referer`, and no proxy environment. Body 2 MiB after decompression, headers 64 KiB, timeout `web_timeout` (30s default, 120s max). HTML is decoded (Content-Type/meta charset/BOM, UTF-8 default), stripped of script/style/nav/header/footer/aside/form/hidden nodes, and extracted with `go-trafilatura` (conservative DOM fallback); text/markdown/JSON/XML/CSV pass through as text; images, audio, video, PDF, and octet-stream are `unsupported_content_type`; a missing type is sniffed. An app shell, bot challenge, or empty extraction is `content_unavailable`, never empty success. Text is sanitized (valid UTF-8, LF, no controls or ANSI escapes) and capped at 60 KiB per call with `[truncated at 61440 bytes; continue with offset=N]`. `web_fetch_provider=crawl4ai` posts one URL to `<web_fetch_url>/crawl` with `cache_mode: "disabled"` and `check_robots_txt: false`, stream-decodes `results[0].html` (2 MiB cap, 16 MiB response cap), and applies the same extraction, caps, and paging. A provider failure is `fetch_failed` and is never retried against the builtin path. |
@@ -845,16 +887,19 @@ func (w *Workspace) rel(p string) (string, error) {
 measure before adding it.
 
 Tool descriptions are versioned prompt material. New sessions record
-`toolset-v1`; v1 was extended in place, first with `web_search`, then with
-`web_fetch`, then with the shared `intent` argument, and now with `todo`, under
-the no-backward-compatibility decision, so a session that recorded v1 replays
-the current v1 set rather than a four-tool snapshot. The frozen `toolset-v0`
-declaration set remains available so a session that recorded v0 replays with
-the descriptions it was created under.
-`tools.SchemasFor(version)` selects the set, `agent.Project` carries it in
-`Projection.Schemas`, and the runner sends that set. An unknown version is a
-replay error. The system prompt and `PromptVersion` are unchanged; the
-`web_search` description carries the untrusted-snippet warning and the
+`toolset-v2`. The sets are frozen per version: `toolset-v0` (four tools),
+`toolset-v1` (`web_search`, `web_fetch`, `todo`, and the shared `intent`
+argument added under the earlier no-backward-compatibility decision), and
+`toolset-v2` (v1 plus `delegate`). Adding `delegate` is the one bump this plan
+pays for; per-role tool grants are recorded session data (`session_start.tools`)
+rather than new versions, so a child narrows its recorded set without creating
+a version per role. `tools.SchemasFor(version)` selects the set,
+`tools.Filter` narrows it to the recorded grant in recorded order,
+`agent.Project` carries the result in `Projection.Schemas`, and the runner sends
+that set. An unknown version or a granted name the version does not define is a
+replay error. A session that recorded v0 or v1 keeps its frozen descriptions
+and, because `delegate` is absent from both, cannot delegate.
+The `web_search` description carries the untrusted-snippet warning and the
 `web_fetch` description labels fetched content as untrusted data.
 
 `edit_file` writes atomically: create a temp file in the same directory with
@@ -914,10 +959,14 @@ it on every turn. Compaction never mutates the log.
    reserve or subtract an output budget.
 7. If the projection cannot fit after compaction, the run stops with
    `token_limit` before the model call.
-8. The tool schemas are selected from the session's recorded toolset version,
-   carried in `Projection.Schemas`, and used both for the request and for the
-   per-schema token estimate. A resumed v0 session never silently receives v1
-   descriptions.
+8. The tool schemas are selected from the session's recorded toolset version
+   and narrowed to the recorded tool grant, carried in `Projection.Schemas`, and
+   used both for the request and for the per-schema token estimate. A resumed
+   v0/v1 session never silently receives v2 descriptions, and a child never
+   receives a schema outside its grant.
+9. The system prompt is the text recorded in `session_start`. A log that
+   predates the recorded prompt renders the frozen template for its recorded
+   version, so replay never depends on the current agent files.
 
 ### 6.2 Budget policy
 
@@ -1037,7 +1086,7 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, plus optional `parent_session`/`parent_seq`. |
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `agent` (a child's definition name), optional `tools` (a recorded allowlist; absent means every tool of the version), and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
 | `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`, `require_usage`, and the effective `pricing` snapshot. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
@@ -1050,7 +1099,7 @@ it on every turn. Compaction never mutates the log.
 | `error` | as needed | Fatal error class and message; optional capped partial text and partial byte count for a failed stream. |
 | `session_repair` | on resume | Discarded bytes, last good `seq`, reason. |
 | `final` | once per run | Terminal status and last assistant text for this run, if any. |
-| `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration, estimated run/cumulative cost, and cost-completeness flags. |
+| `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration, estimated run/cumulative cost, cost-completeness flags, and the folded `subagent_turns`/`subagent_usage`/`subagent_cost_micro_usd`/`subagent_cost_complete` totals. Child turns are excluded from the parent's turn budget; child tokens are included in the token budget. |
 
 v1 uses `run_end` and does not emit `session_end`. The projection ignores every
 run/control event. `seq` and `turn` continue across runs. A run without a
@@ -1249,12 +1298,13 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   endpoints that train on request data.
 - `-version` prints build info from `runtime/debug.ReadBuildInfo` (module
   version, Go version, VCS revision/modified) and exits 0.
-- `-max-turns`, `-max-total-tokens`, `-session-timeout`, `-model-timeout`,
-  `-max-context-tokens`, and `-max-output-tokens` are configurable through a
-  flag, an environment variable, and a config-file key. The matching variables
-  are `AHARNESS_MAX_TURNS`, `AHARNESS_MAX_TOTAL_TOKENS`,
-  `AHARNESS_SESSION_TIMEOUT`, `AHARNESS_MODEL_TIMEOUT`,
-  `AHARNESS_MAX_CONTEXT_TOKENS`, and `AHARNESS_MAX_OUTPUT_TOKENS`; see
+- `-max-turns`, `-max-total-tokens`, `-max-subagents`, `-session-timeout`,
+  `-model-timeout`, `-max-context-tokens`, and `-max-output-tokens` are
+  configurable through a flag, an environment variable, and a config-file key.
+  The matching variables are `AHARNESS_MAX_TURNS`, `AHARNESS_MAX_TOTAL_TOKENS`,
+  `AHARNESS_MAX_SUBAGENTS`, `AHARNESS_SESSION_TIMEOUT`,
+  `AHARNESS_MODEL_TIMEOUT`, `AHARNESS_MAX_CONTEXT_TOKENS`, and
+  `AHARNESS_MAX_OUTPUT_TOKENS`; see
   [configuration.md](configuration.md) for the key names. The four run
   budgets default to `0`: `-max-turns` and
   `-max-total-tokens` are unlimited, and `-session-timeout`/`-model-timeout`
@@ -1277,6 +1327,12 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   config error. The catalog's advertised output ceiling is informational only.
   A provider rejection of an explicit output budget is a provider error naming
   the requested value.
+- `-max-subagents` (`AHARNESS_MAX_SUBAGENTS`, `max_subagents`) bounds fresh
+  delegated children per run; the default is 8 and `0` means unlimited. It is a
+  fan-out guard, not a spend budget: spend stays on `-max-total-tokens`. A
+  negative value is a config error. Agent definitions are read from
+  `<state-dir>/agents/`, not from a flag: a workspace file would be
+  repository-controlled prompt material with no trust model.
 - `-require-usage` (default false) turns a completed buffered model response
   with `reported=false` into a terminal `protocol_error` before any tool
   executes. The `model_response` is already durable, so the transcript remains
@@ -1319,7 +1375,11 @@ empty token for local no-auth endpoints and tests (Section 2.1).
   silent clear. `default` always clears and never conflicts with a model
   change.
 - Prompt and toolset versions are selected from `session_start` and must be
-  supported by the binary. v1 ships only `prompt-v0` and `toolset-v0`.
+  supported by the binary. v1 ships `prompt-v0`/`prompt-v1` and
+  `toolset-v0`/`toolset-v1`/`toolset-v2`; new sessions record `prompt-v1` and
+  `toolset-v2`. The recorded prompt, agent name, and tool grant are inherited
+  verbatim on resume and fork, so an older session cannot delegate and an edited
+  agent file never rewrites an existing session.
 - Effective context/output values, the recorded base URL, and the effective
   thinking effort are inherited from the last run unless overridden. On
   resume/fork, the recorded model/dialect/base URL/context/output values and
@@ -1383,7 +1443,10 @@ Defaults are deliberately conservative and easy to change:
 | Max output tokens per call | 0 (unset; the request field is omitted) |
 | Thinking effort | unset (provider/model default; `-thinking-effort` / `AHARNESS_THINKING_EFFORT`) |
 | Usage strictness | permissive (`-require-usage` off; missing buffered usage records `reported=false`) |
-| Toolset version | `toolset-v1` for new sessions; `toolset-v0` replay supported |
+| Toolset version | `toolset-v2` for new sessions; `toolset-v0`/`toolset-v1` replay supported |
+| Prompt version | `prompt-v1` for new sessions; `prompt-v0` replay supported |
+| Max subagents | 8 fresh children per run (`-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`; `0` unlimited) |
+| Agent definitions | `<state-dir>/agents/*.md`; five bundled defaults; at most 32 |
 | Max total tokens | 0 (unlimited; `-max-total-tokens`) |
 | Max run wall clock | 0 (none; `-session-timeout`) |
 | Model call timeout | 0 (none; `-model-timeout`) |

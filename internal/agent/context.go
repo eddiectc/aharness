@@ -24,22 +24,6 @@ const (
 	bytesPerTokenBits = 2 // ceil(bytes / 4)
 )
 
-// systemPrompt is the versioned v0 system prompt. It is prompt material:
-// changing it requires bumping PromptVersion.
-const systemPromptFormat = `You are aharness, a coding harness working in the workspace %q.
-
-- Tools are your only way to act on the workspace. Do not claim an action you did not take through a tool call.
-- Search and read before editing. Keep changes minimal and focused on the task.
-- Run the relevant tests after changing code.
-- Commands run with the harness's privileges. The harness adds no sandbox and no approval step.
-- Tool errors are data: read them, adapt, and try a different approach instead of escalating.
-- Stop by replying without a tool call when the task is complete or when you are blocked.`
-
-// systemPrompt renders the versioned prompt for a workspace.
-func systemPrompt(workspace string) string {
-	return fmt.Sprintf(systemPromptFormat, workspace)
-}
-
 // Project rebuilds the canonical model input from the event log. It is a pure
 // function of events and limits: the system prompt and tool schemas are
 // selected from the versions recorded in session_start.
@@ -48,17 +32,24 @@ func Project(events []session.Event, limits Limits) (Projection, error) {
 	if err != nil {
 		return Projection{}, err
 	}
-	if start.PromptVersion != PromptVersion {
-		return Projection{}, fmt.Errorf("project: unsupported prompt version %q", start.PromptVersion)
+	prompt, err := projectPrompt(start)
+	if err != nil {
+		return Projection{}, err
 	}
 	schemas, err := tools.SchemasFor(start.ToolsetVersion)
 	if err != nil {
 		return Projection{}, fmt.Errorf("project: %w", err)
 	}
+	if start.Tools != nil {
+		schemas, err = tools.Filter(schemas, start.Tools)
+		if err != nil {
+			return Projection{}, fmt.Errorf("project: recorded tool grant: %w", err)
+		}
+	}
 
 	projected := []projectedMessage{{
 		kind: projectionSystem,
-		msg:  model.Message{Role: model.RoleSystem, Content: systemPrompt(start.Workspace)},
+		msg:  model.Message{Role: model.RoleSystem, Content: prompt},
 	}}
 	nodes := make([]*assistantNode, 0, 8)
 	var current *assistantNode
@@ -278,6 +269,21 @@ func (n *assistantNode) unpairedCall(id string) *assistantCall {
 		}
 	}
 	return nil
+}
+
+// projectPrompt returns the system prompt recorded in session_start, or
+// renders the recorded version when the log predates the recorded prompt. The
+// recorded text wins verbatim, so editing an agent file never rewrites an
+// existing session's prompt.
+func projectPrompt(start sessionStartData) (string, error) {
+	if start.SystemPrompt != "" {
+		return capText(cleanText(start.SystemPrompt), maxSystemPromptBytes), nil
+	}
+	prompt, err := renderPrompt(start.PromptVersion, start.Workspace, nil)
+	if err != nil {
+		return "", err
+	}
+	return capText(prompt, maxSystemPromptBytes), nil
 }
 
 func projectSessionStart(events []session.Event) (sessionStartData, error) {

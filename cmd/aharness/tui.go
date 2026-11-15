@@ -55,6 +55,7 @@ type tuiHost struct {
 	catalogSource    string
 	catalogFetchedAt time.Time
 	models           []tui.ModelChoice
+	agents           *agent.AgentCatalog
 
 	mu             sync.Mutex
 	info           tui.Info
@@ -223,6 +224,104 @@ func (h *tuiHost) TakeModelWarning() string {
 
 func (h *tuiHost) Workspace() *tools.Workspace { return h.ws }
 
+// Agents returns the definitions loaded for this process. It is read-only and
+// never re-reads the directory.
+func (h *tuiHost) Agents() []tui.AgentDefView {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return agentViews(h.agents)
+}
+
+// agentViews converts the loaded catalog into browser rows: active
+// definitions first, then the invalid files whose parse errors a user needs to
+// see.
+func agentViews(catalog *agent.AgentCatalog) []tui.AgentDefView {
+	if catalog == nil {
+		return nil
+	}
+	views := make([]tui.AgentDefView, 0, len(catalog.Agents)+len(catalog.Invalid))
+	for _, def := range catalog.Agents {
+		views = append(views, tui.AgentDefView{
+			Name:            def.Name,
+			Description:     def.Description,
+			Model:           def.Model,
+			Effort:          def.ThinkingEffort,
+			Source:          def.Source,
+			Path:            def.Path,
+			Tools:           append([]string(nil), def.Tools...),
+			MaxTurns:        def.MaxTurns,
+			Status:          "active",
+			PromptFirstLine: firstLine(def.Prompt),
+		})
+	}
+	for _, def := range catalog.Invalid {
+		views = append(views, tui.AgentDefView{
+			Name:   def.Name,
+			Source: def.Source,
+			Path:   def.Path,
+			Status: "invalid",
+			Err:    def.Err,
+		})
+	}
+	return views
+}
+
+// firstLine collapses the first non-empty prompt line for the expanded row.
+func firstLine(text string) string {
+	for line := range strings.SplitSeq(text, "\n") {
+		collapsed := strings.Join(strings.Fields(line), " ")
+		if collapsed != "" {
+			return tui.CapText(tui.SanitizeLine(collapsed), 200)
+		}
+	}
+	return ""
+}
+
+// resolveAgentModel resolves an agent's model and effort through the loaded
+// catalog without mutating the host configuration.
+func (h *tuiHost) resolveAgentModel(modelID, effort string) (agent.ModelResolution, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return agent.ModelResolution{}, errors.New("session host is closed")
+	}
+	m, ok := h.catalog[modelID]
+	if !ok {
+		if modelID == h.cfg.Model {
+			// Offline resume/fork: the recorded values are authoritative until a
+			// catalog loads, so an inherited model stays usable.
+			return agent.ModelResolution{
+				Dialect: string(h.cfg.Dialect),
+				BaseURL: h.cfg.BaseURL,
+				Limits:  h.cfg.Limits,
+				Pricing: h.cfg.Pricing,
+			}, nil
+		}
+		return agent.ModelResolution{}, fmt.Errorf("model %q is not in the loaded catalog", modelID)
+	}
+	if m.Unavailable != "" {
+		return agent.ModelResolution{}, fmt.Errorf("model %q is not usable: %s", modelID, m.Unavailable)
+	}
+	if effort != "" {
+		if err := validateModelThinkingEffort(effort, m); err != nil {
+			return agent.ModelResolution{}, err
+		}
+	}
+	cfg := h.cfg
+	if err := applyCatalogModel(&cfg, m, func(string) {}); err != nil {
+		return agent.ModelResolution{}, err
+	}
+	if err := validateEffective(&cfg); err != nil {
+		return agent.ModelResolution{}, err
+	}
+	return agent.ModelResolution{
+		Dialect: string(cfg.Dialect),
+		BaseURL: cfg.BaseURL,
+		Limits:  cfg.Limits,
+		Pricing: m.Pricing(h.catalogSource, h.catalogFetchedAt),
+	}, nil
+}
+
 // TodoItems returns the checklist recorded by the active session log so the
 // TUI widget can show it before the next todo call and after a session switch.
 func (h *tuiHost) TodoItems() []tools.TodoItem {
@@ -281,6 +380,7 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 		h.mu.Unlock()
 		return nil, errors.New("a run is already active")
 	}
+	definitions := h.agents
 	var warnings []string
 	warn := func(text string) { warnings = append(warnings, text) }
 	modelName, dialect, err := h.prepareRunLocked(opts, warn)
@@ -308,7 +408,11 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 	rcfg.Steering = steer
 	rcfg.Logger = nil
 	if display != nil {
-		rcfg.Display = func(ev agent.DisplayEvent) error {
+		rcfg.Display = display
+	}
+	forward := display
+	if forward != nil {
+		forward = func(ev agent.DisplayEvent) error {
 			select {
 			case <-runCtx.Done():
 				return nil
@@ -317,7 +421,30 @@ func (h *tuiHost) Start(sub tui.Submission, opts tui.RunOptions, steer <-chan st
 			return display(ev)
 		}
 	}
-	registry := tools.NewRegistry(h.ws, toolOptions(h.cfg, tmpDir, workDir))
+	spawner := agent.NewSpawner(agent.SpawnerOptions{
+		Config:      rcfg,
+		Workspace:   h.ws,
+		Definitions: definitions,
+		Resolve:     h.resolveAgentModel,
+		NewCompleter: func(dialect model.Dialect, baseURL, sessionID string) model.Completer {
+			return newCompleterFor(dialect, h.cfg, sessionID)
+		},
+		NewToolOptions: func(_, childWorkDir, childTmpDir string) tools.Options {
+			return toolOptions(h.cfg, childTmpDir, childWorkDir)
+		},
+		Display:       forward,
+		ParentSession: h.sessionID,
+		ParentSeq:     h.store.LastSeq,
+		MaxSubagents:  h.cfg.MaxSubagents,
+	})
+	registryOpts := toolOptions(h.cfg, tmpDir, workDir)
+	registryOpts.Spawning = spawner
+	registry := tools.NewRegistry(h.ws, registryOpts)
+	// A recorded grant is enforced twice: the projection omits ungranted
+	// schemas, and dispatch rejects an ungranted name without running it. This
+	// keeps a resumed batch session non-delegating and a resumed child on its
+	// own grant.
+	registry.SetGrant(sessionGrant(rcfg.Tools, rcfg.ToolsetVersion))
 	registry.SeedTodo(agent.RestoreTodo(h.store.Events()))
 	runner := agent.New(rcfg, newCompleterFor(dialect, h.cfg, h.sessionID), registry, h.store)
 	run := &hostRun{
@@ -428,6 +555,15 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		startupWarn   []string
 	)
 	warn := func(text string) { startupWarn = append(startupWarn, text) }
+
+	// Definitions are loaded once per process from the state directory. The
+	// recorded prompt and grant keep a resumed session's replay exact, so this
+	// catalog only affects new children and the /agents browser.
+	definitions := agent.LoadAgents(cfg.StateDir)
+	for _, warning := range definitions.Warnings {
+		warn(warning)
+	}
+	cfg.Agents = definitions.Infos()
 
 	fail := func(code int) (*tuiHost, int) {
 		if store != nil {
@@ -599,6 +735,7 @@ func openTUIHost(cfg config, stderr io.Writer) (*tuiHost, int) {
 		ws:             ws,
 		sessionID:      store.ID(),
 		source:         catalogSource,
+		agents:         definitions,
 		info:           info,
 		pendingWarning: strings.Join(startupWarn, "; "),
 	}

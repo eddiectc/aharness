@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aharness/internal/tools"
 )
 
 func chatWebFetchToolCallResponse(rawURL string) map[string]any {
@@ -111,8 +113,8 @@ func TestBinaryWebFetchCrawl4AI(t *testing.T) {
 	if got := strings.Count(run.log, `"type":"tool_result"`); got != 1 {
 		t.Errorf("tool_result events = %d, want 1", got)
 	}
-	if !strings.Contains(run.log, `"toolset_version":"toolset-v1"`) {
-		t.Errorf("session log does not record toolset-v1:\n%s", run.log)
+	if !strings.Contains(run.log, `"toolset_version":"`+tools.Version+`"`) {
+		t.Errorf("session log does not record %s:\n%s", tools.Version, run.log)
 	}
 	for _, want := range []string{
 		"web_timeout_ms=20000",
@@ -226,8 +228,8 @@ func TestBinaryWebFetchResumeKeepsToolsetV1(t *testing.T) {
 	if resumed.exit != 0 {
 		t.Fatalf("resume exit = %d\nstderr:\n%s", resumed.exit, resumed.stderr)
 	}
-	if got := strings.Count(resumed.log, `"toolset_version":"toolset-v1"`); got == 0 {
-		t.Errorf("resumed session does not record toolset-v1:\n%s", resumed.log)
+	if got := strings.Count(resumed.log, `"toolset_version":"`+tools.Version+`"`); got == 0 {
+		t.Errorf("resumed session does not record %s:\n%s", tools.Version, resumed.log)
 	}
 	if strings.Contains(resumed.stderr, "unknown toolset version") {
 		t.Errorf("resume reported a toolset version error:\n%s", resumed.stderr)

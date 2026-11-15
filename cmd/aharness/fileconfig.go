@@ -40,6 +40,7 @@ type fileConfig struct {
 	ThinkingEffort   *string         `json:"thinking_effort"`
 	MaxTurns         *int            `json:"max_turns"`
 	MaxTotalTokens   *int            `json:"max_total_tokens"`
+	MaxSubagents     *int            `json:"max_subagents"`
 	MaxContextTokens *int            `json:"max_context_tokens"`
 	MaxOutputTokens  *int            `json:"max_output_tokens"`
 	SessionTimeout   *configDuration `json:"session_timeout"`
@@ -117,6 +118,7 @@ func (c fileConfig) validate(path string) error {
 	}{
 		{"max_turns", c.MaxTurns},
 		{"max_total_tokens", c.MaxTotalTokens},
+		{"max_subagents", c.MaxSubagents},
 		{"max_output_tokens", c.MaxOutputTokens},
 	} {
 		if budget.value != nil && *budget.value < 0 {

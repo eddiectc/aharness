@@ -749,3 +749,119 @@ func TestHeadlessUntrustedTextAndUnicode(t *testing.T) {
 		t.Fatalf("markdown source was not rendered:\n%s", text)
 	}
 }
+
+// rosterHost starts a run that stays active until the test releases it, and
+// reports two delegated children mid-run.
+type rosterHost struct {
+	*fakeHost
+	release  chan struct{}
+	finished chan struct{}
+	once     sync.Once
+}
+
+func newRosterHost() *rosterHost {
+	return &rosterHost{fakeHost: newFakeHost(), release: make(chan struct{}), finished: make(chan struct{})}
+}
+
+// releaseRun ends the fake child run when the UI is asked to quit.
+func (h *rosterHost) releaseRun() { h.once.Do(func() { close(h.release) }) }
+
+// rosterRun models an active run that ends when it is terminated.
+type rosterRun struct {
+	done    chan agent.Result
+	release func()
+}
+
+func (r *rosterRun) Interrupt()                {}
+func (r *rosterRun) Terminate()                { r.release() }
+func (r *rosterRun) Done() <-chan agent.Result { return r.done }
+
+func (h *rosterHost) Start(sub Submission, opts RunOptions, steer <-chan string, display func(agent.DisplayEvent) error) (Run, error) {
+	done := make(chan agent.Result, 1)
+	emit := func(ev agent.DisplayEvent) {
+		if display != nil {
+			_ = display(ev)
+		}
+	}
+	go func() {
+		defer close(h.finished)
+		emit(agent.RunStarted{Turn: 0, Model: "deepseek-v4.1-flash", Dialect: "openai-chat", ThinkingEffort: "high"})
+		emit(agent.SubagentStarted{
+			Turn: 1, CallID: "call-1", Index: 0, Agent: "explore",
+			Intent: "find the projection", Session: "child-1",
+			Model: "deepseek-v4.1-flash", Effort: "high", Tools: []string{"read_file", "search"},
+		})
+		emit(agent.SubagentStarted{
+			Turn: 1, CallID: "call-1", Index: 1, Agent: "reviewer",
+			Intent: "review the change", Session: "child-2",
+			Model: "deepseek-v4.1-flash", Effort: "high", Tools: []string{"read_file", "search"},
+		})
+		emit(agent.SubagentProgress{
+			Turn: 1, CallID: "call-1", Index: 0, Agent: "explore", Session: "child-1",
+			ChildTurns: 3, ContextTokens: 18240,
+			Usage:        model.Usage{InputTokens: 41230, OutputTokens: 3110},
+			CostMicroUSD: 9210, CostComplete: true, LastTool: "read_file",
+		})
+		<-h.release
+		result := agent.Result{Status: agent.StopCompleted, RunTurns: 1, CumulativeTurns: 1}
+		emit(agent.RunFinished{Result: result, Reason: "model completed the task", Duration: time.Millisecond})
+		done <- result
+	}()
+	return &rosterRun{done: done, release: h.releaseRun}, nil
+}
+
+func (h *rosterHost) Close() error {
+	h.releaseRun()
+	<-h.finished
+	return nil
+}
+
+func TestHeadlessAgentHubRoster(t *testing.T) {
+	host := newRosterHost()
+	script := strings.Join([]string{
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"text","text":"/agent-hub"}`,
+		`{"v":1,"type":"key","key":"enter"}`,
+		`{"v":1,"type":"frame"}`,
+		`{"v":1,"type":"quit"}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	exit, err := RunHeadless(HeadlessOptions{
+		Host: host, Models: host.Models(), Model: "deepseek-v4.1-flash", Dialect: model.DialectChat,
+		Seed:   &Submission{Text: "delegate the work", Source: "-task"},
+		Width:  120,
+		Height: 30,
+		Stdin:  strings.NewReader(script), Stdout: &out,
+		ImageProtocol: "glyph",
+	})
+	if err != nil {
+		t.Fatalf("RunHeadless: %v", err)
+	}
+	if exit != 0 {
+		t.Fatalf("exit = %d", exit)
+	}
+	if err := host.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	found := false
+	for _, line := range parseOutput(t, out.String()) {
+		if line["type"] != "frame" || line["overlay"] != string(OverlayAgentHub) {
+			continue
+		}
+		rows, _ := line["lines"].([]any)
+		var frame strings.Builder
+		for _, row := range rows {
+			fmt.Fprintf(&frame, "%v\n", row)
+		}
+		body := frame.String()
+		if strings.Contains(body, "explore") && strings.Contains(body, "find the projec") &&
+			strings.Contains(body, "reviewer") && strings.Contains(body, "deepseek-v4.1-f") &&
+			strings.Contains(body, "high") && strings.Contains(body, "running") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no agent-hub frame listed both children:\n%s", out.String())
+	}
+}

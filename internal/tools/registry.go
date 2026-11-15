@@ -27,6 +27,7 @@ type Registry struct {
 	search *searchClient
 	web    *webFetchTool
 	todos  todoState
+	grant  []string
 }
 
 // NewRegistry constructs the tool registry for one workspace.
@@ -44,21 +45,66 @@ func NewRegistry(ws *Workspace, opts Options) *Registry {
 	return r
 }
 
-// Schemas returns a copy of the current tool declarations.
-func (r *Registry) Schemas() []model.ToolSchema {
-	return Schemas()
+// SetGrant narrows the registry to a tool-name allowlist. A nil grant keeps
+// every tool of the current toolset. The grant is enforced twice: Schemas
+// returns only granted declarations, and Execute rejects a call to a tool the
+// grant omits without running it.
+func (r *Registry) SetGrant(names []string) {
+	r.grant = append([]string(nil), names...)
+	if names == nil {
+		r.grant = nil
+	}
 }
 
-// Execute validates and runs one tool call. Panics are recovered at this
-// boundary, converted to a panic result with a capped stack, and returned to
-// the caller; pairing and stopping are the runner's responsibility. Tools are
-// never retried automatically.
-func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessage) (res Result) {
+// granted reports whether name is inside the current grant.
+func (r *Registry) granted(name string) bool {
+	if r.grant == nil {
+		return true
+	}
+	for _, allowed := range r.grant {
+		if allowed == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Schemas returns a copy of the current tool declarations, narrowed to the
+// recorded grant when one is set.
+func (r *Registry) Schemas() []model.ToolSchema {
+	schemas := Schemas()
+	if r.grant == nil {
+		return schemas
+	}
+	filtered, err := Filter(schemas, r.grant)
+	if err != nil {
+		return nil
+	}
+	return filtered
+}
+
+// Execute validates and runs one tool call without a parent call identifier.
+// Panics are recovered at this boundary, converted to a panic result with a
+// capped stack, and returned to the caller; pairing and stopping are the
+// runner's responsibility. Tools are never retried automatically.
+func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessage) Result {
+	return r.ExecuteCall(ctx, Call{}, name, args)
+}
+
+// ExecuteCall runs one tool call with the parent-run facts a delegated tool
+// needs, such as the tool-call ID recorded as a child's parent_call_id.
+func (r *Registry) ExecuteCall(ctx context.Context, call Call, name string, args json.RawMessage) (res Result) {
 	defer func() {
 		if v := recover(); v != nil {
 			res = panicResult(v)
 		}
 	}()
+	if !r.granted(name) {
+		return Failure(CodeUnknownTool, fmt.Sprintf("unknown tool %q: not granted to this session", name))
+	}
+	if name == "delegate" {
+		return r.executeDelegate(ctx, args, call)
+	}
 	fn, ok := r.fs[name]
 	if !ok {
 		return Failure(CodeUnknownTool, fmt.Sprintf("unknown tool %q: not registered", name))

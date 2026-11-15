@@ -657,7 +657,45 @@ func (m *App) renderTool(t uiTheme, it *transcriptItem) []string {
 	rows := m.foldedBody(it, expanded, body, func() []string {
 		return m.toolBodyRows(t, body, expanded)
 	})
-	return renderFolded(t, tstyle.Render(ansi.Truncate(head, m.width, "")), rows, foldedTailRows, !expanded)
+	out := renderFolded(t, tstyle.Render(ansi.Truncate(head, m.width, "")), rows, foldedTailRows, !expanded)
+	if it.name == "delegate" {
+		out = insertDelegateRows(out, m.delegateRows(it))
+	}
+	return out
+}
+
+// delegateRows renders the nested per-task lines of a delegate block: the
+// recorded table when the call has finished, otherwise the live roster rows
+// for the call.
+func (m *App) delegateRows(it *transcriptItem) []string {
+	if it.delegate != nil {
+		return delegateDetailsRows(it.delegate, m.width)
+	}
+	children := m.liveDelegateRows(it.callID)
+	if len(children) == 0 {
+		return nil
+	}
+	now := time.Now()
+	rows := make([]string, 0, len(children))
+	for _, child := range children {
+		rows = append(rows, renderDelegateTaskRow(child.index, child.agent, child.status, child.model, child.effort,
+			child.turns, child.contextTokens, child.usage, child.costMicroUSD, child.costKnown,
+			child.elapsed(now), true, m.width))
+	}
+	return rows
+}
+
+// insertDelegateRows puts the nested task lines between the block header and
+// its folded body.
+func insertDelegateRows(lines, nested []string) []string {
+	if len(nested) == 0 || len(lines) == 0 {
+		return lines
+	}
+	out := make([]string, 0, len(lines)+len(nested))
+	out = append(out, lines[0])
+	out = append(out, nested...)
+	out = append(out, lines[1:]...)
+	return out
 }
 
 // toolBodyRows renders a tool result body. Expanded applies the inline display

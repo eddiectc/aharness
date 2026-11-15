@@ -15,10 +15,6 @@ import (
 	"aharness/internal/tools"
 )
 
-// PromptVersion identifies the v1 system prompt and projection contract. v1
-// keeps prompt-v0 unchanged.
-const PromptVersion = "prompt-v0"
-
 // Limits is the per-call context budget contract.
 type Limits struct {
 	MaxContextTokens int `json:"max_context_tokens"`
@@ -45,6 +41,17 @@ type Config struct {
 	PromptVersion  string
 	ToolsetVersion string
 	HarnessVersion string
+	// SystemPrompt is the resolved prompt text recorded in session_start. It
+	// is authoritative for projection; an empty value renders the configured
+	// PromptVersion instead. A child session sets it to the agent's prompt.
+	SystemPrompt string
+	// Agent is the definition name for a child run; empty for a parent.
+	Agent string
+	// Tools is the recorded tool-name grant. Nil means every tool of the
+	// recorded ToolsetVersion; a non-nil list narrows it.
+	Tools []string
+	// Agents is the catalog rendered into a prompt-v1 parent prompt.
+	Agents []AgentInfo
 
 	// MaxTurns is the cumulative model-turn budget; 0 means unlimited.
 	MaxTurns int
@@ -92,10 +99,12 @@ type Controller interface {
 }
 
 // ParentRef identifies the parent session and fork point recorded in a new
-// forked session_start.
+// forked or delegated session_start. CallID is set only for a delegated child:
+// a fork has a parent session and sequence but no call identifier.
 type ParentRef struct {
 	Session string
 	Seq     uint64
+	CallID  string
 }
 
 // RunOptions describes one process run over a durable session.
@@ -164,7 +173,13 @@ type Result struct {
 	CostMicroUSD    int64
 	RunCostComplete bool
 	CostComplete    bool
-	Err             error
+	// Subagent totals fold every delegated child's spend into this run. Child
+	// turns are not added to RunTurns: -max-turns bounds this run's own loop.
+	SubagentTurns        int
+	SubagentUsage        model.Usage
+	SubagentCostMicroUSD int64
+	SubagentCostComplete bool
+	Err                  error
 }
 
 // Projection is the model input rebuilt from the event log.

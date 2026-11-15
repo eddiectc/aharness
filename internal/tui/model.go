@@ -99,6 +99,9 @@ type transcriptItem struct {
 	truncated bool
 	timedOut  bool
 	toolTime  time.Duration
+	// delegate is the recorded per-task summary of one delegate call. It is
+	// decoded from Details so a resumed session renders the same table.
+	delegate *tools.DelegateDetails
 
 	// Notice.
 	noticeKind agent.NoticeKind
@@ -179,6 +182,9 @@ type App struct {
 	rich      bool
 	expandAll bool
 	headless  bool
+	// children is the live delegated-child roster for the active run. It is
+	// display-only and rebuilt from SubagentStarted/Progress/Finished.
+	children []*subagentRow
 	// todos is the checklist last published by the todo tool. It is
 	// display-only and restored from the session log through TodoProvider.
 	todos []tools.TodoItem
@@ -335,6 +341,11 @@ func (m *App) loadHistory(items []agent.HistoryItem) {
 			it.args = SanitizeLine(string(h.Arguments))
 			it.intent = toolIntent(h.Arguments)
 		}
+		if h.Name == "delegate" {
+			if details, ok := tools.ParseDelegateDetails(h.Details); ok {
+				it.delegate = &details
+			}
+		}
 		if it.kind == itemNotice {
 			it.noticeKind = agent.NoticeWarning
 		}
@@ -369,6 +380,7 @@ func (m *App) applySessionSnapshot(snapshot SessionSnapshot) {
 	m.nextEffort = snapshot.Info.ThinkingEffort
 	m.nextRun = 0
 	m.run = liveRun{}
+	m.children = nil
 	m.runStartedCount = 0
 	m.runFinishedCount = 0
 	m.steer = nil

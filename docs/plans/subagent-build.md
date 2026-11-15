@@ -1,8 +1,11 @@
 # aharness subagent build plan
 
 - **Date:** 2026-11-15
-- **Status:** proposed; no code changed. Current reference documents win where
-  they disagree, and implementation updates them in the same change.
+- **Status:** implemented 2026-11-15 (milestone 1). Milestones 2–4 are deferred
+  and recorded in §4.3. Current reference documents win where they disagree;
+  implementation updated them in the same change, and §11 records the
+  deviations. The real-provider smoke (§5.4) is **not run** while
+  `AHARNESS_PROVIDER_TOKEN` is unset.
 - **Source:** [subagent research](../research/subagent-research.md).
 - **Target:** Go 1.27.3, module `aharness`.
 - **Architecture:** [architecture.md](../architecture.md) §3.1 (packages), §3.2
@@ -119,91 +122,91 @@ In addition to the [project definition of done](../definition-of-done.md), all
 items below must hold. Every item is checkable by a fixture, integration, or
 gate test unless marked otherwise.
 
-- [ ] `delegate` is registered as tool number eight, declares `intent`, rejects
+- [x] `delegate` is registered as tool number eight, declares `intent`, rejects
       unknown members, and executes its tasks in order; one tool call produces
       exactly one result.
-- [ ] A child writes a valid v2 session under `<state>/sessions/<child-id>.jsonl`
+- [x] A child writes a valid v2 session under `<state>/sessions/<child-id>.jsonl`
       with `parent_session` and `parent_call_id`, its own `run_start`/`run_end`,
       and exactly one `final`; the parent log contains no child events.
-- [ ] `session_start` records `system_prompt`, `agent`, and `tools`; `Project`
+- [x] `session_start` records `system_prompt`, `agent`, and `tools`; `Project`
       uses the recorded prompt; a session with a recorded prompt projects
       identically after the agent file is edited or deleted.
-- [ ] A `prompt-v0` session created before this change resumes and projects
+- [x] A `prompt-v0` session created before this change resumes and projects
       with the frozen v0 prompt; a `toolset-v0`/`toolset-v1` session resumes
       with its frozen schema set and no grant filtering.
-- [ ] `delegate` is absent from a pre-change session's schemas, so a resumed or
+- [x] `delegate` is absent from a pre-change session's schemas, so a resumed or
       forked old session cannot delegate; a new session can.
-- [ ] A definition that lists `delegate`, names an unknown tool, omits `tools`,
+- [x] A definition that lists `delegate`, names an unknown tool, omits `tools`,
       or has an empty prompt body is rejected with a warning and does not
       replace a bundled agent of the same name.
-- [ ] New sessions record `toolset-v2` and `prompt-v1`.
-- [ ] A user agent file with the same name as a bundled agent replaces it; the
+- [x] New sessions record `toolset-v2` and `prompt-v1`.
+- [x] A user agent file with the same name as a bundled agent replaces it; the
       replacement's prompt, tools, model, and effort are what the child runs.
-- [ ] Per-agent model and effort are resolved through the catalog; a model
+- [x] Per-agent model and effort are resolved through the catalog; a model
       change without an explicit effort uses that model's default effort; an
       unsupported effort produces an `invalid_args` result naming the agent and
       value, not a process exit.
-- [ ] A child's tool allowlist is enforced twice: only granted schemas are sent,
+- [x] A child's tool allowlist is enforced twice: only granted schemas are sent,
       and a call to a non-granted tool returns `unknown_tool` without executing.
-- [ ] A child cannot call `delegate`; the tool is absent from its schemas and
+- [x] A child cannot call `delegate`; the tool is absent from its schemas and
       its plan. Depth is one.
-- [ ] A child's turn budget is: the definition's `max_turns` when present, else
+- [x] A child's turn budget is: the definition's `max_turns` when present, else
       the parent run's explicit `-max-turns`, else unlimited. A child stopped by
       a declared cap reports `status=max_turns`, `code=subagent_limit`, and its
       partial text; an unlimited child is never stopped by the harness alone.
-- [ ] A child inherits stuck detection: five identical failing calls with the
+- [x] A child inherits stuck detection: five identical failing calls with the
       same arguments and result code terminate it with `stuck`.
-- [ ] Child input+output tokens count against `-max-total-tokens`; child turns
+- [x] Child input+output tokens count against `-max-total-tokens`; child turns
       do not count against `-max-turns`; both are visible in `run_end` and
       reconstructed by `Inspect` on resume.
-- [ ] `/agent-hub` opens a roster overlay listing every child in the call with
+- [x] `/agent-hub` opens a roster overlay listing every child in the call with
       agent, intent, model, effort, elapsed, context tokens, turns, and status;
       `Esc` closes it without interrupting a child; it works while a run is
       active and reports that no child is running when idle.
-- [ ] `/agents` opens a definitions browser listing every discovered agent with
+- [x] `/agents` opens a definitions browser listing every discovered agent with
       name, source and file path, declared model, effort, tool count, and
       `max_turns`; a malformed file appears as `invalid` with its parse error.
-- [ ] `/agents` is read-only: no key edits, writes, or persists anything, and
+- [x] `/agents` is read-only: no key edits, writes, or persists anything, and
       the process never opens `<state-dir>/config.json` for writing.
-- [ ] Both commands appear in the `F1` help overlay and in composer
+- [x] Both commands appear in the `F1` help overlay and in composer
       autocomplete, and trailing words after either are accepted and ignored.
-- [ ] Columns drop in the documented order as width shrinks (intent below 60
+- [x] Columns drop in the documented order as width shrinks (intent below 60
       columns, turns below 60, context tokens below 70, model and effort below
       80) and no row exceeds the terminal width.
-- [ ] Elapsed time advances once per second while a child runs and does not
+- [x] Elapsed time advances once per second while a child runs and does not
       depend on progress events; a child in a long tool call still shows a
       moving clock.
-- [ ] `/agent-hub` appears in the `F1` help overlay and in composer autocomplete,
+- [x] `/agent-hub` appears in the `F1` help overlay and in composer autocomplete,
       and `/agent-hub extra words` is accepted and ignored like other
       no-argument commands.
-- [ ] Every roster string is sanitized; a task prompt beginning with an ANSI
+- [x] Every roster string is sanitized; a task prompt beginning with an ANSI
       escape or a control character renders inert and capped.
-- [ ] After a resume, the delegate block shows the recorded per-task table
+- [x] After a resume, the delegate block shows the recorded per-task table
       (agent, intent, model, effort, turns, context tokens, usage, cost) and no
       overlay claims a live run.
-- [ ] `SubagentProgress` is emitted at most once per child response and at most
+- [x] `SubagentProgress` is emitted at most once per child response and at most
       once per second per child, carries counters only, and updates both the
       overlay and the delegate block's nested line without adding a transcript
       item.
-- [ ] A `-batch` session records a grant without `delegate`; its schemas omit the
+- [x] A `-batch` session records a grant without `delegate`; its schemas omit the
       tool, and a resumed batch session keeps that grant.
-- [ ] `-max-subagents` blocks further spawns with an `invalid_args` result
+- [x] `-max-subagents` blocks further spawns with an `invalid_args` result
       naming the limit; `0` means unlimited; a negative value is a config error.
-- [ ] `Esc` during a `delegate` call stops the child loop, kills a child
+- [x] `Esc` during a `delegate` call stops the child loop, kills a child
       `run_command` process group, pairs the delegate call with `canceled`, and
       leaves the child log terminated with `interrupted` and one `final`.
-- [ ] `session` resumes only a child whose `parent_session` matches the caller;
+- [x] `session` resumes only a child whose `parent_session` matches the caller;
       a sibling, parent, or unknown ID returns `invalid_args`; a duplicate
       `session` within one call is rejected.
-- [ ] The report is capped at 16 KiB with a marker; `details` is capped at
+- [x] The report is capped at 16 KiB with a marker; `details` is capped at
       4 KiB; both are sanitized; an instruction-shaped report gains one marker
       line and its text is otherwise unmodified.
-- [ ] `/resume` and the TUI session switcher never list child sessions; a child
+- [x] `/resume` and the TUI session switcher never list child sessions; a child
       remains addressable by ID.
-- [ ] The TUI renders one foldable delegate block per call, restores it from
+- [x] The TUI renders one foldable delegate block per call, restores it from
       `details` on resume, and `-ui-json` adds no new event kind and no protocol
       version bump.
-- [ ] README, architecture, limits, configuration, tui, and testing strategy are
+- [x] README, architecture, limits, configuration, tui, and testing strategy are
       updated; `make dod` passes.
 - [ ] A manual real-provider smoke runs `explore` and `reviewer` against this
       repository and records the parent's context growth, child turns, and cost.
@@ -559,8 +562,12 @@ feature in this plan; batch support is deliberately out of scope (§1.3).
 6. The child's recorded tool grant and prompt are reused; editing the agent file
    does not change an existing child session.
 
-A resumed child is bounded by the same 40-turn cap applied to its cumulative
-turns, and its remaining budget is the parent's remaining budget at call time.
+A resumed child uses the same turn rule as a fresh one: the definition's
+`max_turns` when present, else the parent's explicit `-max-turns`, else
+unlimited; the cap is applied to the child's cumulative turns. Its remaining
+token budget is the parent's remaining budget at call time. (The earlier
+"40-turn cap" line was inconsistent with §1.4 and §6; §11 records the
+resolution.)
 
 ### 3.6 Report caps and marking
 
@@ -905,20 +912,40 @@ type SubagentSpec struct {
 }
 
 type SubagentReport struct {
-    Agent     string
-    Session   string
-    Status    string
-    Turns     int
-    Usage     model.Usage
-    CostMicroUSD int64
-    CostComplete bool
-    Text      string
+    Agent         string
+    Intent        string
+    Model         string
+    Effort        string
+    Session       string
+    Status        string
+    Code          Code
+    Turns         int
+    ContextTokens int
+    Usage         model.Usage
+    CostMicroUSD  int64
+    CostComplete  bool
+    Text          string
+}
+
+// Call carries parent-run facts the registry cannot know by itself: the
+// parent tool-call ID recorded as the child's parent_call_id, the parent turn,
+// and the parent's cumulative usage used to derive a child token budget.
+type Call struct {
+    ID          string
+    Turn        int
+    ParentUsage model.Usage
 }
 
 type Spawning interface {
-    Spawn(ctx context.Context, specs []SubagentSpec) []SubagentReport
+    Spawn(ctx context.Context, call Call, specs []SubagentSpec) []SubagentReport
+    Agents() []AgentInfo
 }
 ```
+
+`Agents()` is what lets the tool reject an unknown name before any task runs
+and list the available names in the error, and `Call` is what lets a child
+record `parent_call_id` and inherit the parent's remaining token budget. Both
+are the smallest additions the recorded contract needs; see §11.
 
 - `tools.Options.Spawning` carries it; a nil value keeps `delegate` registered
   and returns an actionable `unavailable` result, matching how `web_search`
@@ -1240,3 +1267,26 @@ When implemented, update:
   stated piece of work the parent performs while a child runs.
 - Worktrees are the prerequisite for concurrent writers. They are a separate
   plan: a second `os.Root`, a cleanup rule, and a diff or commit to review.
+
+## 11. Implementation deviations
+
+Milestone 1 was implemented in one change. The current reference documents
+(architecture, limits, configuration, commands, tui, testing strategy) carry the
+shipped contract; this section records where the code differs from the plan
+text above.
+
+| Area | Plan | Shipped | Why |
+|---|---|---|---|
+| Spawn interface | `Spawn(ctx, specs)` | `Spawn(ctx, Call, specs)` plus `Agents()` | A child must record the parent tool-call ID (`parent_call_id`) and inherit the parent's remaining token budget; the tool must reject an unknown agent before any task runs and list the available names. Both facts are only available at the call site. |
+| `delegate` `intent` | no `maxLength` | `maxLength: 200` | Every current tool schema declares the shared, capped `intent` argument, and a unit test enforces it. The schema is new in `toolset-v2`, so the cap adds no replay risk. |
+| Progress and finish payloads | no cost-completeness field | `CostComplete` on `SubagentProgress` and `SubagentFinished` | Without it the roster cannot distinguish a free child from an unpriced one; the column would have to claim `$0.000000` for an unknown cost. |
+| Resumed child turns | "the same 40-turn cap" | definition `max_turns`, else parent `-max-turns`, else unlimited | §1.4 and §6 define the budget and reject a fixed constant; §3.5's 40 was a leftover and is superseded. |
+| Continuation `agent` | a `session` task may omit `agent` | accepted empty only with `session`; the recorded agent wins | The schema marks `agent` required, so a model always sends something; an empty value is meaningless for a fresh task and is rejected there. |
+| `/agents` status | `active`, `invalid`, or `shadowed` | `active` or `invalid` | A malformed user file is an `invalid` row and the bundled agent of the same name simply stays active, which the two-status model expresses without a third state. |
+| `-ui-json` roster | "no new event kind" | roster appears in frames plus optional `tool_started`/`tool_finished.subagent_tasks` | No subagent semantic event was added; the plan already allowed the optional task array and the rendered overlay in frames. |
+| Batch grant | "a grant without `delegate`" | the grant is computed from the recorded toolset version | A resumed or forked `toolset-v0`/`toolset-v1` session must not receive a v2-only name (`web_search`, `web_fetch`, `todo`) in its recorded grant; `Project` would reject it as corrupt. |
+| Agent catalog source | bundled agents "compiled in" | `bundledAgents()` in `internal/agent/agents.go` | Keeps the parser, the catalog, and the definitions in one package with no embedded file system. |
+
+Deferred as planned: `/agent-hub` focus and steering (M2), concurrent read-only
+fan-out (M3), and `agent_overrides` with a config writer (M4). The M1 checklist
+in §1.4 is the shipped scope; the manual real-provider smoke was not run.

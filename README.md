@@ -102,6 +102,25 @@ opt-in and unlimited by default.
   or follow-up run keeps it. The TUI shows the current checklist in a persistent
   capped panel above the composer, updated from the recorded details and
   restored on resume, fork, and session switch.
+- Delegated subagents. The `delegate` tool runs up to four child agents in one
+  call, each a separate v2 session under `<state>/sessions` recorded with
+  `parent_session` and `parent_call_id`. Five bundled agents ship as defaults
+  (`explore`, `researcher`, `reviewer`, `implementer`, `task`), and
+  `<state-dir>/agents/*.md` files override them by exact name with a strict
+  `key: value` header and a markdown prompt body. Each child records its own
+  resolved prompt, tool grant, model, effort, provider, and pricing, so its log
+  is self-describing and resumable; it cannot delegate, and a test asserts that.
+  Child input+output tokens count against `-max-total-tokens`; child turns do
+  not count against `-max-turns` but seed a child's default cap. The TUI renders
+  one foldable delegate block per call and adds two display-only commands:
+  `/agent-hub`, a live roster of running children with agent, intent, model,
+  effort, elapsed, context tokens, turns, cost, and status, and `/agents`, a
+  read-only browser of the discovered definitions. `-max-subagents` (default 8,
+  `0` unlimited) bounds fresh children per run. `-batch` records a grant without
+  `delegate`, because an unattended run has no `Esc` and no observer. Sessions
+  created before this change keep their recorded `prompt-v0` and
+  `toolset-v0`/`toolset-v1` contracts, so they cannot delegate; start a new
+  session to use the feature.
 - An append-only v2 JSONL session log with `run_start`/`run_end` boundaries,
   exclusive/shared `flock`, torn-final-line repair, and a per-run `final`.
 - `-resume <id>` continues a session in place; `-fork <id>` creates a new
@@ -126,7 +145,8 @@ opt-in and unlimited by default.
   previous session in the same workspace while idle.
   Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
   `/provider`, `/details`, `/new`, `/resume`, `/files`, `/table`, `/image`,
-  `/rich`/`/raw`, `/repaint`, `/refresh`, `/interrupt`, `/cancel`, `/quit`);
+  `/rich`/`/raw`, `/repaint`, `/refresh`, `/agent-hub`, `/agents`, `/interrupt`,
+  `/cancel`, `/quit`);
   typing `/` opens a filtered completion menu (`Tab` completes, `Enter` runs),
   and unrecognized `/text` is sent as a normal message. See the
   [slash-command reference](docs/commands.md).
@@ -148,11 +168,12 @@ opt-in and unlimited by default.
   `web_fetch_key` configure `web_fetch`; the provider defaults to `builtin`.
   See [docs/configuration.md](docs/configuration.md).
 
-Out of scope: hooks, model-based summarization, subagents, RAG/embeddings,
+Out of scope: hooks, model-based summarization, background or asynchronous
+subagents, agent-to-agent messaging, nested delegation, worktrees, RAG/embeddings,
 MCP/plugins, additional provider dialects, built-in evals, price tracking,
 workspace snapshots, built-in isolation/approval, session rotation, or v0 log
-migration. The TUI adds no durable event type, schema version, tool, prompt
-input, or security boundary.
+migration. Apart from the subagent surfaces listed above, the TUI adds no
+durable event type, schema version, tool, prompt input, or security boundary.
 
 ## Documentation
 

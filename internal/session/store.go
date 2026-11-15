@@ -194,6 +194,9 @@ func (s *Store) ID() string { return s.id }
 // Path returns the session log path.
 func (s *Store) Path() string { return s.path }
 
+// LastSeq returns the sequence number of the most recently appended event.
+func (s *Store) LastSeq() uint64 { return s.next }
+
 // Events returns a copy of the events appended so far. It remains valid after
 // Close.
 func (s *Store) Events() []Event {

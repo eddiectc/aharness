@@ -422,6 +422,13 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 	}
 	cfg.PromptVersion = state.PromptVersion
 	cfg.ToolsetVersion = state.ToolsetVersion
+	// The recorded prompt, agent, and grant are replay values: a resumed or
+	// forked session keeps exactly what it recorded, so an edited agent file
+	// never rewrites an existing prompt and a pre-change session cannot
+	// delegate.
+	cfg.SystemPrompt = state.SystemPrompt
+	cfg.Agent = state.Agent
+	cfg.Tools = append([]string(nil), state.Tools...)
 	return validateEffective(cfg)
 }
 

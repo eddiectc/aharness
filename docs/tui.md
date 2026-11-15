@@ -271,6 +271,41 @@ act on it.
   newlines flatten to spaces, tabs expand, and the value is capped at 200 bytes
   on a rune boundary. A missing intent never fails a tool call.
 
+### Delegate blocks and subagents
+
+A `delegate` call renders as one folded tool block, like every other call. Under
+its header, each task gets one nested status line:
+`[N] <agent> · <status> · [elapsed] · <model> · effort <value> · <turns> turns · ctx <tokens> · <tokens> tok · cost <estimate>`.
+While the call runs the lines come from the live roster; after `tool_result` is
+durable they come from the recorded `details`, so a resumed session shows the
+same table with no claim that anything is live. Reports stay in the folded body
+(one `[task N agent=… status=… session=…]` section each). The block is the
+permanent record; `/agent-hub` is the live view, and a `SubagentProgress` event
+updates both without adding a transcript item.
+
+### `/agent-hub` roster
+
+`/agent-hub` opens an overlay over the transcript with one row per child:
+`AGENT`, `INTENT`, `MODEL`, `EFFORT`, `ELAPSED`, `CTX`, `TURNS`, `COST`, and
+`STATUS`. Columns drop in a fixed order as the terminal narrows: intent and
+turns below 60 columns, context tokens below 70, model and effort below 80, and
+cost below 90. A row never exceeds the terminal width. Rows are keyed by child
+session and ordered by task index; eight are visible plus the header and a
+`+N more` row, and `Up`/`Down`/`PgUp`/`PgDn`/wheel scroll. A finished child
+keeps its terminal status, turns, duration, and cost for the rest of the run; a
+new run starts with an empty roster and the roster is empty while idle. Elapsed
+is computed by the TUI from its receipt of the start event, so it keeps moving
+during a long tool call and is unaffected by throttled progress. Every string is
+sanitized; the intent is one capped line and the full prompt stays in the
+tool-call arguments. `Esc` closes the overlay without interrupting a child.
+
+### `/agents` definitions browser
+
+`/agents` opens the read-only definitions browser described in
+[commands.md](commands.md#agents). It shows the set loaded for this process, so
+a mid-run edit cannot change a child in flight; editing takes effect for the
+next process. Malformed files appear as `invalid` rows with their parse error.
+
 ## Todo widget
 
 The TUI keeps the checklist published by the `todo` tool in a persistent widget
@@ -362,15 +397,19 @@ Output lines:
   (`id`, `path`, `alt`, `row`, `col`, `width`, `height`, `protocol`),
   `color_profile`, `no_color`, `image_protocol`, `styles_truncated`. `overlay`
   is `none`, `help`, `details`, `table`, `file`, `model`, `effort`, `session`,
-  or `image`. Frames contain no ANSI and no raw image bytes.
+  `image`, `agent-hub`, or `agents`. Frames contain no ANSI and no raw image
+  bytes.
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
   `model_changed`, `notice`, `error`, with the fields documented in
   [tui-build.md §2.7](plans/tui-build.md#27-machine-readable-ui-mode---ui-json).
   `run_started` and `model_changed` carry an optional `thinking_effort` field
   for the effective value; an omitted field means the provider default.
   Selecting an effort with `F2` emits a `notice` with
-  `kind: "thinking_effort"`. No new event type is introduced, and the protocol
-  version stays 1; clients that do not know the optional field ignore it.
+  `kind: "thinking_effort"`. `tool_started` and `tool_finished` carry an
+  optional `subagent_tasks` array for a `delegate` call (agent, intent, session,
+  model, effort, status, turns, context tokens, usage, cost). No new event type
+  is introduced, and the protocol version stays 1; clients that do not know the
+  optional fields ignore them.
 - `snapshot`: a deterministic SVG of the current `x/vt` cells at the current
   frame `seq`; it contains no timestamps, random IDs, durations, or ANSI, and
   does not emit an extra frame.
@@ -405,6 +444,9 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | File picker entries / filter | 2,000 per directory / 64 bytes | No recursion, no file contents; `.git`, symlinks, control-character names, and escapes are rejected. |
 | Resume picker sessions / head | 100 per workspace / 64 events | Same canonical workspace only; the active session is excluded; unreadable or corrupt logs are skipped; the first-message preview is sanitized and cut to 160 bytes. |
 | Overlay stack | 4 | Deeper requests close the oldest overlay. |
+| Agent roster | 8 rows, 200-byte intent | Header and `+N more` row; scrolls; every string sanitized. |
+| Delegated tasks per call | 4 | Each renders one nested row; a call produces exactly one tool block. |
+| Child report per task | 16 KiB | Included in the folded block body; the child log keeps the full text. |
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
 | Image file / dimensions / pixels | 8 MiB / 4096×4096 / 16 Mi | PNG/JPEG/GIF only; `DecodeConfig` runs before decode. |
 | Images per transcript / thumbnail | 32 / 60×20 cells | Older images fall off; thumbnails are half-block glyphs. |

@@ -176,7 +176,30 @@ Other event payloads:
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
-| Toolset version | `toolset-v1` for new sessions | `toolset-v0` declarations are frozen for replay; `toolset-v1` replays the current extended set, including `web_search`, `web_fetch`, `todo`, and the shared `intent` argument. An unknown recorded version is a replay error. `PromptVersion` is unchanged. |
+| Toolset version | `toolset-v2` for new sessions | `toolset-v0` and `toolset-v1` declarations are frozen for replay; `toolset-v2` adds `delegate` to v1. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, and an older session cannot delegate. |
+| Prompt version | `prompt-v1` for new sessions | `prompt-v0` stays frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
+| `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Tasks run in array order. |
+| `delegate` | Concurrent children per call | 1 | Milestone 1 executes sequentially; the concurrency cap of 4 belongs to the deferred read-only fan-out. |
+| `delegate` | `task` field | 16 KiB | A longer self-contained prompt is `invalid_args`; it is a delegation prompt, not a document. |
+| `delegate` | Child report | 16 KiB | Head-capped with `[truncated N bytes]`, marked once when instruction-shaped, and never rewritten. An empty report becomes `(no report)`. |
+| `delegate` | `details` | 4 KiB | Exceeding it is `internal_error`: the spawner controls the size. |
+| `delegate` | Child turns | Inherited, not fixed | The definition's `max_turns` when present, else the parent's explicit `-max-turns`, else unlimited. A child stopped by a declared cap reports `status=max_turns`, `code=subagent_limit`, and its partial text. |
+| `delegate` | Child tokens | Parent's remaining budget | Always the parent's `-max-total-tokens` remainder; unlimited when the parent is. Child tokens count against the parent's cumulative total. |
+| `delegate` | Child stuck detection | 5 identical failures | Inherited unchanged from the normal loop. |
+| `delegate` | Child cancellation | parent operation context | `Esc` cancels the child loop and any child `run_command` process group; the child log ends `interrupted` with one `final`. |
+| `delegate` | Session continuation | canonical UUID | A `session` task must be a child whose recorded `parent_session` matches the caller; a sibling, parent, unknown, foreign, or duplicate ID is `invalid_args`. |
+| `delegate` | Progress events | 1 per child response, 1 per second per child | Counters and names only; never child text, arguments, or tool output. |
+| `delegate` | Subagents per run | 8 default; 0 unlimited | `-max-subagents` / `AHARNESS_MAX_SUBAGENTS` / `max_subagents`. A fan-out guard, not a spend budget. |
+| Agent definition | File size | 64 KiB | Larger files are skipped with a warning. |
+| Agent definition | Name | 64 bytes, `[a-z][a-z0-9-]*` | Stable identifier in logs and prompts. |
+| Agent definition | Description | 200 bytes | Billed on every parent call through the catalog. |
+| Agent definition | Prompt body | 16 KiB | Recorded per session. |
+| Agent definition | Tools | non-empty, current toolset, no `delegate` | A child with no tools cannot act, and depth is one. |
+| Agent definitions | Discovered count | 32 | The catalog stays readable; later files are ignored with a warning. |
+| Agent catalog | Prompt material | 4 KiB | One line per agent plus an `[N agents omitted]` marker. |
+| Roster | Visible rows | 8 plus header and `+N more` | Keeps `/agent-hub` readable at 24 rows; more is scrollable. |
+| Roster | Intent text | 200 bytes, one line | The full prompt stays in the tool-call arguments. |
+| Roster | Elapsed | TUI clock | Computed from the start event; not carried in events, so throttled progress cannot skew it. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
 
 ## 5. CLI, input, and configuration
@@ -282,6 +305,17 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | `-ui-json` snapshot | 512 KiB SVG payload | Over-cap emits `snapshot_too_large` and continues. |
 
 ## 7. No cap or no separate cap
+
+Child turns have no separate fixed cap: the definition's `max_turns`, then the
+parent's explicit `-max-turns`, then unlimited. The plan for subagents rejected
+a hard-coded child cap because a number chosen in advance either truncates
+legitimate long work or fails to stop a child that keeps making different
+calls. The real bound is observation plus `Esc`: `SubagentProgress` is
+forwarded through the parent display, `/agent-hub` shows a moving clock, and
+`-batch` never grants `delegate`. Tokens are different: a child always spends
+inside the parent's call, so its tokens count against `-max-total-tokens` and
+cannot be used to escape the budget.
+
 
 These are intentionally bounded only by an enclosing limit, not by a dedicated
 constant:

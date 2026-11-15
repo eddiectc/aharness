@@ -47,6 +47,7 @@ before the file is read, and a key in the file cannot move its own location.
   "provider_base_url": "https://opencode.ai/inference/go/v1",
   "searxng_url": "http://127.0.0.1:8080",
   "max_turns": 40,
+  "max_subagents": 8,
   "http_timeout": "10m",
   "thinking_effort": "high"
 }
@@ -71,7 +72,8 @@ number is rejected so a unit typo cannot silently mean nanoseconds.
 | `web_fetch_key` | string | `-web-fetch-key` / `AHARNESS_WEB_FETCH_KEY` | Optional provider bearer token; sent only to the provider and never logged. Prefer the environment. |
 | `thinking_effort` | string | `-thinking-effort` / `AHARNESS_THINKING_EFFORT` | `default` clears. |
 | `max_turns` | integer | `-max-turns` / `AHARNESS_MAX_TURNS` | 0 is unlimited; negative is invalid. |
-| `max_total_tokens` | integer | `-max-total-tokens` / `AHARNESS_MAX_TOTAL_TOKENS` | 0 is unlimited; negative is invalid. |
+| `max_total_tokens` | integer | `-max-total-tokens` / `AHARNESS_MAX_TOTAL_TOKENS` | 0 is unlimited; negative is invalid. Child (delegated) tokens count against it. |
+| `max_subagents` | integer | `-max-subagents` / `AHARNESS_MAX_SUBAGENTS` | Fresh delegated children per run; default 8, 0 is unlimited, negative is invalid. |
 | `max_context_tokens` | integer | `-max-context-tokens` / `AHARNESS_MAX_CONTEXT_TOKENS` | Must be positive; clamped to the model ceiling. |
 | `max_output_tokens` | integer | `-max-output-tokens` / `AHARNESS_MAX_OUTPUT_TOKENS` | 0 omits the request field. |
 | `session_timeout` | duration | `-session-timeout` / `AHARNESS_SESSION_TIMEOUT` | 0 means no deadline. |
@@ -88,11 +90,21 @@ Deliberately **not** configurable in the file:
 | Provider token (`AHARNESS_PROVIDER_TOKEN`) | A secret does not belong on disk in this harness; keep it in the environment or a secret manager. |
 | State directory (`-state-dir` / `AHARNESS_STATE_DIR`) | It locates the file itself, so it cannot be self-referential. |
 | Task, `-task-file`, `-resume`, `-fork` | Per-invocation inputs; a sticky task or session would be a footgun. |
+| Agent definitions | They are files under `<state-dir>/agents/`, not config keys: a definition carries a tool grant and a prompt, and a settings surface must not widen authority without editing a file. |
 | `-batch`, `-ui-json`, `-ui-size`, `-stream`, `-version`, `-list-models`, `-refresh-models` | Front-end and terminal-action selection is per invocation. |
 | `AHARNESS_IMAGE_PROTOCOL` | A terminal capability, not harness configuration. |
 
 Every key is validated even when a higher layer wins, so a broken file is
 reported instead of hiding behind a flag.
+
+The agent directory is derived, not configured. Definitions live in
+`<state-dir>/agents/*.md`; there is no `-agents-dir` flag, environment
+variable, or config key. The state directory is already the harness-owned,
+operator-scoped location, and a workspace-level agent directory would be
+repository-controlled prompt material with no trust model. Moving the state
+directory moves the definitions with it. `-max-subagents` is the one new
+delegation setting because a fan-out guard depends on the operator's patience
+and provider plan, while the definitions themselves are content.
 
 ## 3. Environment variables
 
@@ -114,6 +126,7 @@ reported instead of hiding behind a flag.
 | `AHARNESS_THINKING_EFFORT` | `-thinking-effort` |
 | `AHARNESS_MAX_TURNS` | `-max-turns` |
 | `AHARNESS_MAX_TOTAL_TOKENS` | `-max-total-tokens` |
+| `AHARNESS_MAX_SUBAGENTS` | `-max-subagents` |
 | `AHARNESS_MAX_CONTEXT_TOKENS` | `-max-context-tokens` |
 | `AHARNESS_MAX_OUTPUT_TOKENS` | `-max-output-tokens` |
 | `AHARNESS_SESSION_TIMEOUT` | `-session-timeout` |

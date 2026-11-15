@@ -109,6 +109,56 @@ type Notice struct {
 	Text string
 }
 
+// SubagentStarted is emitted before a child run starts. Fields are resolved
+// parent-side so the display never guesses.
+type SubagentStarted struct {
+	Turn    int
+	CallID  string
+	Index   int
+	Agent   string
+	Intent  string
+	Session string
+	Model   string
+	// Effort is the resolved effort; empty means the model default.
+	Effort string
+	Tools  []string
+}
+
+// SubagentProgress is emitted at child model-response boundaries and throttled
+// to at most one event per second per child. It carries counters and names
+// only, never child text, arguments, or tool output.
+type SubagentProgress struct {
+	Turn          int
+	CallID        string
+	Index         int
+	Agent         string
+	Session       string
+	ChildTurns    int
+	ContextTokens int
+	Usage         model.Usage
+	CostMicroUSD  int64
+	// CostComplete is false when the child's model is unpriced, so the roster
+	// shows an unknown cost instead of a zero one.
+	CostComplete bool
+	LastTool     string
+}
+
+// SubagentFinished is emitted after the child store is synced and closed.
+type SubagentFinished struct {
+	Turn          int
+	CallID        string
+	Index         int
+	Agent         string
+	Session       string
+	Status        string
+	ChildTurns    int
+	ContextTokens int
+	Usage         model.Usage
+	CostMicroUSD  int64
+	CostComplete  bool
+	Duration      time.Duration
+}
+
 // RunFinished is emitted after final and run_end are durable.
 type RunFinished struct {
 	Result   Result
@@ -125,6 +175,9 @@ func (ToolStarted) isDisplayEvent()       {}
 func (ToolCompleted) isDisplayEvent()     {}
 func (MessageRecorded) isDisplayEvent()   {}
 func (Notice) isDisplayEvent()            {}
+func (SubagentStarted) isDisplayEvent()   {}
+func (SubagentProgress) isDisplayEvent()  {}
+func (SubagentFinished) isDisplayEvent()  {}
 func (RunFinished) isDisplayEvent()       {}
 
 // sanitizeDisplayEvent removes terminal control characters from text fields
@@ -152,12 +205,45 @@ func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
 	case Notice:
 		ev.Text = displaySafe(ev.Text)
 		return ev
+	case SubagentStarted:
+		ev.Agent = displaySafe(ev.Agent)
+		ev.Intent = displaySafe(ev.Intent)
+		ev.Session = displaySafe(ev.Session)
+		ev.Model = displaySafe(ev.Model)
+		ev.Effort = displaySafe(ev.Effort)
+		ev.CallID = displaySafe(ev.CallID)
+		ev.Tools = displaySafeSlice(ev.Tools)
+		return ev
+	case SubagentProgress:
+		ev.Agent = displaySafe(ev.Agent)
+		ev.Session = displaySafe(ev.Session)
+		ev.CallID = displaySafe(ev.CallID)
+		ev.LastTool = displaySafe(ev.LastTool)
+		return ev
+	case SubagentFinished:
+		ev.Agent = displaySafe(ev.Agent)
+		ev.Session = displaySafe(ev.Session)
+		ev.CallID = displaySafe(ev.CallID)
+		ev.Status = displaySafe(ev.Status)
+		return ev
 	case RunFinished:
 		ev.Reason = displaySafe(ev.Reason)
 		return ev
 	default:
 		return ev
 	}
+}
+
+// displaySafeSlice sanitizes every name in a display-only list.
+func displaySafeSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = displaySafe(value)
+	}
+	return out
 }
 
 func displaySafe(s string) string {

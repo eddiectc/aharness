@@ -75,6 +75,8 @@ change and frames expose the resulting composer, menu rows, and overlay.
 | `/resume` | none | none | pick a previous session in this workspace and resume it (idle) |
 | `/files`, `/file` | none | `Ctrl-O` | workspace file picker (idle) |
 | `/table` | none | `Ctrl-T` | most recent markdown table |
+| `/agent-hub` | none | none | live delegated-child roster; works during a run |
+| `/agents` | none | none | read-only agent definitions browser |
 | `/image` | none | `Ctrl-G` | image viewer for the most recent image block |
 | `/rich` | none | `Ctrl-R` toggles | set rich assistant rendering |
 | `/raw` | none | `Ctrl-R` toggles | set raw assistant rendering |
@@ -245,6 +247,36 @@ line shows the active mode.
 Requests a full terminal repaint, equivalent to `Ctrl-L`. It does not modify
 the transcript, composer, run, or session.
 
+## Delegation
+
+### `/agent-hub`
+
+Opens a live roster of the delegated children in the current run: agent,
+intent, model, effort, elapsed, context tokens, turns, cost, and status, with
+columns dropping in a documented order as the terminal narrows. It is
+display-only and works while a run is active, because it is a display command.
+`Up`/`Down`/`PgUp`/`PgDn`/wheel scroll the rows; eight rows are visible plus a
+header and a `+N more` row. `Esc` closes it and does not interrupt a child.
+Elapsed time is the TUI's own clock from the start event, so it keeps ticking
+between progress events. Rows are keyed by child session and a finished child
+keeps its terminal status for the rest of the run. Idle, it reports that no
+child is running. Trailing words are accepted and ignored, like every
+no-argument command. It adds no protocol event: the roster appears in
+`-ui-json` `frames` and `snapshots`.
+
+### `/agents`
+
+Opens the read-only definitions browser: name, source (`bundled` or `user` with
+the file path), declared model and effort (`inherit` when absent), tool count,
+`max_turns`, and status. `Enter` expands a row in place to show the tool list,
+the first prompt line, and, for a malformed file, the parse error; `Esc`
+closes. Rows are sorted by name. The browser shows the set loaded for this
+process, so a mid-run edit cannot change what a child in flight will run and an
+edit takes effect for the next process. It has no editing keys and writes
+nothing: it never opens `<state-dir>/config.json` for writing, and agent
+overrides do not exist. Invalid files appear as `invalid` rows while the bundled
+agent of the same name stays active. It works while a run is active.
+
 ## Run control
 
 ### `/interrupt`
@@ -271,6 +303,8 @@ to idle. Idle: reports that no run is active.
 /new                        start a fresh session in this workspace
 /resume                     pick a previous session for this workspace
 /files                      insert a workspace-relative path into the composer
+/agent-hub                  live roster of the children in the current run
+/agents                     read-only agent definitions browser
 /interrupt                  stop the current model call; the run continues
 /cancel                     end the active run and return to idle
 /quit                       exit; an active run is canceled with exit code 130
@@ -287,9 +321,11 @@ Commands are composer text, not a new protocol command. Send:
 
 The same text/key stream drives autocomplete (`tab`, `up`, `down`, `esc`).
 Resulting overlays appear in `frame.overlay` (`help`, `details`, `model`,
-`effort`, `session`, `file`, `table`, or `image`); status feedback appears in
-the frame lines. `/model` and `/effort` also emit the existing `model_changed`
-and `notice` events. `/new` and `/resume` emit a `notice` event with kind
+`effort`, `session`, `file`, `table`, `image`, `agent-hub`, or `agents`); status
+feedback appears in the frame lines. `/model` and `/effort` also emit the existing `model_changed`
+and `notice` events. `tool_started` and `tool_finished` gain an optional
+`subagent_tasks` array for a `delegate` call; there is no new event kind and no
+protocol version bump. `/new` and `/resume` emit a `notice` event with kind
 `session` after a successful switch. The protocol version stays 1.
 
 ## Caps

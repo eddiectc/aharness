@@ -304,6 +304,11 @@ func listPreviousSessions(stateDir, workspace, current string) ([]tui.PreviousSe
 		if err != nil || summary.Workspace != workspace {
 			continue
 		}
+		if summary.ParentSession != "" {
+			// A delegated child is addressable by ID and by -resume, but it is
+			// not a previous session a human started.
+			continue
+		}
 		choices = append(choices, tui.PreviousSession{
 			ID:       candidate.id,
 			Modified: candidate.modified,

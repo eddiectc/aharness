@@ -69,10 +69,14 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		ModelTimeoutMS:   cfg.ModelTimeout.Milliseconds(),
 		HarnessVersion:   cfg.HarnessVersion,
 		ThinkingEffort:   cfg.ThinkingEffort,
+		SystemPrompt:     systemPromptText(cfg),
+		Agent:            cfg.Agent,
+		Tools:            append([]string(nil), cfg.Tools...),
 	}
 	if parent != nil {
 		data.ParentSession = parent.Session
 		data.ParentSeq = parent.Seq
+		data.ParentCallID = parent.CallID
 	}
 	ev, err := session.NewEvent(session.TypeSessionStart, 0, "", data)
 	if err != nil {
@@ -124,6 +128,12 @@ type runState struct {
 	failKey          string
 	failCount        int
 	finalized        bool
+	// Delegated children spend inside this run's call. Their tokens and cost
+	// fold into the run's totals; their turns never do.
+	subagentTurns        int
+	subagentUsage        model.Usage
+	subagentCost         int64
+	subagentCostComplete bool
 }
 
 // Run executes one run to a terminal state. Every initialized run emits
@@ -151,6 +161,18 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	st.cost = state.CostMicroUSD
 	st.costComplete = state.CostComplete
 	st.runCostComplete = true
+	st.subagentTurns = state.SubagentTurns
+	st.subagentUsage = state.SubagentUsage
+	st.subagentCost = state.SubagentCostMicroUSD
+	st.subagentCostComplete = true
+	if state.SubagentUsage.Total() > 0 || state.SubagentTurns > 0 {
+		st.subagentCostComplete = state.SubagentCostComplete
+	}
+	if !st.subagentCostComplete {
+		// The cumulative estimate includes the children, so an unpriced child
+		// from an earlier run keeps the session total incomplete.
+		st.costComplete = false
+	}
 
 	// Repair every unpaired call before the new run starts so the pairing
 	// invariant holds even after a crash.
@@ -350,11 +372,11 @@ func (r *Runner) checkLimits(ctx context.Context, st *runState) (StopReason, str
 		}
 		return StopTimeLimit, fmt.Sprintf("session deadline reached (-session-timeout %s, elapsed %s)", r.cfg.SessionTimeout, observed.Round(time.Millisecond)), nil
 	}
-	if r.cfg.MaxTotalTokens > 0 && st.usage.Total() >= r.cfg.MaxTotalTokens {
-		if err := r.recordLimit(st.turns, limitMaxTotalTokens, int64(r.cfg.MaxTotalTokens), int64(st.usage.Total())); err != nil {
+	if total := st.totalTokens(); r.cfg.MaxTotalTokens > 0 && total >= r.cfg.MaxTotalTokens {
+		if err := r.recordLimit(st.turns, limitMaxTotalTokens, int64(r.cfg.MaxTotalTokens), int64(total)); err != nil {
 			return StopInternalError, "", err
 		}
-		return StopTokenLimit, fmt.Sprintf("total token budget reached (-max-total-tokens %d, tokens %d)", r.cfg.MaxTotalTokens, st.usage.Total()), nil
+		return StopTokenLimit, fmt.Sprintf("total token budget reached (-max-total-tokens %d, tokens %d)", r.cfg.MaxTotalTokens, total), nil
 	}
 	return "", "", nil
 }
@@ -780,7 +802,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 
 		started := time.Now()
 		opCtx, finish := r.beginOperation(ctx)
-		result, panicked := safeExecute(opCtx, r.tools, call)
+		result, panicked := safeExecute(opCtx, r.tools, call, tools.Call{ID: call.ID, Turn: turn, ParentUsage: st.cumulativeUsage()})
 		duration := time.Since(started)
 		interrupted := ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled)
 		finish()
@@ -796,6 +818,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			if err := r.emit(toolCompletedEvent(turn, call, payload)); err != nil {
 				return r.failDisplay(res, st, err, "failed to display a tool result")
 			}
+			r.foldSubagent(st, call, result)
 			if err := r.appendUnexecuted(calls[i+1:], turn, tools.CodeInternal, "tool call not executed after a recovered panic"); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record a tool result")
@@ -828,6 +851,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			return r.failDisplay(res, st, err, "failed to display a tool result")
 		}
 
+		r.foldSubagent(st, call, result)
 		if interrupted {
 			if err := r.record(session.TypeInterrupt, st.turns, "", interruptData{
 				Operation: operationTool,
@@ -907,6 +931,44 @@ func (r *Runner) logToolResult(call model.ToolCall, result tools.Result, payload
 	)
 }
 
+// totalTokens is the parent's cumulative spend plus every delegated child's
+// spend. A child cannot be used to escape -max-total-tokens.
+func (st *runState) totalTokens() int {
+	return st.usage.Total() + st.subagentUsage.Total()
+}
+
+// cumulativeUsage is the parent's own usage plus every delegated child's
+// usage. It is what a new child subtracts from the budget, so children from
+// earlier runs in the same session are not forgotten.
+func (st *runState) cumulativeUsage() model.Usage {
+	usage := st.usage
+	usage.InputTokens += st.subagentUsage.InputTokens
+	usage.OutputTokens += st.subagentUsage.OutputTokens
+	return usage
+}
+
+// foldSubagent adds one delegate result to the run's subagent totals. A
+// malformed or foreign details payload is ignored: accounting is advisory and
+// must never fail a run.
+func (r *Runner) foldSubagent(st *runState, call model.ToolCall, result tools.Result) {
+	if call.Name != "delegate" {
+		return
+	}
+	details, ok := tools.ParseDelegateDetails(result.Details)
+	if !ok {
+		return
+	}
+	st.subagentTurns += details.SubagentTurns
+	st.subagentUsage.InputTokens += details.SubagentUsage.InputTokens
+	st.subagentUsage.OutputTokens += details.SubagentUsage.OutputTokens
+	st.subagentCost += details.SubagentCostMicroUSD
+	if !details.SubagentCostComplete {
+		st.subagentCostComplete = false
+		st.runCostComplete = false
+		st.costComplete = false
+	}
+}
+
 // finishContext maps context cancellation after an in-flight operation.
 func (r *Runner) finishContext(res *Result, st *runState, ctx context.Context) (bool, error) {
 	cerr := ctx.Err()
@@ -948,6 +1010,10 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	res.CostMicroUSD = st.cost
 	res.RunCostComplete = st.runCostComplete
 	res.CostComplete = st.costComplete
+	res.SubagentTurns = st.subagentTurns
+	res.SubagentUsage = st.subagentUsage
+	res.SubagentCostMicroUSD = st.subagentCost
+	res.SubagentCostComplete = st.subagentCostComplete
 	if st.finalized {
 		return *res, res.Err
 	}
@@ -958,17 +1024,21 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 		Text:   capText(st.lastText, maxEventTextBytes),
 	})
 	endErr := r.record(session.TypeRunEnd, st.turns, "", runEndData{
-		Status:          status,
-		Reason:          capText(reason, maxErrorEventBytes),
-		RunTurns:        st.runTurns,
-		RunUsage:        st.runUsage,
-		Turns:           st.turns,
-		Usage:           st.usage,
-		DurationMS:      time.Since(st.start).Milliseconds(),
-		RunCostMicroUSD: st.runCost,
-		CostMicroUSD:    st.cost,
-		RunCostComplete: st.runCostComplete,
-		CostComplete:    st.costComplete,
+		Status:               status,
+		Reason:               capText(reason, maxErrorEventBytes),
+		RunTurns:             st.runTurns,
+		RunUsage:             st.runUsage,
+		Turns:                st.turns,
+		Usage:                st.usage,
+		DurationMS:           time.Since(st.start).Milliseconds(),
+		RunCostMicroUSD:      st.runCost,
+		CostMicroUSD:         st.cost,
+		RunCostComplete:      st.runCostComplete,
+		CostComplete:         st.costComplete,
+		SubagentTurns:        st.subagentTurns,
+		SubagentUsage:        st.subagentUsage,
+		SubagentCostMicroUSD: st.subagentCost,
+		SubagentCostComplete: st.subagentCostComplete,
 	})
 	syncErr := r.sync()
 	if failures := errors.Join(finalErr, endErr, syncErr); failures != nil {
@@ -1096,7 +1166,14 @@ func validateToolCalls(calls []model.ToolCall) error {
 	return nil
 }
 
-func safeExecute(ctx context.Context, ts toolset, call model.ToolCall) (result tools.Result, panicked bool) {
+// callExecutor is implemented by a toolset that needs the parent tool-call
+// identifier and budget. Production wires *tools.Registry; loop tests use the
+// smaller toolset interface and fall back to Execute.
+type callExecutor interface {
+	ExecuteCall(ctx context.Context, call tools.Call, name string, args json.RawMessage) tools.Result
+}
+
+func safeExecute(ctx context.Context, ts toolset, call model.ToolCall, meta tools.Call) (result tools.Result, panicked bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panicked = true
@@ -1109,6 +1186,9 @@ func safeExecute(ctx context.Context, ts toolset, call model.ToolCall) (result t
 			}
 		}
 	}()
+	if executor, ok := ts.(callExecutor); ok {
+		return executor.ExecuteCall(ctx, meta, call.Name, call.Arguments), false
+	}
 	result = ts.Execute(ctx, call.Name, call.Arguments)
 	return result, false
 }

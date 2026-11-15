@@ -63,10 +63,14 @@ var v0Schemas = []model.ToolSchema{
 }`),
 }
 
-// v1Schemas is the current toolset-v1 declaration set. It describes the
-// contiguous read window, the 60 KiB file-result cap, the search ** glob and
-// skip summary, command output spilling, web search, web fetch, the per-run
-// todo checklist, and the shared display-only intent argument.
+// v1Schemas is the frozen toolset-v1 declaration set. Existing sessions
+// replay with these descriptions, so do not edit it. New behavior belongs in
+// v2Schemas.
+//
+// It describes the contiguous read window, the 60 KiB file-result cap, the
+// search ** glob and skip summary, command output spilling, web search, web
+// fetch, the per-run todo checklist, and the shared display-only intent
+// argument.
 var v1Schemas = []model.ToolSchema{
 	schema("read_file",
 		"Read a UTF-8 text file from the workspace. Returns one contiguous window of numbered lines with a 'lines X-Y of Z' header describing the lines actually delivered. offset is 1-based; limit defaults to 2000 and is capped at 4000. The result is capped at 60 KiB. When more lines remain, the result ends with 'continue with offset=N'; a line cut by the byte cap is marked instead. Rejects binary files and files over 2 MiB.",
@@ -203,9 +207,79 @@ var v1Schemas = []model.ToolSchema{
 }`),
 }
 
-// Schemas returns a copy of the current (toolset-v1) tool declarations.
+// v2Schemas is the current toolset-v2 declaration set: the frozen v1 set plus
+// delegate. Per-role grants are recorded session data, not extra versions.
+var v2Schemas = append(append([]model.ToolSchema(nil), v1Schemas...), schema("delegate",
+	"Run up to four child agents as separate sessions. Each child starts with no conversation history, so its task prompt must be self-contained. Tasks run in order; each result is reported separately. A child cannot delegate.",
+	`{
+  "type": "object",
+  "properties": {
+    "intent": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Required. One short sentence explaining why these delegations are needed; shown as the tool block title."
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "description": "Independent delegations. They run in order; each result is reported separately.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "Agent name from the available-agents list in the system prompt."
+          },
+          "task": {
+            "type": "string",
+            "description": "Self-contained delegation prompt. The agent starts with no conversation history, so state the goal, the constraints, and what to report."
+          },
+          "session": {
+            "type": "string",
+            "description": "Optional child session ID to continue instead of starting fresh."
+          }
+        },
+        "required": ["agent", "task"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["intent", "tasks"],
+  "additionalProperties": false
+}`))
+
+// Schemas returns a copy of the current (toolset-v2) tool declarations.
 func Schemas() []model.ToolSchema {
-	return append([]model.ToolSchema(nil), v1Schemas...)
+	return append([]model.ToolSchema(nil), v2Schemas...)
+}
+
+// Names returns the tool names of the current toolset in declaration order.
+func Names() []string {
+	names := make([]string, len(v2Schemas))
+	for i, schema := range v2Schemas {
+		names[i] = schema.Name
+	}
+	return names
+}
+
+// NamesWithout returns the current tool names except the excluded ones.
+func NamesWithout(excluded ...string) []string {
+	names := Names()
+	kept := make([]string, 0, len(names))
+	for _, name := range names {
+		skip := false
+		for _, drop := range excluded {
+			if name == drop {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			kept = append(kept, name)
+		}
+	}
+	return kept
 }
 
 // SchemasFor returns a copy of the tool declarations for a recorded toolset
@@ -215,14 +289,52 @@ func SchemasFor(version string) ([]model.ToolSchema, error) {
 	switch version {
 	case "toolset-v0":
 		return append([]model.ToolSchema(nil), v0Schemas...), nil
-	case Version:
+	case "toolset-v1":
 		return append([]model.ToolSchema(nil), v1Schemas...), nil
+	case Version:
+		return append([]model.ToolSchema(nil), v2Schemas...), nil
 	default:
 		return nil, fmt.Errorf("unknown toolset version %q", version)
 	}
 }
 
+// Filter narrows schemas to names, preserving the order of names. A name the
+// schema set does not define is an error: a recorded grant must always be a
+// subset of the recorded version.
+func Filter(schemas []model.ToolSchema, names []string) ([]model.ToolSchema, error) {
+	if names == nil {
+		return schemas, nil
+	}
+	byName := make(map[string]model.ToolSchema, len(schemas))
+	for _, schema := range schemas {
+		byName[schema.Name] = schema
+	}
+	filtered := make([]model.ToolSchema, 0, len(names))
+	for _, name := range names {
+		schema, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("tool %q is not defined by the recorded toolset", name)
+		}
+		filtered = append(filtered, schema)
+	}
+	return filtered, nil
+}
+
+// ValidateGrant reports whether every name is defined by the current toolset.
+func ValidateGrant(names []string) error {
+	known := make(map[string]bool, len(v2Schemas))
+	for _, schema := range v2Schemas {
+		known[schema.Name] = true
+	}
+	for _, name := range names {
+		if !known[name] {
+			return fmt.Errorf("tool %q is not defined by toolset %s", name, Version)
+		}
+	}
+	return nil
+}
+
 // SupportsVersion reports whether this binary can replay a toolset version.
 func SupportsVersion(version string) bool {
-	return version == "toolset-v0" || version == Version
+	return version == "toolset-v0" || version == "toolset-v1" || version == Version
 }

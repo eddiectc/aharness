@@ -22,7 +22,7 @@ func TestRegistrySchemas(t *testing.T) {
 	for _, schema := range got {
 		names = append(names, schema.Name)
 	}
-	wantNames := []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch", "todo"}
+	wantNames := []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch", "todo", "delegate"}
 	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
 		t.Errorf("schema names = %v, want %v", names, wantNames)
 	}
@@ -143,6 +143,11 @@ func TestRegistryErrorMapping(t *testing.T) {
 func TestRegistrySchemasExecuteUnknownNames(t *testing.T) {
 	r, _ := newTestRegistry(t)
 	for _, schema := range r.Schemas() {
+		if schema.Name == "delegate" {
+			// delegate is dispatched through the spawn interface rather than
+			// the local tool map.
+			continue
+		}
 		if _, ok := r.fs[schema.Name]; !ok {
 			t.Errorf("schema %q has no registered implementation", schema.Name)
 		}
@@ -151,8 +156,8 @@ func TestRegistrySchemasExecuteUnknownNames(t *testing.T) {
 
 func TestSchemasReturnsModelSchemas(t *testing.T) {
 	schemas := Schemas()
-	if len(schemas) != 7 {
-		t.Fatalf("Schemas() length = %d, want 7", len(schemas))
+	if len(schemas) != 8 {
+		t.Fatalf("Schemas() length = %d, want 8", len(schemas))
 	}
 	for _, schema := range schemas {
 		if schema.Name == "" || schema.Description == "" || len(schema.Parameters) == 0 {

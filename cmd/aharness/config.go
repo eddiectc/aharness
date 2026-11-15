@@ -27,6 +27,9 @@ const (
 	defaultMaxTotalTokens = 0
 	defaultSessionTimeout = time.Duration(0)
 	defaultModelTimeout   = time.Duration(0)
+	// defaultMaxSubagents bounds one run's fresh delegated children. It is a
+	// fan-out guard, not a spend budget; 0 means unlimited.
+	defaultMaxSubagents = 8
 
 	defaultUISizeWidth  = 100
 	defaultUISizeHeight = 30
@@ -76,6 +79,7 @@ type config struct {
 
 	MaxTurns         int
 	MaxTotalTokens   int
+	MaxSubagents     int
 	MaxContextTokens int
 	MaxOutputTokens  int
 	// ThinkingEffort is the effective effort after clearing "default". Empty
@@ -110,6 +114,16 @@ type config struct {
 	Stream    bool
 	StreamSet bool
 
+	// The recorded session contract. Tools is the tool-name grant (nil means
+	// every tool of the recorded version); SystemPrompt and Agent are set for
+	// a delegated child session.
+	Tools        []string
+	SystemPrompt string
+	Agent        string
+	// Agents is the discovered definition catalog rendered into a prompt-v1
+	// parent prompt.
+	Agents []agent.AgentInfo
+
 	ShowVersion    bool
 	ListModels     bool
 	RefreshModels  bool
@@ -127,6 +141,7 @@ type config struct {
 	baseURLSet        bool
 	maxTurnsSet       bool
 	maxTotalTokensSet bool
+	maxSubagentsSet   bool
 	maxContextSet     bool
 	maxContextValue   int
 	maxOutputSet      bool
@@ -168,6 +183,8 @@ type envSettings struct {
 	maxTurnsSet         bool
 	maxTotalTokens      int
 	maxTotalTokensSet   bool
+	maxSubagents        int
+	maxSubagentsSet     bool
 	maxContext          int
 	maxContextSet       bool
 	maxOutput           int
@@ -304,6 +321,9 @@ func loadEnv(getenv func(string) string) (envSettings, error) {
 	if env.maxTotalTokens, env.maxTotalTokensSet, err = envInt(getenv, "AHARNESS_MAX_TOTAL_TOKENS"); err != nil {
 		return envSettings{}, err
 	}
+	if env.maxSubagents, env.maxSubagentsSet, err = envInt(getenv, "AHARNESS_MAX_SUBAGENTS"); err != nil {
+		return envSettings{}, err
+	}
 	if env.maxContext, env.maxContextSet, err = envInt(getenv, "AHARNESS_MAX_CONTEXT_TOKENS"); err != nil {
 		return envSettings{}, err
 	}
@@ -372,6 +392,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		stream           bool
 		maxTurns         int
 		maxTotalTokens   int
+		maxSubagents     int
 		maxContextTokens int
 		maxOutputTokens  int
 		thinkingEffort   string
@@ -410,6 +431,11 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 	fs.BoolVar(&stream, "stream", false, "stream assistant text in batch mode (implied in TUI modes)")
 	fs.IntVar(&maxTurns, "max-turns", env.maxTurns, "maximum cumulative model turns (0: unlimited; negative is invalid)")
 	fs.IntVar(&maxTotalTokens, "max-total-tokens", env.maxTotalTokens, "cumulative token budget (0: unlimited; negative is invalid)")
+	maxSubagentsDefault := env.maxSubagents
+	if !env.maxSubagentsSet {
+		maxSubagentsDefault = defaultMaxSubagents
+	}
+	fs.IntVar(&maxSubagents, "max-subagents", maxSubagentsDefault, "fresh delegated children per run (0: unlimited; negative is invalid)")
 	fs.IntVar(&maxContextTokens, "max-context-tokens", env.maxContext, "per-call context window (0: use the model catalog)")
 	fs.DurationVar(&sessionTimeout, "session-timeout", env.sessionTimeout, "per-run wall-clock timeout (0: no deadline; negative is invalid)")
 	fs.DurationVar(&modelTimeout, "model-timeout", env.modelTimeout, "per-model-call harness timeout (0: no deadline; negative is invalid)")
@@ -558,6 +584,8 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		file.MaxTurns, defaultMaxTurns)
 	maxTotalTokensLayer := layered(maxTotalTokens, visited["max-total-tokens"], env.maxTotalTokens, env.maxTotalTokensSet,
 		file.MaxTotalTokens, defaultMaxTotalTokens)
+	maxSubagentsLayer := layered(maxSubagents, visited["max-subagents"], env.maxSubagents, env.maxSubagentsSet,
+		file.MaxSubagents, defaultMaxSubagents)
 	maxContextLayer := layered(maxContextTokens, visited["max-context-tokens"], env.maxContext, env.maxContextSet,
 		file.MaxContextTokens, 0)
 	maxOutputLayer := layered(maxOutputTokens, visited["max-output-tokens"], env.maxOutput, env.maxOutputSet,
@@ -665,6 +693,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		WebFetchKey:       webFetchKey,
 		MaxTurns:          maxTurnsLayer.value(),
 		MaxTotalTokens:    maxTotalTokensLayer.value(),
+		MaxSubagents:      maxSubagentsLayer.value(),
 		MaxContextTokens:  maxContextLayer.value(),
 		MaxOutputTokens:   maxOutputLayer.value(),
 		ThinkingEffort:    thinkingEffort,
@@ -693,6 +722,7 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		baseURLSet:        baseURLSet,
 		maxTurnsSet:       maxTurnsLayer.set(),
 		maxTotalTokensSet: maxTotalTokensLayer.set(),
+		maxSubagentsSet:   maxSubagentsLayer.set(),
 		maxContextSet:     maxContextLayer.set(),
 		maxOutputSet:      maxOutputLayer.set(),
 		sessionTimeoutSet: sessionTimeoutLayer.set(),
@@ -838,11 +868,12 @@ func writeUsage(w io.Writer, fs *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w, "environment: AHARNESS_MODEL, AHARNESS_PROVIDER, AHARNESS_WORKSPACE,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_STATE_DIR, AHARNESS_CONFIG, AHARNESS_PROVIDER_TOKEN,")
 	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_CONTEXT_TOKENS, AHARNESS_MAX_TURNS, AHARNESS_MAX_TOTAL_TOKENS,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_OUTPUT_TOKENS, AHARNESS_SESSION_TIMEOUT, AHARNESS_MODEL_TIMEOUT,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_HTTP_TIMEOUT, AHARNESS_CATALOG_TIMEOUT, AHARNESS_REQUIRE_USAGE,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_LOG_REQUESTS, AHARNESS_SEARXNG_URL, AHARNESS_PROVIDER_BASE_URL,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_WEB_TIMEOUT, AHARNESS_WEB_FETCH_PROVIDER, AHARNESS_WEB_FETCH_URL,")
-	_, _ = fmt.Fprintln(w, "AHARNESS_WEB_FETCH_KEY, AHARNESS_MODELS_DEV_URL, AHARNESS_THINKING_EFFORT")
+	_, _ = fmt.Fprintln(w, "AHARNESS_MAX_OUTPUT_TOKENS, AHARNESS_MAX_SUBAGENTS, AHARNESS_SESSION_TIMEOUT,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_MODEL_TIMEOUT, AHARNESS_HTTP_TIMEOUT, AHARNESS_CATALOG_TIMEOUT,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_REQUIRE_USAGE, AHARNESS_LOG_REQUESTS, AHARNESS_SEARXNG_URL,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_PROVIDER_BASE_URL, AHARNESS_WEB_TIMEOUT, AHARNESS_WEB_FETCH_PROVIDER,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_WEB_FETCH_URL, AHARNESS_WEB_FETCH_KEY, AHARNESS_MODELS_DEV_URL,")
+	_, _ = fmt.Fprintln(w, "AHARNESS_THINKING_EFFORT")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "precedence: flag > environment > config file > default;")
 	_, _ = fmt.Fprintf(w, "the config file is %s (JSON; see docs/configuration.md)\n", configFileHint)
@@ -989,6 +1020,9 @@ func validateExplicitValues(cfg *config) error {
 	if cfg.maxTotalTokensSet && cfg.MaxTotalTokens < 0 {
 		return fmt.Errorf("max total tokens must not be negative, got %d", cfg.MaxTotalTokens)
 	}
+	if cfg.maxSubagentsSet && cfg.MaxSubagents < 0 {
+		return fmt.Errorf("max subagents must not be negative, got %d", cfg.MaxSubagents)
+	}
 	if cfg.maxContextSet && cfg.MaxContextTokens <= 0 {
 		return fmt.Errorf("max context tokens must be positive, got %d", cfg.MaxContextTokens)
 	}
@@ -1020,6 +1054,9 @@ func validateCumulative(cfg *config) error {
 	}
 	if cfg.MaxTotalTokens < 0 {
 		return fmt.Errorf("max total tokens must not be negative, got %d", cfg.MaxTotalTokens)
+	}
+	if cfg.MaxSubagents < 0 {
+		return fmt.Errorf("max subagents must not be negative, got %d", cfg.MaxSubagents)
 	}
 	if cfg.SessionTimeout < 0 {
 		return fmt.Errorf("session timeout must not be negative, got %s", cfg.SessionTimeout)
@@ -1079,8 +1116,8 @@ func validateSessionRules(cfg *config, state agent.State) error {
 	if cfg.MaxTurns > 0 && state.Turns >= cfg.MaxTurns {
 		return fmt.Errorf("session is at its turn limit (%d >= %d); raise -max-turns", state.Turns, cfg.MaxTurns)
 	}
-	if cfg.MaxTotalTokens > 0 && state.Usage.Total() >= cfg.MaxTotalTokens {
-		return fmt.Errorf("session is at its token limit (%d >= %d); raise -max-total-tokens", state.Usage.Total(), cfg.MaxTotalTokens)
+	if used := state.Usage.Total() + state.SubagentUsage.Total(); cfg.MaxTotalTokens > 0 && used >= cfg.MaxTotalTokens {
+		return fmt.Errorf("session is at its token limit (%d >= %d); raise -max-total-tokens", used, cfg.MaxTotalTokens)
 	}
 	return nil
 }

@@ -55,7 +55,7 @@ rewriting its conclusions.
 | [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
-| [plans/subagent-build.md](plans/subagent-build.md) | Proposed 2026-11-15; no code changed |
+| [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestone 1; M2–M4 deferred) |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
 | [plans/transcript-folding-build.md](plans/transcript-folding-build.md) | Implemented 2026-11-14; real-provider fold smoke pending |
 | [plans/tui-build.md](plans/tui-build.md) | Implemented 2026-11-10 |

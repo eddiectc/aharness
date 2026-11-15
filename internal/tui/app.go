@@ -28,15 +28,17 @@ const (
 type OverlayKind string
 
 const (
-	OverlayNone    OverlayKind = "none"
-	OverlayHelp    OverlayKind = "help"
-	OverlayDetails OverlayKind = "details"
-	OverlayTable   OverlayKind = "table"
-	OverlayFile    OverlayKind = "file"
-	OverlayModel   OverlayKind = "model"
-	OverlayEffort  OverlayKind = "effort"
-	OverlaySession OverlayKind = "session"
-	OverlayImage   OverlayKind = "image"
+	OverlayNone     OverlayKind = "none"
+	OverlayHelp     OverlayKind = "help"
+	OverlayDetails  OverlayKind = "details"
+	OverlayTable    OverlayKind = "table"
+	OverlayFile     OverlayKind = "file"
+	OverlayModel    OverlayKind = "model"
+	OverlayEffort   OverlayKind = "effort"
+	OverlaySession  OverlayKind = "session"
+	OverlayImage    OverlayKind = "image"
+	OverlayAgentHub OverlayKind = "agent-hub"
+	OverlayAgents   OverlayKind = "agents"
 )
 
 // ModelChoice is one catalog-backed model in the picker. Switchable is false
@@ -169,6 +171,30 @@ type TodoProvider interface {
 	TodoItems() []tools.TodoItem
 }
 
+// AgentDefView is one discovered agent definition shown by the /agents
+// browser. Status is "active" or "invalid"; an invalid row carries the parse
+// error instead of usable settings.
+type AgentDefView struct {
+	Name            string
+	Description     string
+	Model           string
+	Effort          string
+	Source          string
+	Path            string
+	Tools           []string
+	MaxTurns        int
+	Status          string
+	Err             string
+	PromptFirstLine string
+}
+
+// AgentProvider is an optional Host capability for the /agents browser. It
+// reports the definitions loaded for this process, not a re-read of disk, so a
+// mid-run edit cannot change what a child in flight will run.
+type AgentProvider interface {
+	Agents() []AgentDefView
+}
+
 // Details is optional host metadata for the details overlay.
 type Details struct {
 	TracePath        string
@@ -247,6 +273,8 @@ type (
 		CallID    string
 		Name      string
 		Arguments string
+		// SubagentTasks is optional and only set for a delegate call.
+		SubagentTasks []SubagentTaskLine
 	}
 	EventToolFinished struct {
 		CallID    string
@@ -256,6 +284,9 @@ type (
 		ExitCode  int
 		Truncated bool
 		TimedOut  bool
+		// SubagentTasks is the per-task summary of a delegate call. It is
+		// additive and optional, so the protocol version does not change.
+		SubagentTasks []SubagentTaskLine
 	}
 	EventModelChanged struct {
 		Model          string
@@ -922,6 +953,8 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		m.nextEffort = ev.ThinkingEffort
 		m.run.state = StateRunning
 		m.dirty = true
+		// A new run starts with an empty roster; children only exist inside it.
+		m.children = nil
 		m.runStartedCount++
 		m.emit(EventRunStarted{
 			Run:            m.run.number,
@@ -1066,7 +1099,12 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 		it.args = CapText(SanitizeLine(string(ev.Call.Arguments)), 2<<10)
 		it.intent = toolIntent(ev.Call.Arguments)
 		it.invalidateLines()
-		m.emit(EventToolStarted{CallID: it.callID, Name: it.name, Arguments: it.args})
+		m.emit(EventToolStarted{
+			CallID:        it.callID,
+			Name:          it.name,
+			Arguments:     it.args,
+			SubagentTasks: subagentTasksFromArgs(ev.Call.Arguments),
+		})
 		m.dirty = true
 		m.ensureContent()
 	case agent.ToolCompleted:
@@ -1099,17 +1137,33 @@ func (m *App) handleDisplay(ev agent.DisplayEvent) tea.Cmd {
 				m.setTodos(items)
 			}
 		}
+		if ev.Name == "delegate" {
+			if details, ok := tools.ParseDelegateDetails(ev.Details); ok {
+				it.delegate = &details
+			}
+			// The recorded table replaces the live rows for this call.
+			it.invalidateLines()
+		}
 		delete(m.run.pending, it.callID)
 		m.dirty = true
 		m.emit(EventToolFinished{
-			CallID:    it.callID,
-			Name:      it.name,
-			OK:        it.ok,
-			Code:      it.code,
-			ExitCode:  it.exitCode,
-			Truncated: it.truncated,
-			TimedOut:  it.timedOut,
+			CallID:        it.callID,
+			Name:          it.name,
+			OK:            it.ok,
+			Code:          it.code,
+			ExitCode:      it.exitCode,
+			Truncated:     it.truncated,
+			TimedOut:      it.timedOut,
+			SubagentTasks: subagentTasksFromDetails(it.delegate),
 		})
+		m.ensureContent()
+	case agent.SubagentStarted:
+		m.startedChild(ev)
+	case agent.SubagentProgress:
+		m.progressedChild(ev)
+		m.ensureContent()
+	case agent.SubagentFinished:
+		m.finishedChild(ev)
 		m.ensureContent()
 	case agent.MessageRecorded:
 		m.ackMessage(ev)
@@ -1221,6 +1275,9 @@ func (m *App) applyResult(result agent.Result, reason string, duration time.Dura
 	}
 	m.steer = nil
 	m.steerCh = nil
+	// The roster describes a live run only; the delegate block keeps the
+	// recorded table afterwards.
+	m.children = nil
 	m.run.pending = map[string]*transcriptItem{}
 	m.run.streamed = nil
 	if thinking := m.run.thinking; thinking != nil {
