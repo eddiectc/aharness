@@ -98,6 +98,11 @@ type config struct {
 	CatalogTimeout time.Duration
 	LogRequests    bool
 	RequireUsage   bool
+	// UIRich and UIExpandAll are the TUI's initial assistant rendering mode and
+	// fold mode. They are display-only preferences from the config file; no
+	// session event records them.
+	UIRich      bool
+	UIExpandAll bool
 	// Pricing is the effective model's catalog price snapshot. It is
 	// observational and may be unavailable when no catalog was loaded.
 	Pricing model.Pricing
@@ -138,6 +143,11 @@ type config struct {
 	// applied to the discovered catalog when the TUI host opens; batch mode has
 	// no delegate grant and therefore never resolves it.
 	AgentOverrides map[string]agent.AgentOverride
+	// SettingSources maps each config-file key to the layer that supplied its
+	// effective value at startup: "flag <name>", "environment <NAME>",
+	// "config file", or "default". The TUI settings browser uses it to explain
+	// which value wins and why a saved key does not change this process.
+	SettingSources map[string]string
 
 	modelSet          bool
 	providerSet       bool
@@ -154,6 +164,8 @@ type config struct {
 	httpTimeoutSet    bool
 	catalogTimeoutSet bool
 	thinkingEffortSet bool
+	uiRichSet         bool
+	uiExpandSet       bool
 }
 
 // envSettings is the environment layer. It is parsed before flags so defaults
@@ -604,6 +616,16 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		file.RequireUsage, false)
 	logRequestsLayer := layered(logRequests, visited["log-requests"], env.logRequests, env.logRequestsSet,
 		file.LogRequests, false)
+	// TUI display preferences have no flag or environment layer: they are
+	// operator defaults for the front end and live only in the config file.
+	uiRich := true
+	if file.UIRich != nil {
+		uiRich = *file.UIRich
+	}
+	uiExpandAll := false
+	if file.UIExpandAll != nil {
+		uiExpandAll = *file.UIExpandAll
+	}
 
 	searxngURL = layered(searxngURL, visited["searxng-url"], env.searxngURL, env.searxngURLSet,
 		file.SearXNGURL, "").value()
@@ -708,6 +730,8 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		ModelTimeout:      modelTimeoutLayer.value(),
 		LogRequests:       logRequestsLayer.value(),
 		RequireUsage:      requireUsageLayer.value(),
+		UIRich:            uiRich,
+		UIExpandAll:       uiExpandAll,
 		ResumeID:          resumeID,
 		ForkID:            forkID,
 		Mode:              mode,
@@ -735,6 +759,9 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		httpTimeoutSet:    httpTimeoutLayer.set(),
 		catalogTimeoutSet: catalogTimeoutLayer.set(),
 		thinkingEffortSet: thinkingEffortSet,
+		uiRichSet:         file.UIRich != nil,
+		uiExpandSet:       file.UIExpandAll != nil,
+		SettingSources:    configSettingSources(visited, env, file),
 	}
 	if cfg.maxContextSet {
 		cfg.maxContextValue = cfg.MaxContextTokens
@@ -779,6 +806,53 @@ func parseConfig(args []string, getenv func(string) string, out io.Writer) (conf
 		return config{}, err
 	}
 	return cfg, nil
+}
+
+// configSettingSources records which layer supplied each config-file key at
+// startup. The config file sits below explicit flags and environment variables,
+// so the label lets the settings browser warn that a saved key does not change
+// this process while a higher layer is set. Keys with no flag or environment
+// layer fall through to "config file" or "default".
+func configSettingSources(visited map[string]bool, env envSettings, file fileConfig) map[string]string {
+	source := func(flag, envName string, envSet, fileSet bool) string {
+		switch {
+		case flag != "" && visited[flag]:
+			return "flag -" + flag
+		case envSet:
+			return "environment " + envName
+		case fileSet:
+			return "config file"
+		default:
+			return "default"
+		}
+	}
+	return map[string]string{
+		"model":              source("model", "AHARNESS_MODEL", env.model != "", file.Model != nil),
+		"provider":           source("provider", "AHARNESS_PROVIDER", env.providerSet, file.Provider != nil),
+		"workspace":          source("workspace", "AHARNESS_WORKSPACE", env.workspaceSet, file.Workspace != nil),
+		"provider_base_url":  source("provider-base-url", "AHARNESS_PROVIDER_BASE_URL", env.baseURLSet, file.ProviderBaseURL != nil),
+		"models_dev_url":     source("", "AHARNESS_MODELS_DEV_URL", env.modelsDevURL != "", file.ModelsDevURL != nil),
+		"searxng_url":        source("searxng-url", "AHARNESS_SEARXNG_URL", env.searxngURLSet, file.SearXNGURL != nil),
+		"web_timeout":        source("web-timeout", "AHARNESS_WEB_TIMEOUT", env.webTimeoutSet, file.WebTimeout != nil),
+		"web_fetch_provider": source("web-fetch-provider", "AHARNESS_WEB_FETCH_PROVIDER", env.webFetchProviderSet, file.WebFetchProvider != nil),
+		"web_fetch_url":      source("web-fetch-url", "AHARNESS_WEB_FETCH_URL", env.webFetchURLSet, file.WebFetchURL != nil),
+		"web_fetch_key":      source("web-fetch-key", "AHARNESS_WEB_FETCH_KEY", env.webFetchKeySet, file.WebFetchKey != nil),
+		"thinking_effort":    source("thinking-effort", "AHARNESS_THINKING_EFFORT", env.thinkingEffortSet, file.ThinkingEffort != nil),
+		"max_turns":          source("max-turns", "AHARNESS_MAX_TURNS", env.maxTurnsSet, file.MaxTurns != nil),
+		"max_total_tokens":   source("max-total-tokens", "AHARNESS_MAX_TOTAL_TOKENS", env.maxTotalTokensSet, file.MaxTotalTokens != nil),
+		"max_subagents":      source("max-subagents", "AHARNESS_MAX_SUBAGENTS", env.maxSubagentsSet, file.MaxSubagents != nil),
+		"max_context_tokens": source("max-context-tokens", "AHARNESS_MAX_CONTEXT_TOKENS", env.maxContextSet, file.MaxContextTokens != nil),
+		"max_output_tokens":  source("max-output-tokens", "AHARNESS_MAX_OUTPUT_TOKENS", env.maxOutputSet, file.MaxOutputTokens != nil),
+		"session_timeout":    source("session-timeout", "AHARNESS_SESSION_TIMEOUT", env.sessionTimeoutSet, file.SessionTimeout != nil),
+		"model_timeout":      source("model-timeout", "AHARNESS_MODEL_TIMEOUT", env.modelTimeoutSet, file.ModelTimeout != nil),
+		"http_timeout":       source("http-timeout", "AHARNESS_HTTP_TIMEOUT", env.httpTimeoutSet, file.HTTPTimeout != nil),
+		"catalog_timeout":    source("catalog-timeout", "AHARNESS_CATALOG_TIMEOUT", env.catalogTimeoutSet, file.CatalogTimeout != nil),
+		"require_usage":      source("require-usage", "AHARNESS_REQUIRE_USAGE", env.requireUsageSet, file.RequireUsage != nil),
+		"log_requests":       source("log-requests", "AHARNESS_LOG_REQUESTS", env.logRequestsSet, file.LogRequests != nil),
+		"ui_rich":            source("", "", false, file.UIRich != nil),
+		"ui_expand_all":      source("", "", false, file.UIExpandAll != nil),
+		"agent_overrides":    source("", "", false, len(file.AgentOverrides) > 0),
+	}
 }
 
 // parseUISize parses and bounds the -ui-json initial frame size.

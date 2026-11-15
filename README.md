@@ -58,7 +58,8 @@ opt-in and unlimited by default.
   their header, an elision row with the hidden rendered-row count, and the last
   seven rendered rows. The tail keeps the conclusion, failure, or test verdict
   visible. `F3` expands every block, and `F3` again collapses them; the mode is
-  sticky across turns and runs, inert in overlays, and not persisted. Expanded
+  sticky across turns and runs, inert in overlays, and in-memory only. `/settings`
+  can persist the initial mode as `ui_expand_all`. Expanded
   tool output stays bounded to 40 lines / 4 KiB, and the 64 KiB safety caps and
   truncation markers are unchanged.
 - Tool intents: every tool schema declares a shared `intent` string, one short
@@ -157,10 +158,13 @@ opt-in and unlimited by default.
   previous session in the same workspace while idle.
   Composer slash commands mirror the actions (`/help`, `/model`, `/effort`,
   `/provider`, `/details`, `/new`, `/resume`, `/files`, `/table`, `/image`,
-  `/rich`/`/raw`, `/repaint`, `/refresh`, `/agent-hub`, `/agents`, `/interrupt`,
-  `/cancel`, `/quit`);
+  `/rich`/`/raw`, `/repaint`, `/refresh`, `/agent-hub`, `/agents`, `/settings`,
+  `/interrupt`, `/cancel`, `/quit`);
   typing `/` opens a filtered completion menu (`Tab` completes, `Enter` runs),
-  and unrecognized `/text` is sent as a normal message. See the
+  and unrecognized `/text` is sent as a normal message. `/settings` lists every
+  config-file key with its saved or effective value and winning layer, edits
+  them through the same atomic writer, masks `web_fetch_key`, and applies the
+  rich/raw and folded/expanded display preferences immediately. See the
   [slash-command reference](docs/commands.md).
 - `-batch` forces the one-shot stdout contract. Non-TTY invocations batch
   automatically. `-ui-json` runs the same Bubble Tea program headlessly over a
@@ -180,7 +184,10 @@ opt-in and unlimited by default.
   `web_fetch_key` configure `web_fetch`; the provider defaults to `builtin`.
   The optional `agent_overrides` object routes a discovered agent's model,
   effort, turn cap, and enable state; `/agents` writes it atomically and
-  preserves every other key. See [docs/configuration.md](docs/configuration.md).
+  preserves every other key. The display-only `ui_rich` and `ui_expand_all` keys
+  set the TUI's initial rendering and fold modes. `/settings` edits every
+  scalar key, including those two, through the same atomic writer. See
+  [docs/configuration.md](docs/configuration.md).
 
 Out of scope: hooks, model-based summarization, background or asynchronous
 subagents, agent-to-agent messaging, nested delegation, worktrees, RAG/embeddings,
@@ -189,7 +196,9 @@ workspace snapshots, built-in isolation/approval, session rotation, or v0 log
 migration. Apart from the subagent surfaces listed above, the TUI adds no
 durable event type, schema version, tool, prompt input, or security boundary.
 The `/agents` writer only changes routing settings: it cannot add a tool to a
-grant or rewrite a prompt.
+grant or rewrite a prompt. The `/settings` writer only changes the documented
+config-file keys; it never writes a token, the state directory, the task, or a
+session ID.
 
 ## Documentation
 

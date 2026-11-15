@@ -77,6 +77,7 @@ change and frames expose the resulting composer, menu rows, and overlay.
 | `/table` | none | `Ctrl-T` | most recent markdown table |
 | `/agent-hub` | none | none | live delegated-child roster; Enter focuses a child for viewing and steering; works during a run |
 | `/agents` | none | none | agent definitions browser; edits model, effort, max_turns, and enabled |
+| `/settings` | none | none | all config-file settings; edits are written atomically to the active config file |
 | `/image` | none | `Ctrl-G` | image viewer for the most recent image block |
 | `/rich` | none | `Ctrl-R` toggles | set rich assistant rendering |
 | `/raw` | none | `Ctrl-R` toggles | set raw assistant rendering |
@@ -242,6 +243,53 @@ changes only display rendering (Glamour markdown versus source text); it does
 not change the transcript content, session log, or model input. The status
 line shows the active mode.
 
+### `/settings`
+
+Opens a browser for every key in the active config file
+(`-config`/`AHARNESS_CONFIG`, default `<state-dir>/config.json`): model,
+provider, workspace, provider and catalog URLs, thinking effort, run budgets,
+timeouts, usage/logging switches, SearXNG and `web_fetch` settings, the two
+display preferences, and an `agent_overrides` row that opens `/agents`. The
+value column shows the saved value; for a key the file does not set it shows
+the current effective value. The source column is `file`, `flag`, `env`, or
+`current` (`runtime` for a display toggle changed since startup), and the footer
+explains the selected row and warns when a flag or environment variable wins
+over a saved value.
+
+Keys:
+
+| Key | Action |
+|---|---|
+| `Up`/`Down`, `PgUp`/`PgDn`, `Home`/`End`, wheel | Move the selection; the window scrolls. |
+| `Enter`, `Space` | Edit a text, integer, duration, or secret row. Toggle and enum rows save the next option immediately. On the `agent_overrides` row, open `/agents`. |
+| `Left`/`Right` | Save the previous or next option of a toggle or enum row. |
+| `r` | Remove the saved key so the built-in default applies. A row that is not saved is a no-op. |
+| `Esc` | Cancel an inline edit; otherwise close the browser. |
+| `Enter` in an editor | Save. An empty value removes the key. `Esc` cancels. |
+
+Values are checked with the same rules as startup: model IDs against the loaded
+catalog when it is available, provider names, workspace existence, base and
+catalog URLs, SearXNG and `web_fetch` URLs, duration bounds, non-negative
+budgets, a positive context window, and thinking effort against the effective
+model. The candidate file's own values are validated again before the atomic
+0600 replacement, so a malformed external edit is reported instead of
+overwritten. Every other key is preserved. A config path inside the workspace
+is refused, because operator settings must not become repository-controlled
+state, and `-config ""` disables the file, so the footer says edits cannot be
+saved.
+
+A saved value is read at the next startup. The two display preferences,
+`ui_rich` and `ui_expand_all`, also apply to the current process immediately. A
+key supplied by an explicit flag or environment variable keeps winning in this
+process; the footer names that layer. The `web_fetch_key` value is never shown,
+prefilled, or echoed: the row reports `set` or `(unset)`, and the editor buffer
+is masked. The overlay also warns when the `web_fetch` provider/endpoint pair is
+incomplete, because either key can be entered first.
+
+In `-ui-json`, the overlay appears as `frame.overlay: "settings"`; a client may
+send `r` as a one-character text message to reset the selected row. Saves and
+validation errors appear in frame lines, and the protocol version stays 1.
+
 ### `/repaint`
 
 Requests a full terminal repaint, equivalent to `Ctrl-L`. It does not modify
@@ -296,10 +344,10 @@ A save rewrites the active config file (`-config`/`AHARNESS_CONFIG`, default
 `<state-dir>/config.json`) with `agent_overrides`, atomically and in 0600, and
 preserves every other key. A path inside the workspace is refused, because
 operator settings must not become repository-controlled state, and `-config ""`
-disables the file, so the browser reports that settings cannot be saved. A saved override applies to the next
-process: the browser shows it immediately, but the catalog loaded for this
-process is unchanged, so neither a child in flight nor a new run in this process
-is affected. The tool grant and prompt body stay file-only; `/agents` cannot
+disables the file, so `/agents` reports that settings cannot be saved. A saved
+override applies to the next process: `/agents` shows it immediately, but the
+catalog loaded for this process is unchanged, so neither a child in flight nor
+a new run in this process is affected. The tool grant and prompt body stay file-only; `/agents` cannot
 widen either. An invalid value or a failed write is reported in the footer, and
 a malformed config file is left untouched.
 
@@ -331,6 +379,7 @@ to idle. Idle: reports that no run is active.
 /files                      insert a workspace-relative path into the composer
 /agent-hub                  live roster of the children in the current run
 /agents                     agent definitions and settings
+/settings                   all config-file settings, saved atomically
 /interrupt                  stop the current model call; the run continues
 /cancel                     end the active run and return to idle
 /quit                       exit; an active run is canceled with exit code 130
@@ -347,9 +396,9 @@ Commands are composer text, not a new protocol command. Send:
 
 The same text/key stream drives autocomplete (`tab`, `up`, `down`, `esc`).
 Resulting overlays appear in `frame.overlay` (`help`, `details`, `model`,
-`effort`, `session`, `file`, `table`, `image`, `agent-hub`, or `agents`); status
-feedback appears in the frame lines. `/model` and `/effort` also emit the existing `model_changed`
-and `notice` events. `tool_started` and `tool_finished` gain an optional
+`effort`, `session`, `file`, `table`, `image`, `agent-hub`, `agents`, or
+`settings`); status feedback appears in the frame lines. `/model` and `/effort`
+also emit the existing `model_changed` and `notice` events. `tool_started` and `tool_finished` gain an optional
 `subagent_tasks` array for a `delegate` call; there is no new event kind and no
 protocol version bump. `/new` and `/resume` emit a `notice` event with kind
 `session` after a successful switch. The protocol version stays 1.

@@ -286,12 +286,13 @@ contract. See [tui.md](tui.md) for the shipped behavior and
 | Widget list / file picker entries | 1,000 / 2,000 per directory | File picker does not recurse, read contents, follow symlinks, or list `.git`; filter query is 64 bytes. |
 | Resume picker sessions / head | 100 per workspace / 64 events | Same canonical workspace only; the active session is excluded; unreadable, linked, or corrupt logs are skipped; each row preview is sanitized and cut to 160 bytes. |
 | Overlay stack | 4 | Deeper requests close the oldest non-modal overlay with a notice. |
+| Config settings editor | 512 bytes | One config-file value; longer input is refused, values use the startup validation rules, and `web_fetch_key` is masked and never rendered. |
 | Image file / dimensions | 8 MiB / 4096×4096 | Larger files are rejected with a placeholder. `image.DecodeConfig` runs first. |
 | Decoded image pixels | 16 Mi (4096×4096 max) | Larger images are rejected before full decode. |
 | Images per transcript | 32 | Oldest displayed thumbnails are dropped; the transcript item remains. |
 | Image thumbnail | 60×20 cells or available width | Half-block glyph preview; Kitty only in the viewer. |
 | Tool output | 4 KiB or 40 lines expanded | Collapsed shows the last seven rendered rows of the full result; expanded output never exceeds the logged tool-result cap. |
-| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky, display-only, and not persisted. |
+| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default to the header, an elision row with the hidden rendered-row count, and the tail. `F3` expands all folds; the mode is sticky and display-only for this process, and `/settings` can persist the initial mode as `ui_expand_all`. |
 | Todo widget | 8 rows | One header plus up to seven one-line items, each truncated to the available width. The window keeps the in-progress (or first pending) item visible and reports hidden items as a count. Hidden when the list is empty, there is no room, or the slash-command menu is open. Derived from the last successful `todo` result's `details`; not a new durable event. |
 | Tool intent title | 200 bytes | Shared display-only `intent`, trimmed and cut on a rune boundary. A missing intent falls back to the raw argument preview and never fails a call. |
 | Tool arguments preview | 2 KiB or 8 lines | Full arguments remain in `model_response`/the log. |

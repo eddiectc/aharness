@@ -39,6 +39,7 @@ const (
 	OverlayImage    OverlayKind = "image"
 	OverlayAgentHub OverlayKind = "agent-hub"
 	OverlayAgents   OverlayKind = "agents"
+	OverlaySettings OverlayKind = "settings"
 )
 
 // ModelChoice is one catalog-backed model in the picker. Switchable is false
@@ -216,6 +217,83 @@ type AgentProvider interface {
 type AgentSettings interface {
 	SetAgentOverride(name string, override agent.AgentOverride) error
 	ClearAgentOverrides(name string) error
+}
+
+// SettingKind selects the editor and display used by the /settings browser.
+type SettingKind string
+
+const (
+	// SettingText is a free-form string, such as a model ID or URL.
+	SettingText SettingKind = "text"
+	// SettingInt is a non-negative integer.
+	SettingInt SettingKind = "int"
+	// SettingDuration is a Go duration string such as "90s" or "15m".
+	SettingDuration SettingKind = "duration"
+	// SettingToggle cycles true and false.
+	SettingToggle SettingKind = "toggle"
+	// SettingEnum cycles a fixed option list.
+	SettingEnum SettingKind = "enum"
+	// SettingSecret holds a value that must never be rendered. The editor
+	// starts empty and the buffer is masked.
+	SettingSecret SettingKind = "secret"
+	// SettingInfo is a read-only row, optionally with an Action.
+	SettingInfo SettingKind = "info"
+)
+
+// SettingOption is one enum or toggle value and its operator-facing label.
+type SettingOption struct {
+	Value string
+	Label string
+}
+
+// SettingField is one config-file setting in the /settings browser. Value is
+// the raw spelling the editor starts with; Display is the human value; Source
+// is the short winning layer ("file", "flag", "env", or "current") and
+// SourceDetail is its long form. Saved reports that the config file currently
+// has the key, which is what reset removes. Live means a save applies to this
+// process immediately; other fields apply at the next startup. Action names an
+// overlay to open for an info row ("agents").
+type SettingField struct {
+	Key          string
+	Label        string
+	Kind         SettingKind
+	Value        string
+	Display      string
+	Source       string
+	SourceDetail string
+	Saved        bool
+	Options      []SettingOption
+	Detail       string
+	Live         bool
+	Action       string
+}
+
+// SettingsView is the config-file state shown by /settings. ConfigPath is the
+// active config file, empty when it is disabled. Err reports a config file that
+// cannot be read; the fields then show the effective values. Warning reports a
+// cross-field problem, such as a crawl4ai provider without an endpoint, that is
+// fixed by editing another row.
+type SettingsView struct {
+	Fields     []SettingField
+	ConfigPath string
+	Err        string
+	Warning    string
+}
+
+// SettingsProvider is an optional Host capability for the /settings browser.
+// It reports every config-file setting with its current value and source.
+type SettingsProvider interface {
+	Settings() SettingsView
+}
+
+// SettingsEditor is an optional Host capability for saving /settings changes.
+// SetSetting persists one config-file key and ResetSetting removes it so the
+// built-in default applies again. An empty SetSetting value clears the key for
+// string-like settings. Saved values apply on the next startup except the
+// Live display preferences.
+type SettingsEditor interface {
+	SetSetting(key, value string) error
+	ResetSetting(key string) error
 }
 
 // SubagentFocus is an optional Host capability for the /agent-hub child view.

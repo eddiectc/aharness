@@ -28,13 +28,14 @@ type overlayState struct {
 	help   []string
 	scroll int
 
-	table   *tableOverlay
-	file    *fileOverlay
-	model   *modelOverlay
-	effort  *effortOverlay
-	session *sessionOverlay
-	image   *imageOverlay
-	agents  *agentsOverlay
+	table    *tableOverlay
+	file     *fileOverlay
+	model    *modelOverlay
+	effort   *effortOverlay
+	session  *sessionOverlay
+	image    *imageOverlay
+	agents   *agentsOverlay
+	settings *settingsOverlay
 }
 
 func (o *overlayState) push(kind OverlayKind) {
@@ -103,6 +104,13 @@ func (o *overlayState) insert(m *App, text string) bool {
 			}
 			return o.agents.command(text)
 		}
+	case OverlaySettings:
+		if o.settings != nil {
+			if o.settings.insert(text) {
+				return true
+			}
+			return o.settings.command(m, text)
+		}
 	}
 	return false
 }
@@ -112,6 +120,10 @@ func (o *overlayState) insert(m *App, text string) bool {
 func (o *overlayState) cancelEdit() bool {
 	if o.kind == OverlayAgents && o.agents != nil && o.agents.editing {
 		o.agents.cancelEdit()
+		return true
+	}
+	if o.kind == OverlaySettings && o.settings != nil && o.settings.editing {
+		o.settings.cancelEdit()
 		return true
 	}
 	return false
@@ -137,6 +149,9 @@ func (o *overlayState) resizeCmd(m *App, width, height int) tea.Cmd {
 	}
 	if o.agents != nil {
 		o.agents.resize(innerW, innerH)
+	}
+	if o.settings != nil {
+		o.settings.resize(innerW, innerH)
 	}
 	if o.table != nil {
 		o.table.resize(innerW, innerH)
@@ -187,6 +202,10 @@ func (o *overlayState) wheel(up bool) {
 	case OverlayAgents:
 		if o.agents != nil {
 			o.agents.wheel(up)
+		}
+	case OverlaySettings:
+		if o.settings != nil {
+			o.settings.wheel(up)
 		}
 	}
 }
@@ -240,6 +259,10 @@ func (o *overlayState) update(m *App, msg tea.KeyPressMsg) tea.Cmd {
 	case OverlayAgents:
 		if o.agents != nil {
 			return o.agents.update(msg)
+		}
+	case OverlaySettings:
+		if o.settings != nil {
+			return o.settings.update(m, msg)
 		}
 	case OverlayImage:
 		if o.image != nil {
@@ -296,6 +319,11 @@ func (o *overlayState) view(m *App) string {
 		title = "agents · definitions · read-only"
 		if o.agents != nil {
 			content = o.agents.view()
+		}
+	case OverlaySettings:
+		title = "settings · config file"
+		if o.settings != nil {
+			content = o.settings.viewText(m)
 		}
 	case OverlayImage:
 		title = "image · Ctrl-G"

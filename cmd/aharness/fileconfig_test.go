@@ -555,6 +555,8 @@ func TestWriteFileConfigRoundTrip(t *testing.T) {
 		CatalogTimeout:   fileDuration(15 * time.Second),
 		RequireUsage:     fileBool(false),
 		LogRequests:      fileBool(false),
+		UIRich:           fileBool(true),
+		UIExpandAll:      fileBool(false),
 		AgentOverrides: map[string]fileAgentOverride{
 			"reviewer": {
 				Model:          fileStr("review-model"),
@@ -580,7 +582,7 @@ func TestWriteFileConfigRoundTrip(t *testing.T) {
 	}
 	// Explicit false, zero, and empty values survive; a payload that dropped
 	// them would silently change behavior when an environment layer is set.
-	for _, want := range []string{`"enabled": false`, `"require_usage": false`, `"max_output_tokens": 0`, `"session_timeout": "0s"`, `"searxng_url": ""`} {
+	for _, want := range []string{`"enabled": false`, `"require_usage": false`, `"ui_expand_all": false`, `"max_output_tokens": 0`, `"session_timeout": "0s"`, `"searxng_url": ""`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("written config is missing %s:\n%s", want, raw)
 		}

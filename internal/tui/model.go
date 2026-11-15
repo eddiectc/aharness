@@ -298,6 +298,9 @@ func New(opts Options) *App {
 				app.appendNotice(agent.NoticeWarning, warning)
 			}
 		}
+		if provider, ok := opts.Host.(SettingsProvider); ok {
+			app.applySettings(provider.Settings())
+		}
 	}
 	app.applyNoColor()
 	return app

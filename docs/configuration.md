@@ -50,6 +50,8 @@ before the file is read, and a key in the file cannot move its own location.
   "max_subagents": 8,
   "http_timeout": "10m",
   "thinking_effort": "high",
+  "ui_rich": true,
+  "ui_expand_all": false,
   "agent_overrides": {
     "reviewer": {"model": "kimi-k2.7-code", "max_turns": 12}
   }
@@ -85,7 +87,20 @@ number is rejected so a unit typo cannot silently mean nanoseconds.
 | `catalog_timeout` | duration | `-catalog-timeout` / `AHARNESS_CATALOG_TIMEOUT` | Must be positive; default 15s. |
 | `require_usage` | boolean | `-require-usage` / `AHARNESS_REQUIRE_USAGE` | Per-run; not inherited. |
 | `log_requests` | boolean | `-log-requests` / `AHARNESS_LOG_REQUESTS` | Records request debug events. |
+| `ui_rich` | boolean | none | TUI initial assistant rendering: `true` is rich markdown, `false` is raw source. Default `true`. Display-only; no session event records it. |
+| `ui_expand_all` | boolean | none | TUI initial block fold mode: `true` expands thinking and tool blocks, `false` folds them. Default `false`. `F3` still toggles only the current process. |
 | `agent_overrides` | object | none | Per-agent routing overrides; see §2.2. |
+
+Every key in this table is editable in the TUI `/settings` browser, except
+`agent_overrides`, whose per-agent rows are edited in `/agents`. The browser
+shows the saved value or the current effective value, the winning layer (`file`,
+`flag`, `env`, or `current`), and validates the file's own values before each
+atomic 0600 replacement. A saved value applies at the next startup; `ui_rich`
+and `ui_expand_all` also apply to the current process immediately.
+`web_fetch_key` is never displayed, prefilled, or echoed; the row reports
+whether it is set, and an incomplete `web_fetch` provider/endpoint pair is
+reported as a warning because either key can be entered first.
+See [commands.md § `/settings`](commands.md#settings).
 
 Deliberately **not** configurable in the file:
 
@@ -159,13 +174,16 @@ a process exit; the catalog may be unavailable offline.
 Overrides apply to the next process. The process keeps the catalog it loaded at
 startup, so a saved setting changes neither a child in flight nor a new run
 started in the same process; the next process applies the effective values.
-`/agents` shows the saved values immediately and is the only writer: it re-reads
-the active config file, rewrites it atomically through a 0600 same-directory
-temporary file and `rename`, preserves every other key, and leaves the previous
-file intact on failure. The active path is `-config`/`AHARNESS_CONFIG`, default
-`<state-dir>/config.json`; a path inside the workspace is refused, because
-operator settings must not become repository-controlled state, and `-config ""`
-disables the file, so the browser reports that settings cannot be saved.
+`/agents` shows the saved values immediately and is the writer for this object:
+it re-reads the active config file, rewrites it atomically through a 0600
+same-directory temporary file and `rename`, preserves every other key, and
+leaves the previous file intact on failure. `/settings` uses the same writer for
+every other scalar key and applies the display preferences to the current
+process immediately; its other saved values are used at the next startup. The
+active path is `-config`/`AHARNESS_CONFIG`, default `<state-dir>/config.json`; a
+path inside the workspace is refused, because operator settings must not become
+repository-controlled state, and `-config ""` disables the file, so both
+browsers report that settings cannot be saved.
 
 ## 3. Environment variables
 
@@ -257,4 +275,6 @@ The batch startup log line records the resolved values, including
 `http_timeout_ms`, `search_configured`, the fixed `search_timeout_ms`, and
 `config` (the resolved path, or `none` when disabled). It deliberately does not
 log the SearXNG URL. The TUI details overlay shows the run timeouts;
-`aharness -h` lists the environment variables and the precedence order.
+`/settings` shows every config-file key with the winning layer and edits them
+through the atomic writer; `aharness -h` lists the environment variables and
+the precedence order.

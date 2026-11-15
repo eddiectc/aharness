@@ -53,6 +53,8 @@ type fileConfig struct {
 	CatalogTimeout   *configDuration              `json:"catalog_timeout,omitzero"`
 	RequireUsage     *bool                        `json:"require_usage,omitzero"`
 	LogRequests      *bool                        `json:"log_requests,omitzero"`
+	UIRich           *bool                        `json:"ui_rich,omitzero"`
+	UIExpandAll      *bool                        `json:"ui_expand_all,omitzero"`
 	AgentOverrides   map[string]fileAgentOverride `json:"agent_overrides,omitzero"`
 }
 

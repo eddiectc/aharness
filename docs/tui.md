@@ -129,6 +129,43 @@ reference — syntax, arguments, key equivalents, idle/active behavior,
 `-ui-json` mapping, and examples — is in [commands.md](commands.md). The help
 overlay (`F1`) lists every command.
 
+## Settings
+
+`/settings` opens a browser for every key in the active config file. It lists
+the model, provider, workspace, provider and catalog URLs, thinking effort, run
+budgets, timeouts, usage/logging switches, SearXNG and `web_fetch` settings,
+`ui_rich`, `ui_expand_all`, and an `agent_overrides` row that opens `/agents`.
+The value column shows the saved value, or the current effective value when the
+file omits the key; the source column reports `file`, `flag`, `env`, or
+`current` (`runtime` for a display toggle changed since startup), and the footer
+explains the selected row and warns when a flag or environment variable
+overrides a saved value.
+
+`Up`/`Down`/`PgUp`/`PgDn`/`Home`/`End` and the wheel move the selection.
+`Enter`/`Space` opens an inline editor for text, integer, duration, and secret
+rows, and saves the next option for toggles and enums; `Left`/`Right` cycle the
+latter. `Enter` saves an edit and an empty value removes the key; `Esc` cancels
+the edit before it closes the browser. `r` removes the saved key so the
+built-in default applies, and is a no-op when the row has no saved value.
+
+Validation uses the startup rules: model IDs against the loaded catalog when
+available, provider names, workspace existence, base and catalog URLs, SearXNG
+and `web_fetch` URLs, duration bounds, non-negative budgets, a positive context
+window, and thinking effort against the effective model. The candidate file's
+own values are validated before the atomic 0600 replacement, every other key is
+preserved, a path inside the workspace is refused, and `-config ""` disables
+saving. The `web_fetch_key` value is never rendered or prefilled; the row says
+`set` or `(unset)`, the editor buffer is masked, and the overlay warns when the
+`web_fetch_provider`/`web_fetch_url` pair is incomplete.
+
+A saved value is read at the next startup. `ui_rich` and `ui_expand_all` also
+apply to the current process immediately; a value changed with `Ctrl-R` or `F3`
+since startup is labelled `runtime`. The overlay works while idle or running
+because it never changes the active run or the session log, and it emits no
+protocol event (the `-ui-json` overlay value is `settings`, and `r` may arrive
+as a one-character text message). See
+[commands.md § `/settings`](commands.md#settings).
+
 ## Session picker
 
 `/new` replaces the active session with a fresh log in the same workspace and
@@ -229,8 +266,12 @@ thinking.
   model's conclusion rather than its opening restatement.
 - `F3` expands every thinking block, and `F3` again collapses them, while idle
   or during a run. The mode is sticky across turns, runs, retries, streaming
-  deltas, and item trimming; it is not persisted to the config file and does not
-  survive a restart, matching `Ctrl-R`. There is no per-block or mouse binding.
+  deltas, and item trimming; `F3` itself does not write the config file and the
+  sticky mode does not survive a restart; `Ctrl-R`'s rich/raw toggle is
+  likewise in-memory until `/settings` saves an initial preference. The initial
+  mode can be persisted with `/settings` as `ui_expand_all`; a saved preference
+  is applied at startup but later `F3` presses still change only this process.
+  There is no per-block or mouse binding.
   `F3` is inert while an overlay is open.
 - Expanded thinking is bounded by the 64 KiB per-item display cap. The `CapText`
   `[truncated N bytes]` marker is part of the body and remains visible in both
@@ -436,8 +477,8 @@ Output lines:
   (`id`, `path`, `alt`, `row`, `col`, `width`, `height`, `protocol`),
   `color_profile`, `no_color`, `image_protocol`, `styles_truncated`. `overlay`
   is `none`, `help`, `details`, `table`, `file`, `model`, `effort`, `session`,
-  `image`, `agent-hub`, or `agents`. Frames contain no ANSI and no raw image
-  bytes.
+  `image`, `agent-hub`, `agents`, or `settings`. Frames contain no ANSI and no
+  raw image bytes.
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
   `model_changed`, `notice`, `error`, with the fields documented in
   [tui-build.md §2.7](plans/tui-build.md#27-machine-readable-ui-mode---ui-json).
@@ -485,6 +526,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Overlay stack | 4 | Deeper requests close the oldest overlay. |
 | Agent roster | 8 rows, 200-byte intent | Header and `+N more` row; scrolls; every string sanitized. |
 | Agent settings editor | 200 bytes | One inline routing value; longer input is refused with a footer error, and an empty value clears the override. |
+| Config settings editor | 512 bytes | One config-file value; longer input is refused, values use the startup validation rules, and `web_fetch_key` is masked and never rendered. |
 | Delegated tasks per call | 4 | Each renders one nested row; a call produces exactly one tool block. |
 | Child report per task | 16 KiB | Included in the folded block body; the child log keeps the full text. |
 | Thinking effort values | 16 per model, 32 bytes each | Catalog-normalized; `F2` lists `provider default` plus the model's canonical values and opens no overlay when none exist. |
@@ -493,7 +535,7 @@ elapsed time, and durations. `-ui-json` always uses glyph image mode.
 | Tool output | 4 KiB or 40 lines expanded | Collapsed tool blocks show the last seven rendered rows of the full result; expanded output is bounded to the first 40 lines / 4 KiB, and the remainder stays in the log. |
 | Todo widget | 8 rows | One header plus up to seven one-line items; the window keeps the in-progress (or first pending) item visible and reports hidden items as a count. Hidden when the list is empty, there is no room, or the slash-command menu is open. |
 | Tool intent title | 200 bytes | Shared display-only `intent` argument, trimmed and cut on a rune boundary; a missing intent falls back to the 2 KiB raw argument preview and never fails the call. |
-| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last seven wrapped rows. `F3` expands all folds; the mode is sticky and not persisted. |
+| Transcript fold | 7 rendered rows | Thinking and tool bodies are collapsed by default: header, one elision row with the hidden rendered-row count, and the last seven wrapped rows. `F3` expands all folds; the mode is sticky for this process, and `/settings` can persist the initial mode as `ui_expand_all`. |
 | Tool arguments preview | 2 KiB | Full arguments remain in `model_response`. |
 | Input history | 100 entries | In-memory only. |
 | Minimum terminal | 40×10 | Smaller shows a resize message and keeps quit/resize keys. |
