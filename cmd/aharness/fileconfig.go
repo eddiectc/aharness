@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // maxConfigFileBytes caps one config file. The file only holds a handful of

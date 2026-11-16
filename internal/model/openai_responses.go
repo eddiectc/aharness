@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -22,8 +23,30 @@ type OpenAIResponses struct {
 // DefaultBaseURL. An empty token omits the Authorization header. A
 // non-positive timeout selects DefaultHTTPTimeout.
 func NewOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIResponses {
+	return newOpenAIResponses(baseURL, token, sessionID, version, timeout, nil)
+}
+
+// NewOpenAIResponsesWithClient constructs a Responses adapter that uses the
+// caller's HTTP client. A nil client selects the default bounded client.
+func NewOpenAIResponsesWithClient(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIResponses {
+	return newOpenAIResponses(baseURL, token, sessionID, version, timeout, client)
+}
+
+func newOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIResponses {
 	return &OpenAIResponses{
-		transport:    newHTTPTransport(baseURL, "/responses", token, sessionID, version, timeout),
+		transport:    newHTTPTransportWithClient(baseURL, "/responses", token, sessionID, version, timeout, client),
+		continuation: newContinuationCache(responsesReasoningBytes),
+	}
+}
+
+// WithSessionID returns a copy of the adapter that sends the given session ID
+// in its provider header. The continuation cache is not shared, so a caller
+// must build one adapter per session.
+func (a *OpenAIResponses) WithSessionID(sessionID string) *OpenAIResponses {
+	transport := *a.transport
+	transport.sessionID = sessionID
+	return &OpenAIResponses{
+		transport:    &transport,
 		continuation: newContinuationCache(responsesReasoningBytes),
 	}
 }

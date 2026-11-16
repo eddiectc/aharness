@@ -1,8 +1,9 @@
 # aharness v1 testing strategy
 
-- **Date:** 2026-11-15
+- **Date:** 2026-11-16
 - **Status:** normative testing strategy for v1, the shipped TUI (including the
-  todo widget), model discovery, thinking effort, and the builtin tool set
+  todo widget), the public Go library, model discovery, thinking effort, and
+  the builtin tool set
 - **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md), [web search build plan](plans/web-search-build.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
@@ -448,6 +449,32 @@ diagnostic, not a gate.
   unknown v2 events and fields are tolerated.
 - Caps: an oversized response stops with `protocol_error` and executes no tool;
   a 1 MiB streamed response round-trips through the log.
+- Public library surface: all `package aharness_test` tests use only the public
+  API. They cover new, resume, fork (prompt/grant overrides and copied history
+  with a tool removed from the new grant), blocking and streaming runs, every
+  event kind, custom models, custom tools (including a `ConcurrencySafe`
+  fan-out), policy denial and serialization, interrupt, cancel, steer,
+  steer-child, close-without-events, `ListModels`/`DiscoverModel`, and
+  `ProviderError` classification.
+- External module: `testdata/external` is a separate module with a `replace`
+  directive; `TestExternalModuleBuild` runs `go build ./...` there so an import
+  of the module root cannot silently depend on being inside the repository.
+- Research acceptance shape: an external-package test builds a data workspace
+  with `run_command` and `edit_file` disabled, a replaced prompt, four
+  deterministic custom tools, three analyst definitions, and a fake model; it
+  completes with no network and no shell.
+- UI contract: a public-surface renderer test builds text, tool blocks, the todo
+  panel, the subagent roster, usage/cost, and the terminal status from
+  `Events()` and `Result` alone, without reading the session log.
+- Sequential tool contract: a fake model returns three calls in one response;
+  an instrumented custom tool proves the calls are ordered and never overlap.
+- Delegated fan-out: an all-read-only or all-`ConcurrencySafe` custom grant runs
+  concurrently; a mixed/undeclared grant stays sequential; `Authorize` is never
+  entered concurrently within one session.
+- Compatibility fixtures: v2 sessions with and without `custom_tools` (including
+  `concurrency_safe`), a `contract_override` fork, and a fork whose copied
+  history references a tool absent from the new grant all replay without
+  re-executing the old tool.
 - Run the suite with `-race -count=1` and `govulncheck ./...`; no leaked
   goroutines or child processes. Use `synctest` for retry/deadline tests; use
   real short timeouts for subprocess tests.

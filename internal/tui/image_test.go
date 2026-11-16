@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func writeTestPNG(t *testing.T, path string, width, height int, c color.Color) {

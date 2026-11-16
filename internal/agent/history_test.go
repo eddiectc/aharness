@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func histEvent(t *testing.T, seq uint64, typ session.EventType, turn int, payload any) session.Event {

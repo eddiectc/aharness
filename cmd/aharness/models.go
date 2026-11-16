@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 const (
@@ -428,8 +428,18 @@ func applySessionDefaults(ctx context.Context, cfg *config, state agent.State, s
 	// delegate.
 	cfg.SystemPrompt = state.SystemPrompt
 	cfg.Agent = state.Agent
-	cfg.Tools = append([]string(nil), state.Tools...)
+	cfg.Tools = cloneStrings(state.Tools)
 	return validateEffective(cfg)
+}
+
+// cloneStrings preserves the nil/non-nil grant distinction across CLI session
+// defaults. A nil grant means every tool of the recorded version; an explicit
+// empty grant means none.
+func cloneStrings(names []string) []string {
+	if names == nil {
+		return nil
+	}
+	return append([]string{}, names...)
 }
 
 // baseURLIsLoopback reports whether a resolved base URL points at a local

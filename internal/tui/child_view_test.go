@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/agent"
 )
 
 // childHistory is a small delegated-child transcript for the focus tests.

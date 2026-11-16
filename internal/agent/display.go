@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // DisplayEvent is display-only progress from the runner. It is never durable

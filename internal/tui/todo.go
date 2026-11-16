@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // maxTodoWidgetRows bounds the persistent checklist widget, including its

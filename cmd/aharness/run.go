@@ -14,11 +14,12 @@ import (
 
 	"golang.org/x/term"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/engine"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 const (
@@ -132,40 +133,16 @@ func executeNew(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *s
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return catalogExitCode(err)
 	}
-	ws, code := openWorkspace(cfg, stderr)
-	if ws == nil {
-		return code
-	}
-	cfg.Workspace = ws.Dir()
-	defer closeWorkspace(ws, logger)
-
 	if err := prepareStateDir(cfg.StateDir); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-
-	sessionID := session.NewID()
-	store, err := session.Create(cfg.StateDir, sessionID)
+	host, err := engine.Open(context.Background(), batchEngineSpec(cfg, engine.ModeNew, "", logger))
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: create session log: %v\n", sanitizeText(err.Error()))
-		return exitSetup
+		return engineFailure(err, stderr)
 	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			logger.Warn("close session log", "error", sanitizeText(err.Error()))
-		}
-	}()
-
-	rcfg := runnerConfig(cfg)
-	if err := agent.WriteSessionStart(store, rcfg, nil); err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
-		return exitSetup
-	}
-	return executeRun(cfg, store, ws, sessionID, stdin, stdout, stderr, logger, agent.RunOptions{
-		Task:     cfg.Task,
-		TaskSet:  cfg.TaskSet,
-		TaskFrom: cfg.TaskSource,
-	}, "session started")
+	cfg.Workspace = host.Workspace()
+	return executeEngineRun(cfg, host, stdin, stdout, stderr, logger, "session started")
 }
 
 func executeResume(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) int {
@@ -173,20 +150,14 @@ func executeResume(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-	store, err := session.Open(cfg.StateDir, cfg.ResumeID)
+	snapshot, err := engine.Inspect(context.Background(), cfg.StateDir, cfg.ResumeID)
 	if err != nil {
-		return sessionFailure(err, stderr)
+		return engineFailure(err, stderr)
 	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			logger.Warn("close session log", "error", sanitizeText(err.Error()))
-		}
-	}()
-
-	state, err := agent.Inspect(store.Events())
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: read session %s: %v\n", cfg.ResumeID, sanitizeText(err.Error()))
-		return exitSetup
+	state := snapshot.State
+	if len(state.CustomTools) > 0 {
+		_, _ = fmt.Fprintf(stderr, "aharness: session %s records caller-defined tools; the CLI cannot provide their implementations\n", sanitizeText(cfg.ResumeID))
+		return exitConfig
 	}
 	source, err := sessionCatalogSource(cfg)
 	if err != nil {
@@ -199,24 +170,16 @@ func executeResume(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return catalogExitCode(err)
 	}
-	ws, code := openSessionWorkspace(cfg, state, stderr)
-	if ws == nil {
-		return code
-	}
-	cfg.Workspace = ws.Dir()
-	defer closeWorkspace(ws, logger)
 	if err := validateSessionRules(&cfg, state); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-
-	resumedFrom := lastSeq(store.Events())
-	return executeRun(cfg, store, ws, store.ID(), stdin, stdout, stderr, logger, agent.RunOptions{
-		Task:           cfg.Task,
-		TaskSet:        cfg.TaskSet,
-		TaskFrom:       cfg.TaskSource,
-		ResumedFromSeq: resumedFrom,
-	}, "session resumed")
+	host, err := engine.Open(context.Background(), batchEngineSpec(cfg, engine.ModeResume, cfg.ResumeID, logger))
+	if err != nil {
+		return engineFailure(err, stderr)
+	}
+	cfg.Workspace = host.Workspace()
+	return executeEngineRun(cfg, host, stdin, stdout, stderr, logger, "session resumed")
 }
 
 func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) int {
@@ -224,20 +187,14 @@ func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-	source, err := session.OpenShared(cfg.StateDir, cfg.ForkID)
+	snapshot, err := engine.Inspect(context.Background(), cfg.StateDir, cfg.ForkID)
 	if err != nil {
-		return sessionFailure(err, stderr)
+		return engineFailure(err, stderr)
 	}
-	defer func() {
-		if err := source.Close(); err != nil {
-			logger.Warn("close parent session log", "error", sanitizeText(err.Error()))
-		}
-	}()
-
-	state, err := agent.Inspect(source.Events())
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: read parent session %s: %v\n", cfg.ForkID, sanitizeText(err.Error()))
-		return exitSetup
+	state := snapshot.State
+	if len(state.CustomTools) > 0 {
+		_, _ = fmt.Fprintf(stderr, "aharness: session %s records caller-defined tools; the CLI cannot provide their implementations\n", sanitizeText(cfg.ForkID))
+		return exitConfig
 	}
 	catSource, err := sessionCatalogSource(cfg)
 	if err != nil {
@@ -250,72 +207,76 @@ func executeFork(cfg config, stdin io.Reader, stdout, stderr io.Writer, logger *
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return catalogExitCode(err)
 	}
-	ws, code := openSessionWorkspace(cfg, state, stderr)
-	if ws == nil {
-		return code
-	}
-	cfg.Workspace = ws.Dir()
-	defer closeWorkspace(ws, logger)
 	if err := validateSessionRules(&cfg, state); err != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
 		return exitConfig
 	}
-
-	sessionID := session.NewID()
-	store, err := session.Create(cfg.StateDir, sessionID)
+	host, err := engine.Open(context.Background(), batchEngineSpec(cfg, engine.ModeFork, cfg.ForkID, logger))
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: create forked session log: %v\n", sanitizeText(err.Error()))
-		return exitSetup
+		return engineFailure(err, stderr)
 	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			logger.Warn("close session log", "error", sanitizeText(err.Error()))
-		}
-	}()
-
-	rcfg := runnerConfig(cfg)
-	parent := &agent.ParentRef{Session: source.ID(), Seq: source.LastSeq()}
-	if err := agent.WriteSessionStart(store, rcfg, parent); err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
-		return exitSetup
-	}
-	if err := store.CopyHistory(source.Events()); err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: copy parent session: %v\n", sanitizeText(err.Error()))
-		return exitSetup
-	}
-	if err := store.Sync(); err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: sync forked session: %v\n", sanitizeText(err.Error()))
-		return exitSetup
-	}
-	if err := source.Close(); err != nil {
-		logger.Warn("close parent session log", "error", sanitizeText(err.Error()))
-	}
-
-	resumedFrom := lastSeq(store.Events())
-	return executeRun(cfg, store, ws, sessionID, stdin, stdout, stderr, logger, agent.RunOptions{
-		Task:           cfg.Task,
-		TaskSet:        cfg.TaskSet,
-		TaskFrom:       cfg.TaskSource,
-		ResumedFromSeq: resumedFrom,
-	}, "session forked")
+	cfg.Workspace = host.Workspace()
+	return executeEngineRun(cfg, host, stdin, stdout, stderr, logger, "session forked")
 }
 
-// executeRun prepares the work directory, installs signals and streaming, and
-// performs one run over an already-open session.
-func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID string, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger, opts agent.RunOptions, action string) int {
-	workDir, tmpDir := workPaths(cfg.StateDir, sessionID)
-	if err := resetWorkDirs(workDir, tmpDir); err != nil {
-		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
-		return exitSetup
+// batchEngineSpec maps the resolved CLI configuration onto the shared engine
+// contract. Batch withholds delegate from execution without rewriting the
+// recorded session contract.
+func batchEngineSpec(cfg config, mode engine.Mode, sessionID string, logger *slog.Logger) engine.Spec {
+	effort := cfg.ThinkingEffort
+	spec := engine.Spec{
+		Workspace:      cfg.Workspace,
+		StateDir:       cfg.StateDir,
+		Mode:           mode,
+		SessionID:      sessionID,
+		Provider:       cfg.Provider,
+		Dialect:        string(cfg.Dialect),
+		BaseURL:        cfg.BaseURL,
+		Model:          cfg.Model,
+		Limits:         cfg.Limits,
+		Pricing:        cfg.Pricing,
+		ThinkingEffort: &effort,
+		Agents:         cfg.Agents,
+		Agent:          cfg.Agent,
+		ToolOptions:    toolOptions(cfg, "", ""),
+		PromptVersion:  cfg.PromptVersion,
+		ToolsetVersion: cfg.ToolsetVersion,
+		MaxTurns:       cfg.MaxTurns,
+		MaxTotalTokens: cfg.MaxTotalTokens,
+		RunTimeout:     cfg.SessionTimeout,
+		ModelTimeout:   cfg.ModelTimeout,
+		RequireUsage:   cfg.RequireUsage,
+		LogRequests:    cfg.LogRequests,
+		Version:        cfg.HarnessVersion,
+		Logger:         logger,
+		NewCompleter: func(dialect model.Dialect, baseURL, sessionID string) model.Completer {
+			return newCompleterFor(dialect, cfg, sessionID)
+		},
 	}
-	defer removeWorkDir(workDir, stderr)
+	switch mode {
+	case engine.ModeResume:
+		spec.ExecutionGrant = batchTools(cfg)
+		spec.ExecutionGrantSet = true
+	case engine.ModeNew, engine.ModeFork:
+		spec.Grant = batchTools(cfg)
+		spec.GrantSet = true
+		if mode == engine.ModeNew {
+			spec.CustomToolsSet = true
+		}
+		spec.ExecutionGrant = spec.Grant
+		spec.ExecutionGrantSet = true
+	}
+	return spec
+}
 
+// executeEngineRun performs one batch run over an engine host.
+func executeEngineRun(cfg config, host *engine.Host, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger, action string) int {
 	logger.Info(action,
-		"session", sessionID,
-		"trace", store.Path(),
+		"session", host.ID(),
+		"trace", host.Path(),
 		"model", cfg.Model,
 		"dialect", cfg.Dialect,
-		"workspace", cfg.Workspace,
+		"workspace", host.Workspace(),
 		"auth", authState(cfg.Token),
 		"max_turns", cfg.MaxTurns,
 		"max_context_tokens", cfg.MaxContextTokens,
@@ -333,31 +294,37 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 	if cfg.Token == "" && !baseURLIsLoopback(cfg.BaseURL) {
 		logger.Warn("provider token is unset; hosted OpenCode Go requires AHARNESS_PROVIDER_TOKEN")
 	}
-
 	runCtx, stopSignals := setupSignals()
 	defer stopSignals()
 	var sink *textSink
 	if cfg.Stream {
 		sink = &textSink{w: stdout}
 	}
-
-	rcfg := runnerConfig(cfg)
+	var display func(agent.DisplayEvent) error
 	if sink != nil {
-		rcfg.Display = textDisplay(sink)
+		display = textDisplay(sink)
 	}
-	registry := tools.NewRegistry(ws, toolOptions(cfg, tmpDir, workDir))
-	// Enforce the recorded grant at dispatch as well as in the projection, so a
-	// hallucinated call cannot reach a tool the session never granted.
-	registry.SetGrant(batchTools(cfg))
-	registry.SeedTodo(agent.RestoreTodo(store.Events()))
-	runner := agent.New(rcfg, newCompleter(cfg, sessionID), registry, store)
-
-	result, runErr := runner.Run(runCtx, opts)
+	runner, err := host.BuildRunner(engine.RunSpec{Stream: cfg.Stream}, display, nil, nil)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+		_ = host.Close()
+		return engineExitCode(err)
+	}
+	resumedFrom := host.Store().LastSeq()
+	if cfg.ResumeID == "" && cfg.ForkID == "" {
+		resumedFrom = 0
+	}
+	result, runErr := runner.Run(runCtx, agent.RunOptions{
+		Task:           cfg.Task,
+		TaskSet:        cfg.TaskSet,
+		TaskFrom:       cfg.TaskSource,
+		ResumedFromSeq: resumedFrom,
+	})
 	var sinkErr error
 	if sink != nil {
 		sinkErr = sink.finish()
 	}
-	closeErr := store.Close()
+	closeErr := host.Close()
 
 	status := result.Status
 	if status == "" {
@@ -378,8 +345,6 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 	}
 	if closeErr != nil {
 		_, _ = fmt.Fprintf(stderr, "aharness: close session log: %v\n", sanitizeText(closeErr.Error()))
-		// A failed close means the durable log cannot be trusted, regardless
-		// of the loop's status.
 		status = agent.StopInternalError
 	}
 	if !cfg.Stream && result.FinalText != "" {
@@ -389,6 +354,28 @@ func executeRun(cfg config, store *session.Store, ws *tools.Workspace, sessionID
 		}
 	}
 	return status.ExitCode()
+}
+
+// engineFailure maps an engine construction error to the CLI exit code.
+func engineFailure(err error, stderr io.Writer) int {
+	_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
+	return engineExitCode(err)
+}
+
+func engineExitCode(err error) int {
+	var configErr *engine.ConfigError
+	switch {
+	case errors.As(err, &configErr):
+		return exitConfig
+	case errors.Is(err, engine.ErrSessionNotFound),
+		errors.Is(err, engine.ErrSessionLocked),
+		errors.Is(err, engine.ErrInvalidSessionID),
+		errors.Is(err, session.ErrUnsupportedVersion),
+		errors.Is(err, session.ErrMode):
+		return exitConfig
+	default:
+		return exitSetup
+	}
 }
 
 // toolOptions returns the registry options shared by batch and TUI runs.
@@ -447,7 +434,7 @@ func runnerConfig(cfg config) agent.Config {
 // excludes delegate; a resumed batch session keeps the grant it recorded.
 func batchTools(cfg config) []string {
 	if cfg.Tools != nil {
-		return append([]string(nil), cfg.Tools...)
+		return cloneStrings(cfg.Tools)
 	}
 	if cfg.Mode != ModeBatch {
 		// A TUI session records no grant, which means every tool of its
@@ -481,7 +468,7 @@ func batchTools(cfg config) []string {
 // delegate even through a hallucinated call; nil means no narrowing.
 func sessionGrant(recordedTools []string, toolsetVersion string) []string {
 	if recordedTools != nil {
-		return append([]string(nil), recordedTools...)
+		return cloneStrings(recordedTools)
 	}
 	version := toolsetVersion
 	if version == "" {
@@ -530,12 +517,6 @@ func openSessionWorkspace(cfg config, state agent.State, stderr io.Writer) (*too
 	return ws, 0
 }
 
-func closeWorkspace(ws *tools.Workspace, logger *slog.Logger) {
-	if err := ws.Close(); err != nil {
-		logger.Warn("close workspace", "error", sanitizeText(err.Error()))
-	}
-}
-
 // sessionFailure maps a session open/validate failure to the CLI exit code.
 func sessionFailure(err error, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stderr, "aharness: %v\n", sanitizeText(err.Error()))
@@ -550,10 +531,6 @@ func sessionFailure(err error, stderr io.Writer) int {
 	default:
 		return exitSetup
 	}
-}
-
-func newCompleter(cfg config, sessionID string) model.Completer {
-	return newCompleterFor(cfg.Dialect, cfg, sessionID)
 }
 
 // newCompleterFor builds the adapter for one run's dialect. The model picker

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 // Delegate caps. They bound one call's fan-out, the prompt the parent may hand

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 const v1TestSession = "0190a0c4-0000-7000-8000-0000000000aa"

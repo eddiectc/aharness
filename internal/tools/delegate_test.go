@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 // fakeSpawner records one delegate call and returns scripted reports.

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 // Version is the current toolset/prompt version.
@@ -47,6 +47,22 @@ const (
 	// its own budget, so its report is partial.
 	CodeSubagentLimit Code = "subagent_limit"
 	CodeInternal      Code = "internal"
+	// CodePermissionDenied reports a host policy denial from Authorize. The
+	// tool did not run; the model sees an actionable, non-retryable result.
+	CodePermissionDenied Code = "permission_denied"
+	// CodeToolError reports a custom tool that returned an error without a
+	// more specific code.
+	CodeToolError Code = "tool_error"
+)
+
+// Custom-tool recording caps. They bound session_start.custom_tools and the
+// public ToolsConfig surface.
+const (
+	MaxCustomTools           = 32
+	MaxCustomToolDescription = 2 << 10
+	MaxCustomToolParams      = 32 << 10
+	MaxCustomToolBytes       = 64 << 10
+	MaxToolNameBytes         = 64
 )
 
 // Result is the canonical tool result exchanged with the model and logged in
@@ -103,17 +119,19 @@ var (
 // Spawning runs delegated `delegate` tasks. A nil value keeps the tool
 // registered and returns an actionable unavailable result.
 type Options struct {
-	TmpDir           string
-	WorkDir          string
-	SearXNGURL       string
-	UserAgent        string
-	WebTimeout       time.Duration
-	WebFetchProvider string
-	WebFetchURL      string
-	WebFetchKey      string
-	WebClient        *http.Client
-	WebAllowLoopback bool
-	Spawning         Spawning
+	TmpDir            string
+	WorkDir           string
+	SearXNGURL        string
+	UserAgent         string
+	WebFetchUserAgent string
+	SearchTimeout     time.Duration
+	WebTimeout        time.Duration
+	WebFetchProvider  string
+	WebFetchURL       string
+	WebFetchKey       string
+	WebClient         *http.Client
+	WebAllowLoopback  bool
+	Spawning          Spawning
 }
 
 // Schema returns the canonical declaration for one tool.

@@ -1,4 +1,4 @@
-module aharness
+module github.com/eddiectc/aharness
 
 go 1.27.3
 

@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 type fakeHost struct {

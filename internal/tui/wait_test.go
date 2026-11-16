@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 type blockingHost struct {

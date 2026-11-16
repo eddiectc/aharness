@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 // thinkingEffortCatalogModels returns the shared fixture with per-model

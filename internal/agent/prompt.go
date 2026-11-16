@@ -122,16 +122,36 @@ func childSystemPrompt(def AgentDefinition, workspace, version string) string {
 // that carries an explicit SystemPrompt (a child session) uses it verbatim;
 // otherwise the prompt is rendered from the configured version and catalog.
 func systemPromptText(cfg Config) string {
-	if cfg.SystemPrompt != "" {
-		return capText(cfg.SystemPrompt, maxSystemPromptBytes)
+	text := cfg.SystemPrompt
+	if text == "" {
+		rendered, err := renderPrompt(promptVersion(cfg), cfg.Workspace, cfg.Agents)
+		if err != nil {
+			// A Config carries a validated version; a render failure here would be
+			// a programming error. Fall back to the frozen v0 prompt so a run still
+			// records a usable system message.
+			rendered = fmt.Sprintf(promptV0Format, cfg.Workspace)
+		}
+		text = rendered
 	}
-	text, err := renderPrompt(promptVersion(cfg), cfg.Workspace, cfg.Agents)
+	if cfg.AppendSystemPrompt != "" {
+		text += "\n\n" + cfg.AppendSystemPrompt
+	}
+	return capText(text, maxSystemPromptBytes)
+}
+
+// RenderSystemPrompt renders the harness prompt for a version and workspace and
+// applies the recorded prompt cap. A fork uses it to materialize a new
+// contract before the new log is created.
+func RenderSystemPrompt(version, workspace string, agents []AgentInfo) (string, error) {
+	text, err := renderPrompt(version, workspace, agents)
 	if err != nil {
-		// A Config carries a validated version; a render failure here would be
-		// a programming error. Fall back to the frozen v0 prompt so a run still
-		// records a usable system message.
-		text = fmt.Sprintf(promptV0Format, cfg.Workspace)
+		return "", err
 	}
+	return capText(text, maxSystemPromptBytes), nil
+}
+
+// CapSystemPrompt applies the same cap the session log uses.
+func CapSystemPrompt(text string) string {
 	return capText(text, maxSystemPromptBytes)
 }
 

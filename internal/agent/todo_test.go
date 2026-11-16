@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func todoResultEvent(t *testing.T, name string, ok bool, items []tools.TodoItem) session.Event {

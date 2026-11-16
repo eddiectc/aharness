@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func TestSummarizeSessionHead(t *testing.T) {

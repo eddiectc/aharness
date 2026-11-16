@@ -1,10 +1,10 @@
 # aharness limits and timeouts
 
-- **Date:** 2026-11-15
+- **Date:** 2026-11-16
 - **Status:** current for v1, the shipped TUI (including transcript folding, the
-  todo widget, delegated subagents, and the focused child view), model
-  discovery, thinking effort, web search, and the flag/env/config-file
-  configuration layers.
+  todo widget, delegated subagents, and the focused child view), the public Go
+  library facade and custom tools, model discovery, thinking effort, web
+  search, and the flag/env/config-file configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
   [v1 build plan](plans/v1-build.md),
   [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
@@ -209,6 +209,17 @@ Other event payloads:
 | Child view | Tool body | 12 lines / 2 KiB | A focused transcript is a view; the full result stays in the child session log. |
 | Child view | Queued steering markers | 8 | Display only; the child's steering channel still holds up to 64 lines. |
 | Tool calls | Automatic retry | never | Side effects are not idempotent; the model decides. |
+| Custom tools | Count per session | 32 | Public `ToolsConfig.Extra`; construction rejects a larger set. |
+| Custom tools | Recorded schema total | 64 KiB | Sum of name, description, and parameters across the set; larger is a construction error. |
+| Custom tool | Name | 64 bytes, `[a-z0-9_-]+` | Lowercase ASCII; unique; cannot collide with any built-in (enabled or disabled) or `delegate`. |
+| Custom tool | Description | 2 KiB | Required; recorded in `session_start.custom_tools`. |
+| Custom tool | Parameters | 32 KiB | Required JSON Schema object; use `{}` for no arguments. |
+| Custom tool | Result details | 64 KiB | Larger details are replaced by a bounded truncation marker before recording. |
+| Custom tool | `ConcurrencySafe` | false default | Trusted host declaration recorded as `concurrency_safe`; permits concurrent delegated children only, never in-run parallel calls. A resume must reproduce it exactly. |
+| Tool policy | `Authorize` serialization | one at a time per session | The engine's shared policy mutex covers the parent and delegated children; the hook is never entered concurrently within one session. |
+| Public run | Steering queue | 16 lines | `Run.Steer` never blocks; a full queue returns `ErrSteeringFull`. Consumed at the next turn boundary. |
+| Public run | Child steering queue | 64 lines | `Run.SteerChild` routes to one live child; full returns `ErrSteeringFull`, finished/unknown returns `ErrNoSuchChild`. |
+| Public delegation | `MaxSubagents` | `0` selects 8; `-1` unlimited | Other negative values are a construction error; the internal spawner uses 8/0. |
 
 ## 5. CLI, input, and configuration
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -22,8 +23,30 @@ type OpenAIChat struct {
 // DefaultBaseURL. An empty token omits the Authorization header. A
 // non-positive timeout selects DefaultHTTPTimeout.
 func NewOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIChat {
+	return newOpenAIChat(baseURL, token, sessionID, version, timeout, nil)
+}
+
+// NewOpenAIChatWithClient constructs a Chat Completions adapter that uses the
+// caller's HTTP client. A nil client selects the default bounded client.
+func NewOpenAIChatWithClient(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIChat {
+	return newOpenAIChat(baseURL, token, sessionID, version, timeout, client)
+}
+
+func newOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIChat {
 	return &OpenAIChat{
-		transport:    newHTTPTransport(baseURL, "/chat/completions", token, sessionID, version, timeout),
+		transport:    newHTTPTransportWithClient(baseURL, "/chat/completions", token, sessionID, version, timeout, client),
+		continuation: newContinuationCache(func(s string) int { return len(s) }),
+	}
+}
+
+// WithSessionID returns a copy of the adapter that sends the given session ID
+// in its provider header. The continuation cache is not shared, so a caller
+// must build one adapter per session.
+func (a *OpenAIChat) WithSessionID(sessionID string) *OpenAIChat {
+	transport := *a.transport
+	transport.sessionID = sessionID
+	return &OpenAIChat{
+		transport:    &transport,
 		continuation: newContinuationCache(func(s string) int { return len(s) }),
 	}
 }

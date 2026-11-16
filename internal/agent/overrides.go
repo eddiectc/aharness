@@ -6,7 +6,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 // Agent override caps. They bound the two free-form routing values so a config

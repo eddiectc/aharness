@@ -3,7 +3,7 @@ package tools
 import (
 	"fmt"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 // v0Schemas is the frozen toolset-v0 declaration set. It is versioned prompt

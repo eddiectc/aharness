@@ -8,9 +8,9 @@ import (
 	"io"
 	"strings"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // retainedTurns is the number of most recent model-response turns whose
@@ -26,8 +26,24 @@ const (
 
 // Project rebuilds the canonical model input from the event log. It is a pure
 // function of events and limits: the system prompt and tool schemas are
-// selected from the versions recorded in session_start.
+// selected from the versions recorded in session_start. A session that records
+// custom tools cannot be projected here; use ProjectWithTools so the caller
+// either supplies matching implementations or fails closed.
 func Project(events []session.Event, limits Limits) (Projection, error) {
+	return project(events, limits, nil)
+}
+
+// ProjectWithTools rebuilds the canonical model input and appends the caller
+// tool declarations recorded in session_start. Every recorded custom tool must
+// be supplied with an identical name, description, canonical parameters, and
+// concurrency declaration; a partial or changed set is an ErrToolMismatch.
+// Custom schemas are appended before the recorded grant filter so replay sends
+// exactly the set the model saw.
+func ProjectWithTools(events []session.Event, limits Limits, available []CustomTool) (Projection, error) {
+	return project(events, limits, available)
+}
+
+func project(events []session.Event, limits Limits, available []CustomTool) (Projection, error) {
 	start, err := projectSessionStart(events)
 	if err != nil {
 		return Projection{}, err
@@ -39,6 +55,25 @@ func Project(events []session.Event, limits Limits) (Projection, error) {
 	schemas, err := tools.SchemasFor(start.ToolsetVersion)
 	if err != nil {
 		return Projection{}, fmt.Errorf("project: %w", err)
+	}
+	recorded := customToolsFromData(start.CustomTools)
+	if len(recorded) > 0 {
+		if err := ValidateCustomTools(recorded); err != nil {
+			return Projection{}, fmt.Errorf("%w: recorded custom tools: %w", ErrToolMismatch, err)
+		}
+		if available == nil {
+			return Projection{}, fmt.Errorf("%w: session records %d custom tool(s) but none were supplied", ErrToolMismatch, len(recorded))
+		}
+		if err := VerifyCustomTools(recorded, available); err != nil {
+			return Projection{}, err
+		}
+	}
+	for _, tool := range recorded {
+		schemas = append(schemas, model.ToolSchema{
+			Name:        tool.Schema.Name,
+			Description: tool.Schema.Description,
+			Parameters:  append(json.RawMessage(nil), tool.Schema.Parameters...),
+		})
 	}
 	if start.Tools != nil {
 		schemas, err = tools.Filter(schemas, start.Tools)
@@ -271,7 +306,73 @@ func (n *assistantNode) unpairedCall(id string) *assistantCall {
 	return nil
 }
 
-// projectPrompt returns the system prompt recorded in session_start, or
+// VerifyCustomTools compares the recorded custom-tool contract with the set a
+// caller supplied. Names, descriptions, canonical parameters, concurrency
+// declarations, and declaration order must agree.
+func VerifyCustomTools(recorded, supplied []CustomTool) error {
+	if len(recorded) != len(supplied) {
+		return fmt.Errorf("%w: session records %d custom tool(s), caller supplied %d", ErrToolMismatch, len(recorded), len(supplied))
+	}
+	for i := range recorded {
+		want, got := recorded[i], supplied[i]
+		if want.Schema.Name != got.Schema.Name {
+			return fmt.Errorf("%w: custom tool %d is %q, caller supplied %q", ErrToolMismatch, i+1, want.Schema.Name, got.Schema.Name)
+		}
+		if want.Schema.Description != got.Schema.Description {
+			return fmt.Errorf("%w: custom tool %q description changed", ErrToolMismatch, want.Schema.Name)
+		}
+		wantParams, err := canonicalJSON(want.Schema.Parameters)
+		if err != nil {
+			return fmt.Errorf("%w: recorded custom tool %q parameters: %w", ErrToolMismatch, want.Schema.Name, err)
+		}
+		gotParams, err := canonicalJSON(got.Schema.Parameters)
+		if err != nil {
+			return fmt.Errorf("%w: custom tool %q parameters: %w", ErrToolMismatch, want.Schema.Name, err)
+		}
+		if wantParams != gotParams {
+			return fmt.Errorf("%w: custom tool %q parameters changed", ErrToolMismatch, want.Schema.Name)
+		}
+		if want.ConcurrencySafe != got.ConcurrencySafe {
+			return fmt.Errorf("%w: custom tool %q concurrency declaration changed", ErrToolMismatch, want.Schema.Name)
+		}
+	}
+	return nil
+}
+
+// ValidateCustomTools enforces the construction-time custom-tool contract:
+// names are unique and distinct from every built-in of the current toolset,
+// each schema is within its per-tool cap, and the total recorded schema stays
+// within the aggregate cap.
+func ValidateCustomTools(custom []CustomTool) error {
+	if len(custom) > tools.MaxCustomTools {
+		return fmt.Errorf("%d custom tools, limit %d", len(custom), tools.MaxCustomTools)
+	}
+	builtins := make(map[string]struct{})
+	for _, schema := range tools.Schemas() {
+		builtins[schema.Name] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(custom))
+	total := 0
+	for _, tool := range custom {
+		if err := tools.ValidateCustomTool(tool.Schema); err != nil {
+			return err
+		}
+		name := tool.Schema.Name
+		if _, ok := builtins[name]; ok {
+			return fmt.Errorf("custom tool %q collides with a built-in tool", name)
+		}
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("custom tool %q is registered more than once", name)
+		}
+		seen[name] = struct{}{}
+		total += len(name) + len(tool.Schema.Description) + len(tool.Schema.Parameters)
+		if total > tools.MaxCustomToolBytes {
+			return fmt.Errorf("custom tool schemas total %d bytes, limit %d", total, tools.MaxCustomToolBytes)
+		}
+	}
+	return nil
+}
+
 // renders the recorded version when the log predates the recorded prompt. The
 // recorded text wins verbatim, so editing an agent file never rewrites an
 // existing session's prompt.

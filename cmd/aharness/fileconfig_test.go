@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 // writeConfigFile writes one JSON config file into a fresh state directory and

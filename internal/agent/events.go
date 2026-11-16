@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"aharness/internal/model"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // Event payloads produced by the runner. internal/session owns the envelope;
@@ -34,10 +34,67 @@ type sessionStartData struct {
 	// The resolved system prompt is authoritative for projection when
 	// present; a session recorded before it existed renders from
 	// PromptVersion instead.
-	SystemPrompt string   `json:"system_prompt,omitempty"`
-	Agent        string   `json:"agent,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
-	ParentCallID string   `json:"parent_call_id,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
+	Agent        string `json:"agent,omitempty"`
+	// Tools is the recorded grant. A nil grant is omitted and decodes as nil
+	// ("every tool of the recorded toolset"); an explicit empty grant is
+	// written as [] and decodes as non-nil empty ("no tools"). The field
+	// intentionally has no omitempty so the empty slice survives a round trip.
+	Tools            []string          `json:"tools,omitzero"`
+	CustomTools      []customToolData  `json:"custom_tools,omitempty"`
+	ContractOverride *ContractOverride `json:"contract_override,omitempty"`
+	ParentCallID     string            `json:"parent_call_id,omitempty"`
+}
+
+// customToolData is the recorded declaration of one caller tool.
+type customToolData struct {
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Parameters      json.RawMessage `json:"parameters"`
+	ConcurrencySafe bool            `json:"concurrency_safe"`
+}
+
+// cloneGrant preserves the nil/non-nil-grant distinction through every
+// recording and reconstruction path.
+func cloneGrant(names []string) []string {
+	if names == nil {
+		return nil
+	}
+	return append([]string{}, names...)
+}
+
+func recordedCustomTools(tools []CustomTool) []customToolData {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]customToolData, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, customToolData{
+			Name:            tool.Schema.Name,
+			Description:     tool.Schema.Description,
+			Parameters:      append(json.RawMessage(nil), tool.Schema.Parameters...),
+			ConcurrencySafe: tool.ConcurrencySafe,
+		})
+	}
+	return out
+}
+
+func customToolsFromData(data []customToolData) []CustomTool {
+	if len(data) == 0 {
+		return nil
+	}
+	out := make([]CustomTool, 0, len(data))
+	for _, tool := range data {
+		out = append(out, CustomTool{
+			Schema: model.ToolSchema{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  append(json.RawMessage(nil), tool.Parameters...),
+			},
+			ConcurrencySafe: tool.ConcurrencySafe,
+		})
+	}
+	return out
 }
 
 type runStartData struct {

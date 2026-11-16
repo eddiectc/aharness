@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func chatWebFetchToolCallResponse(rawURL string) map[string]any {

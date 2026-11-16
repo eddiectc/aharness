@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // Runner owns one bounded model/tool loop over a durable session.
@@ -71,7 +71,9 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		ThinkingEffort:   cfg.ThinkingEffort,
 		SystemPrompt:     systemPromptText(cfg),
 		Agent:            cfg.Agent,
-		Tools:            append([]string(nil), cfg.Tools...),
+		Tools:            cloneGrant(cfg.Tools),
+		CustomTools:      recordedCustomTools(cfg.CustomTools),
+		ContractOverride: cfg.ContractOverride,
 	}
 	if parent != nil {
 		data.ParentSession = parent.Session
@@ -252,7 +254,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		}
 
 		limits := r.currentLimits(st)
-		proj, err := Project(r.store.Events(), limits)
+		proj, err := ProjectWithTools(r.store.Events(), limits, r.cfg.CustomTools)
 		if err != nil {
 			if errors.Is(err, ErrProjectionTooLarge) {
 				if proj.ElidedResults != st.lastElided {
@@ -539,7 +541,7 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 	target := max(r.cfg.Limits.MaxInputTokens*9/10, 1)
 	limits := r.currentLimits(st)
 	limits.CompactionTarget = target
-	next, err := Project(r.store.Events(), limits)
+	next, err := ProjectWithTools(r.store.Events(), limits, r.cfg.CustomTools)
 	if err != nil && !errors.Is(err, ErrProjectionTooLarge) {
 		res.Err = err
 		done, ferr := r.finishTerminal(res, st, StopInternalError, "context projection failed")
@@ -624,7 +626,10 @@ func (r *Runner) overflowRetry(ctx context.Context, res *Result, st *runState, f
 func (r *Runner) failModel(res *Result, st *runState, err error) (bool, error) {
 	status := StopProviderError
 	class, _ := retryErrorClass(err)
-	if _, ok := errors.AsType[*model.ProtocolError](err); ok {
+	if errors.Is(err, ErrModelPanic) {
+		status = StopInternalError
+		class = errorClassInternal
+	} else if _, ok := errors.AsType[*model.ProtocolError](err); ok {
 		status = StopProtocolError
 		class = errorClassProtocol
 	}
@@ -805,10 +810,11 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 
 		started := time.Now()
+		meta := tools.Call{ID: call.ID, Turn: turn, ParentUsage: st.cumulativeUsage()}
 		opCtx, finish := r.beginOperation(ctx)
-		result, panicked := safeExecute(opCtx, r.tools, call, tools.Call{ID: call.ID, Turn: turn, ParentUsage: st.cumulativeUsage()})
+		result, panicked, policyCanceled := r.executeGuarded(opCtx, call, meta)
 		duration := time.Since(started)
-		interrupted := ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled)
+		interrupted := policyCanceled || (ctx.Err() == nil && errors.Is(opCtx.Err(), context.Canceled))
 		finish()
 
 		if panicked || result.Code == tools.CodePanic {
@@ -840,6 +846,18 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			}
 		} else {
 			interrupted = false
+		}
+		if !interrupted && result.Code == tools.CodeCanceled && ctx.Err() == nil {
+			// A custom tool returned a context cancellation without the
+			// operation context being canceled. Treat it as an interrupt of
+			// that tool: record the canceled result and continue the run.
+			interrupted = true
+			result = tools.Result{
+				OK:         false,
+				Code:       tools.CodeCanceled,
+				Error:      toolInterruptMessage,
+				DurationMS: duration.Milliseconds(),
+			}
 		}
 		normalizeResultCode(&result)
 		payload := toolResultEvent(call, result, duration)
@@ -895,6 +913,13 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 			st.failCount = 0
 			continue
 		}
+		if result.Code == tools.CodePermissionDenied {
+			// A policy denial is a deliberate host outcome, not a tool
+			// malfunction. It must never accumulate into StopStuck.
+			st.failKey = ""
+			st.failCount = 0
+			continue
+		}
 
 		canonical, canonicalErr := canonicalJSONWithout(call.Arguments, tools.IntentArgument)
 		key := failureKey(call.Name, canonical, canonicalErr, string(result.Code), call.Arguments)
@@ -921,6 +946,43 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 	}
 	return false, nil
+}
+
+// executeGuarded applies the host tool policy and then runs the call. A policy
+// error is a model-visible permission_denied result; a context cancellation
+// returned by the policy interrupts the operation instead. A panic in host
+// policy code is recovered and treated as a denial.
+func (r *Runner) executeGuarded(ctx context.Context, call model.ToolCall, meta tools.Call) (tools.Result, bool, bool) {
+	if err := r.authorize(ctx, call, meta); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return tools.Result{}, false, true
+		}
+		return tools.Failure(tools.CodePermissionDenied, capText(cleanText(err.Error()), maxErrorEventBytes)), false, false
+	}
+	result, panicked := safeExecute(ctx, r.tools, call, meta)
+	return result, panicked, false
+}
+
+// authorize invokes the configured policy hook. The hook is serialized by the
+// engine/spawner when delegated children share it; the runner never calls it
+// concurrently itself because tool calls in one run are sequential.
+func (r *Runner) authorize(ctx context.Context, call model.ToolCall, meta tools.Call) (err error) {
+	if r.cfg.ToolPolicy == nil {
+		return nil
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("authorize panicked: %v", v)
+		}
+	}()
+	return r.cfg.ToolPolicy(ctx, ToolPolicyRequest{
+		Call:    meta,
+		Name:    call.Name,
+		Args:    call.Arguments,
+		Turn:    meta.Turn,
+		Session: r.cfg.SessionID,
+		Agent:   r.cfg.Agent,
+	})
 }
 
 func (r *Runner) logToolResult(call model.ToolCall, result tools.Result, payload toolResultData) {

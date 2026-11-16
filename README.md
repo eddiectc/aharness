@@ -21,13 +21,19 @@ opt-in and unlimited by default.
   runs remain pending
   provider credentials (`AHARNESS_PROVIDER_TOKEN` is unset in the implementation
   environment); they are explicit release prerequisites.
-- **Toolchain:** Go 1.27.3, module `aharness`.
+- **Toolchain:** Go 1.27.3, module `github.com/eddiectc/aharness`.
 - **Dependencies:** the Go standard library by default. The approved TUI
   exception is Bubble Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2,
   and `x/vt`; the justification and measured binary impact are recorded in the
   [coding standard](docs/coding-standard.md#3-dependencies).
 
 ## What aharness includes
+
+- A public Go library facade (`github.com/eddiectc/aharness`) over the same loop,
+  durable sessions, tools, model adapters, events, results, policy hook, and
+  delegation. It is headless, has no environment/config-file layer, and adds no
+  provider matrix or general ADK scope; see [Use as a Go
+  library](#use-as-a-go-library).
 
 - One provider (`opencode-go`, selected by `-provider` or
   `AHARNESS_PROVIDER`) behind a canonical model, with OpenAI Chat Completions
@@ -279,6 +285,85 @@ URL, context/output limits, and thinking effort without a catalog fetch;
 recorded run budgets are historical and are not inherited. An explicit model
 change re-resolves through the catalog, and an explicit non-default thinking
 effort is validated against the effective model (exit 2 if unsupported).
+
+## Use as a Go library
+
+The root package `github.com/eddiectc/aharness` is the embeddable form of the same
+loop: durable sessions, built-in and caller tools, model adapters, delegation,
+events, and typed results. It is headless, adds no environment or config-file
+layer, and imports no TUI or CLI code. The design and boundary are recorded in
+the [Go library build plan](docs/plans/go-library-build.md); the shipped
+contracts are in [architecture](docs/architecture.md).
+
+```go
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/eddiectc/aharness"
+)
+
+type myModel struct{}
+
+func (myModel) Complete(ctx context.Context, req aharness.Request) (aharness.Response, error) {
+    return aharness.Response{
+        Text:         "done",
+        FinishReason: aharness.FinishStop,
+        Usage:        aharness.Usage{InputTokens: 10, OutputTokens: 2, Reported: true},
+    }, nil
+}
+
+func run() error {
+    stateDir := os.Getenv("AHARNESS_STATE_DIR")
+    ag, err := aharness.New(context.Background(), aharness.Config{
+        Workspace: "/repo",
+        StateDir:  stateDir,
+        Model: aharness.CustomModel(aharness.ModelSpec{
+            ID:            "my-model",
+            Provider:      "my-provider",
+            Dialect:       aharness.DialectCustom,
+            ContextWindow: 128_000,
+        }, myModel{}),
+    })
+    if err != nil {
+        return err
+    }
+    defer ag.Close()
+
+    result, err := ag.Run(context.Background(), "Fix the failing test", aharness.RunOptions{})
+    if err != nil {
+        return err // result.Status is still authoritative
+    }
+    fmt.Println(result.FinalText)
+    return nil
+}
+```
+
+`Agent.Start` returns a `*Run` whose `Events()` iterator streams text deltas,
+tool blocks, notices, delegated-child progress, and the terminal
+`RunFinished`; `Interrupt`, `Cancel`, `Steer`, and `SteerChild` control it.
+`Resume` inherits the recorded prompt and tool contract, and `Fork` is the only
+supported way to change either. `OpenAIModel`, `DiscoverModel`, and
+`ListModels` cover OpenAI-compatible endpoints and models.dev discovery;
+`CustomModel` takes any implementation of the public `Model` interface.
+
+Caller tools are registered with `ToolsConfig.Extra` and are recorded in
+`session_start.custom_tools`; a resume must supply the same schemas and
+`ConcurrencySafe` declarations. `Config.Authorize` is called before every tool
+execution and can deny a call with `&aharness.Deny{}`. It is policy, not a
+sandbox: caller tools run with the host's privileges, `run_command` is not
+confined, and the host still owns OS isolation. Tool calls within one run are
+always sequential; independent work belongs in one batch tool or in delegated
+children.
+
+The library is a coding-agent SDK, not a general agent development kit. It adds
+no provider matrix, graph/workflow orchestration, memory/RAG, pluggable session
+store, background or nested delegation, structured-output DTOs, prompt
+templating, or public TUI package. A change that alters a recorded contract —
+session schema, prompt, tool grant, projection, or concurrency model — is a
+different product, not an extension. See the
+[boundary section](docs/plans/go-library-build.md#15-boundary-coding-sdk-not-an-adk).
 
 ## Isolation
 

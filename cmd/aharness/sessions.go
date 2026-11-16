@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 const (

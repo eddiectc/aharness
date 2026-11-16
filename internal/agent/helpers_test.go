@@ -9,9 +9,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 type runOutcome struct {

@@ -76,6 +76,7 @@ type searchClient struct {
 	baseURL   string
 	userAgent string
 	http      *http.Client
+	timeout   time.Duration
 }
 
 type webSearchDetails struct {
@@ -134,10 +135,15 @@ func newSearchClient(opts Options) *searchClient {
 	if userAgent == "" {
 		userAgent = "aharness/devel"
 	}
+	timeout := opts.SearchTimeout
+	if timeout <= 0 {
+		timeout = SearchTimeout
+	}
 	return &searchClient{
 		baseURL:   opts.SearXNGURL,
 		userAgent: userAgent,
 		http:      &http.Client{},
+		timeout:   timeout,
 	}
 }
 
@@ -212,7 +218,7 @@ func (c *searchClient) search(ctx context.Context, req webSearchRequest) Result 
 	if err != nil {
 		return Failure(CodeInternal, sanitizeUTF8(fmt.Sprintf("build SearXNG request: %v", err)))
 	}
-	sctx, cancel := context.WithTimeout(ctx, SearchTimeout)
+	sctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	httpReq, err := http.NewRequestWithContext(sctx, http.MethodGet, endpoint, nil)
@@ -224,7 +230,7 @@ func (c *searchClient) search(ctx context.Context, req webSearchRequest) Result 
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return searchRequestResult(ctx, sctx, endpoint, "request", err)
+		return searchRequestResult(ctx, sctx, endpoint, "request", err, c.timeout)
 	}
 	// The body is either read below or discarded for a non-2xx status; a close
 	// error cannot change the result.
@@ -240,7 +246,7 @@ func (c *searchClient) search(ctx context.Context, req webSearchRequest) Result 
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSearchResponseBytes+1))
 	if err != nil {
-		return searchRequestResult(ctx, sctx, endpoint, "read response", err)
+		return searchRequestResult(ctx, sctx, endpoint, "read response", err, c.timeout)
 	}
 	if len(data) > maxSearchResponseBytes {
 		return Failure(CodeTooLarge, fmt.Sprintf("SearXNG response exceeds %d bytes", maxSearchResponseBytes))
@@ -271,12 +277,12 @@ func (c *searchClient) search(ctx context.Context, req webSearchRequest) Result 
 	}
 }
 
-func searchRequestResult(parent, timeoutCtx context.Context, endpoint, operation string, err error) Result {
+func searchRequestResult(parent, timeoutCtx context.Context, endpoint, operation string, err error, timeout time.Duration) Result {
 	if cerr := parent.Err(); cerr != nil {
 		return errorResult(cerr)
 	}
 	if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
-		return Failure(CodeTimeout, sanitizeUTF8(fmt.Sprintf("SearXNG %s to %s timed out after %s", operation, endpoint, SearchTimeout)))
+		return Failure(CodeTimeout, sanitizeUTF8(fmt.Sprintf("SearXNG %s to %s timed out after %s", operation, endpoint, timeout)))
 	}
 	return Failure(CodeFetchFailed, sanitizeUTF8(fmt.Sprintf("SearXNG %s to %s: %v", operation, endpoint, err)))
 }

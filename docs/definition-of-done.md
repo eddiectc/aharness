@@ -39,6 +39,18 @@ reference disagree, the reference wins and the plan records the deviation.
       outcomes.
 - [ ] **Errors and pairing.** Errors wrap with `%w` and are classified with
       `errors.Is`/`errors.As`; every tool call has exactly one result.
+- [ ] **Coding-SDK boundary.** A public-library change passes the recorded-
+      contract test in the
+      [Go library plan §1.5](plans/go-library-build.md#15-boundary-coding-sdk-not-an-adk):
+      if it alters the session schema, prompt, tool grant, projection, or
+      concurrency model, it is a different product rather than an extension.
+      No new provider matrix, graph/workflow orchestration, memory/RAG,
+      pluggable session store, background or nested delegation,
+      structured-output DTOs, prompt templating, or public TUI package.
+- [ ] **Public API compatibility.** Adding a field or event is backward
+      compatible; adding a method to `Model` or `Tool` is not. Renaming or
+      removing an exported identifier requires a major module version, and the
+      session schema version stays independent of the module version.
 
 ## 2. Verification
 

@@ -8,8 +8,8 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 // Retry policy constants. The transport attempt budget is the initial call

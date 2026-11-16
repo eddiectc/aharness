@@ -10,9 +10,9 @@ import (
 	"log/slog"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // Limits is the per-call context budget contract.
@@ -45,13 +45,34 @@ type Config struct {
 	// is authoritative for projection; an empty value renders the configured
 	// PromptVersion instead. A child session sets it to the agent's prompt.
 	SystemPrompt string
+	// AppendSystemPrompt is appended to the rendered or explicit system prompt
+	// when session_start is written. It is a new/fork input only; resume
+	// inherits the recorded prompt and rejects it.
+	AppendSystemPrompt string
 	// Agent is the definition name for a child run; empty for a parent.
 	Agent string
+	// SessionID is the durable session identifier for this run. It is
+	// runtime-only and never recorded here; the store owns the recorded ID.
+	SessionID string
 	// Tools is the recorded tool-name grant. Nil means every tool of the
-	// recorded ToolsetVersion; a non-nil list narrows it.
+	// recorded ToolsetVersion; a non-nil list narrows it, and a non-nil empty
+	// list means no tools.
 	Tools []string
+	// CustomTools are the caller-registered tools available to this run. They
+	// are recorded in session_start on a new session and must match the
+	// recorded set on resume.
+	CustomTools []CustomTool
+	// ContractOverride records, on a forked session_start, which parts of the
+	// inherited contract the fork replaced. It is nil for every other session.
+	ContractOverride *ContractOverride
 	// Agents is the catalog rendered into the current parent prompt.
 	Agents []AgentInfo
+
+	// ToolPolicy runs before every tool execution, including delegated
+	// children. A returned error denies the call with a permission_denied
+	// result unless it is a context cancellation, which interrupts the
+	// operation.
+	ToolPolicy func(ctx context.Context, req ToolPolicyRequest) error
 
 	// MaxTurns is the cumulative model-turn budget; 0 means unlimited.
 	MaxTurns int
@@ -103,6 +124,42 @@ type Config struct {
 type Controller interface {
 	BeginOperation(ctx context.Context) (context.Context, func())
 }
+
+// CustomTool is the single internal carrier for a caller tool: its declaration
+// and its recorded concurrency-safe claim. Registration, projection, recording,
+// and the spawner all read this one value so they cannot disagree.
+type CustomTool struct {
+	Schema          model.ToolSchema
+	ConcurrencySafe bool
+}
+
+// ToolPolicyRequest is the policy input for one tool execution. It is
+// available for built-in and custom tools, parent and child.
+type ToolPolicyRequest struct {
+	Call    tools.Call
+	Name    string
+	Args    json.RawMessage
+	Turn    int
+	Session string
+	Agent   string
+}
+
+// ContractOverride records that a fork replaced part of the inherited
+// contract. It describes the new session relative to its parent; the parent
+// log is unchanged.
+type ContractOverride struct {
+	ParentSession string `json:"parent_session"`
+	Prompt        bool   `json:"prompt,omitempty"`
+	Tools         bool   `json:"tools,omitempty"`
+}
+
+// ErrToolMismatch marks a resume or fork whose caller tool set does not match
+// the contract recorded in the session.
+var ErrToolMismatch = errors.New("tool set does not match the session")
+
+// ErrModelPanic marks a recovered panic in a caller model implementation. The
+// facade reports it as an internal failure, not a provider failure.
+var ErrModelPanic = errors.New("model panicked")
 
 // ParentRef identifies the parent session and fork point recorded in a new
 // forked or delegated session_start. CallID is set only for a delegated child:

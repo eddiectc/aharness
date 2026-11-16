@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // Agent definition caps. They keep one definition file, one prompt, and the
@@ -393,6 +393,18 @@ func replaceOrAppendAgent(agents []AgentDefinition, def AgentDefinition) []Agent
 		}
 	}
 	return append(agents, def)
+}
+
+// DefaultAgents returns copies of the bundled definition set. The public
+// library passes these to the spawner; file discovery stays in the CLI.
+func DefaultAgents() []AgentDefinition {
+	source := bundledAgents()
+	out := make([]AgentDefinition, len(source))
+	for i, def := range source {
+		def.Tools = append([]string{}, def.Tools...)
+		out[i] = def
+	}
+	return out
 }
 
 // bundledAgents returns a fresh copy of the compiled-in default set.

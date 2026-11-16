@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 const validDefinition = `name: reviewer

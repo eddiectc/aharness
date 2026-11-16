@@ -6,9 +6,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func thinkingStartEvent(t *testing.T, effort string) session.Event {

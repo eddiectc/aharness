@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/tools"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 // maxConfigModelBytes bounds one model ID entered from the settings browser.

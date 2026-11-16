@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/model"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 func TestParseModeSelection(t *testing.T) {

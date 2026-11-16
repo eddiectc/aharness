@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 func TestBinaryUIJSONScriptedSession(t *testing.T) {

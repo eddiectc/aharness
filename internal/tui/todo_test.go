@@ -10,8 +10,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"aharness/internal/agent"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func todoDetailsJSON(t *testing.T, items []tools.TodoItem) json.RawMessage {

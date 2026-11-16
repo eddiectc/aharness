@@ -53,7 +53,7 @@ rewriting its conclusions.
 | Document | Status |
 |---|---|
 | [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
-| [plans/go-library-build.md](plans/go-library-build.md) | Proposed; embeddable Go library design and milestones |
+| [plans/go-library-build.md](plans/go-library-build.md) | Implemented M0–M6 and M8 docs; TUI adoption (M7) deferred; real-provider library smoke pending |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |

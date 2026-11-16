@@ -1,8 +1,8 @@
 # aharness architecture
 
-- **Date:** 2026-11-15
-- **Status:** normative for v1 and the shipped TUI structure and runtime
-  contracts
+- **Date:** 2026-11-16
+- **Status:** normative for v1, the shipped TUI, and the public Go library
+  structure and runtime contracts
 - **Related:** [Go coding standard](coding-standard.md),
   [bare-minimum harness research](research/agent-harness-minimum.md),
   [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md),
@@ -402,8 +402,10 @@ above applies to its SDK types, not to `reasoning_content`.
 
 | Path | Responsibility |
 |---|---|
-| `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. |
-| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction, agent definitions and prompt templates, the subagent spawner. |
+| `aharness` (module root) | Public headless facade: `Config`, `Agent`, `New`/`Resume`/`Fork`, runs, events, results, state, model and tool DTOs, OpenAI/catalog helpers, delegation, and errors. Imports internal packages only; never `internal/tui` or `cmd`. |
+| `cmd/aharness/` | Flags, environment parsing, mode/config validation, session selection, TUI host, wiring, signal handling, exit codes. Batch run construction uses `internal/engine`. |
+| `internal/engine/` | Non-CLI composition layer: new/resume/fork resolution, workspace/state/work-dir setup, session_start recording, fork contract overrides, per-run registry/spawner/runner wiring, and lock-free session inspection/listing. |
+| `internal/agent/` | Runner, run lifecycle, turn execution, stop policy, retry policy, display events, history reconstruction, operation interrupts, state reconstruction, repeated-failure detection, projection/compaction, agent definitions and prompt templates, the subagent spawner, tool policy, and custom-tool projection. |
 | `internal/tui/` | Bubble Tea app/model/view, overlays and widgets, composer slash commands and autocomplete, markdown, workspace images, terminal sanitizer, headless `x/vt` driver and `-ui-json` protocol. |
 | `internal/model/` | Canonical types; Chat Completions and Responses adapters; buffered and SSE transport; shared HTTP plumbing; typed transport errors; models.dev catalog discovery, cache, and SDK-to-dialect mapping. |
 | `internal/tools/` | Registry, argument validation, result shape, workspace containment policy, the seven workspace/web tools, and the `delegate` spawn interface. |
@@ -411,9 +413,20 @@ above applies to its SDK types, not to `reasoning_content`.
 
 ```text
 go.mod
+aharness.go     # public Config, Agent, New/Resume/Fork, lifecycle
+run.go          # Run, RunOptions, event iterator, interrupt/cancel/steer
+events.go       # public Event interface and concrete events
+result.go       # Result, StopReason, Usage, Limits, State, SessionInfo
+model.go        # public model DTOs, Model/StreamingModel, OpenAI and catalog helpers
+tool.go         # Tool, ToolResult, ToolName, ToolsConfig, policy
+delegate.go     # AgentDefinition, DelegationConfig, DefaultAgents
+errors.go       # sentinels and typed errors
+doc.go          # package documentation and boundary
+version.go      # Version()
+example_test.go # external-package runnable example
 cmd/aharness/
   main.go        # os.Exit(run())
-  run.go         # mode selection, batch wiring, exit codes, work directories
+  run.go         # mode selection, batch engine wiring, exit codes
   models.go      # catalog wiring, model resolution, list/refresh terminal actions
   config.go      # parsing, validation, inheritance, discovery resolution
   fileconfig.go  # optional JSON config file: schema, load, layered resolution
@@ -421,6 +434,11 @@ cmd/aharness/
   tui.go         # TUI host, session shell, -ui-json wiring, summary
   textsink.go    # streamed stdout newline handling
   version.go
+internal/engine/
+  engine.go      # Spec, Open/new/resume/fork, inheritance, contract overrides
+  runner.go      # per-run registry, spawner, and runner construction
+  sessions.go    # lock-free Inspect/List snapshots
+  workdir.go    # per-session work directory lifecycle
 internal/agent/
   runner.go      # run lifecycle, loop, stop policy, repair, interrupts
   display.go     # display-only event contract
@@ -483,12 +501,15 @@ internal/session/
   errors.go
 ```
 
-This five-package split is normative for v1. `config` lives in `cmd`,
-projection and durable-state interpretation live in `agent`, and workspace
-policy lives in `tools`. `session` remains a leaf; event payloads are
-`json.RawMessage`, decoded by their producers. `cmd` is wiring and I/O only;
-`agent` is the only orchestrator, and `model`, `tools`, and `session` MUST NOT
-import `agent` or `cmd`. Add a package only when a second consumer or a clear
+The root public package plus the five internal packages is the normative
+layout. `config` lives in `cmd`, projection and durable-state interpretation
+live in `agent`, and workspace policy lives in `tools`. `session` remains a
+leaf; event payloads are `json.RawMessage`, decoded by their producers. `cmd`
+is wiring and I/O only; `agent` is the only orchestrator, and `model`, `tools`,
+and `session` MUST NOT import `agent`, `engine`, the root package, or `cmd`.
+`internal/engine` composes `agent`, `model`, `tools`, and `session`; it MUST NOT
+import `internal/tui`, `cmd`, or the root package. The root package imports
+internal packages only. Add a package only when a second consumer or a clear
 boundary justifies it; do not add `pkg/`, `util`, `common`, or `types`.
 
 Dependencies stay deliberately small: the Go standard library by default. The
@@ -597,6 +618,61 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
   `error`, and unknown types) are ignored. The returned `Projection` carries the
   canonical messages, the input-token estimate, and the elided-result count; the
   runner logs `compaction` when the count changes.
+
+- `agent.ProjectWithTools(events, limits, availableCustomTools)` — projection
+  for a session that records caller tools. It verifies the supplied declarations
+  against `session_start.custom_tools` (names, descriptions, canonical JSON
+  parameters, and `concurrency_safe`), appends the recorded schemas, and then
+  applies the recorded grant. `agent.Project` remains the built-in-only entry
+  point and returns `agent.ErrToolMismatch` when the session records custom
+  tools.
+- `agent.CustomTool{Schema, ConcurrencySafe}` — the single internal carrier for
+  a caller tool. Registration, projection, `session_start` recording, and the
+  spawner read this value so they cannot disagree.
+- `agent.Config.ToolPolicy` — called by the runner after `ToolStarted` and
+  before dispatch. A non-context error becomes a `permission_denied` result and
+  continues; a context cancellation follows the operation-interrupt path. The
+  engine serializes one policy closure across the parent and delegated children,
+  so `Authorize` is never entered concurrently within one session.
+
+### 3.2.1 Public library facade
+
+The module root is `package aharness`; it is the only public Go package. It
+copies DTOs at the boundary instead of aliasing internal types, so internal
+fields remain free to change. The shipped contract:
+
+- Construction: `Config`, `New`, `Resume`, `Fork`, `Agent.ID/SessionPath/
+  Workspace/State/Close`. `New` requires workspace, state directory, and model;
+  `Resume`/`Fork` take the caller's model implementation and inherit the
+  recorded identity when `ModelConfig.Spec.ID` is empty. `Resume` rejects prompt
+  and tool-contract changes; `Fork` applies explicit prompt or tool overrides
+  and records `contract_override`.
+- Runs: blocking `Agent.Run(ctx, task, RunOptions) (Result, error)` and
+  streaming `Agent.Start(...) *Run` with `Events() iter.Seq2[Event, error]`,
+  `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, and `Close`.
+  `Result.Status` is authoritative and `Result.Err` is the same cause returned
+  by `Agent.Run`. Breaking the iterator cancels and drains the run.
+- Models: public canonical `Request`/`Response` DTOs, `Model`,
+  `StreamingModel`, `ModelSpec`, `ModelConfig`, `CustomModel`, `OpenAIModel`,
+  `DiscoverModel`, `ListModels`, and `CatalogListing`. The built-in adapters are
+  wrappers over `internal/model`; a caller implementation is wrapped for the
+  loop. API keys are held in memory and never recorded.
+- Tools: `Tool`, `ToolResult`, `ToolName`, `ToolsConfig`, `WebSearchConfig`,
+  `WebFetchConfig`, `ToolRequest`, and `Deny`. The facade normalizes an explicit
+  grant (enabled built-ins plus custom names, minus disabled, including
+  `delegate` only with delegation), registers custom tools in a per-run
+  registry, and records their schemas and `ConcurrencySafe` declarations.
+- Delegation: `AgentDefinition`, `DelegationConfig`, `DefaultAgents`. The
+  library takes definitions and a resolver; it never reads `<state>/agents`.
+  Child grants are intersected with the parent's authority, a child can never
+  delegate, and `ConcurrencySafe` extends concurrent child fan-out only.
+- State and discovery: `State`, `SessionInfo`, `InspectSession`, `Sessions`,
+  `SchemaVersion`, `Version`, sentinel errors, `ConfigError`, and
+  `ProviderError`. `InspectSession` canonicalizes the ID and reads a snapshot
+  without the exclusive lock; `Sessions` lists newest first and tolerates a live
+  writer.
+- See [the plan](plans/go-library-build.md) for the full field-level contract
+  and compatibility rules.
 
 The agent MAY define unexported consumer interfaces (`completer`, `toolset`,
 `eventStore`) so loop tests use fakes. Keep each interface to one or two
@@ -851,7 +927,8 @@ All tools share these rules:
   carries a stable `code`: `ok` on success, and `invalid_args`, `unknown_tool`,
   `not_found`, `ambiguous`, `outside_workspace`, `git_protected`, `binary_file`,
   `too_large`, `timeout`, `canceled`, `panic`, `spawn_failed`, `unavailable`,
-  `http_error`, `fetch_failed`, `subagent_limit`, or `internal` on failure. A
+  `http_error`, `fetch_failed`, `subagent_limit`, `permission_denied`,
+  `tool_error`, or `internal` on failure. A
   `subagent_limit` result means at least one delegated child stopped at its own
   budget, so its report is partial; the per-task `status` says which
   (`max_turns`, `token_limit`, or `time_limit`). A non-zero command
@@ -971,6 +1048,32 @@ that each schema and its argument struct agree. `read_file` returns line
 numbers so the model can reference what it saw; `search` returns locations so
 the model can page; `edit_file` errors state whether the match was absent or
 ambiguous. These ACI choices are the highest-leverage prompt work in v1.
+
+Caller tools are registered through the public facade. Their declarations are
+recorded in `session_start.custom_tools` (at most 32 tools, 64 KiB total,
+2 KiB description, 32 KiB parameters) and projected by
+`agent.ProjectWithTools`; a resume must supply the identical declarations in the
+same order, and a missing or changed declaration is `ErrToolMismatch`. Names are
+lowercase ASCII letters, digits, `_`, and `-`, at most 64 bytes, and cannot
+collide with a built-in (enabled or disabled) or with `delegate`. A custom tool
+panic is recovered like a built-in panic; a returned error becomes
+`tool_error`, a returned `*aharness.Deny` becomes `permission_denied`, and a
+returned context error follows the operation-interrupt path. `Details` is capped
+at 64 KiB before recording.
+
+`Config.Authorize` (public) becomes `agent.Config.ToolPolicy` and runs after
+`ToolStarted` and before dispatch, for built-ins and custom tools, parent and
+children. A denial is a model-visible `tool_result` with
+`code=permission_denied`; it is excluded from the repeated-failure key and never
+becomes `StopStuck`. The hook is policy, not a sandbox. The engine serializes it
+with one mutex shared by the parent run and its delegated children.
+
+Tool calls within one model response execute strictly sequentially in arrival
+order. That fixes log order, replay order, authorization order, canonical-
+argument stuck detection, and the guarantee that two `edit_file` calls in one
+response cannot race. `Tool.ConcurrencySafe` (public) is recorded per custom tool
+and only permits concurrent *delegated children*; it never changes in-run order.
+A batch custom tool is the supported way to parallelize inside one call.
 
 ## 6. Context budget
 
@@ -1117,7 +1220,7 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `agent` (a child's definition name), optional `tools` (a recorded allowlist; absent means every tool of the version), and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
+| `session_start` | once per session | Prompt version, toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `agent` (a child's definition name), the recorded `tools` grant (omitted means every tool of the version; `[]` means none), optional `custom_tools` (ordered `{name, description, parameters, concurrency_safe}` declarations, now additive in v2), optional `contract_override` (`parent_session`, `prompt`, `tools`) on a fork that changed the inherited contract, and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
 | `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`, `require_usage`, and the effective `pricing` snapshot. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `subagent-steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
@@ -1515,6 +1618,26 @@ Defaults are deliberately conservative and easy to change:
 | `web_fetch` response | 2 MiB body; 64 KiB header; 5 redirects; 8 KiB URL; 30-second timeout (max 120) |
 | `web_fetch` output | 60 KiB per call with offset continuation; text sanitized to valid UTF-8 |
 | `todo` list | 50 items maximum; 500 bytes per item; at most one `in_progress`; restored from the last recorded result at run start |
+
+### 9.1 Library construction path
+
+`internal/engine` is the shared composition layer for the CLI's batch mode and
+the public `aharness` facade. `engine.Open(ctx, engine.Spec)` owns:
+
+1. state-directory preparation and workspace canonicalization;
+2. new/resume/fork model, prompt, grant, and limit inheritance;
+3. `session_start` recording, including custom-tool declarations and
+   `contract_override` on a fork;
+4. fork validation before the new log exists, followed by history copy;
+5. per-session work-directory setup.
+
+`Host.BuildRunner` is per run: it builds the registry, optional spawner, and
+runner, applies the execution grant, seeds the todo list, and resets the work
+directory. `Host.State` and `Host.Close` own the durable view and cleanup. The
+engine imports no flags, environment, terminal I/O, signals, `os.Exit`, TUI, or
+`cmd`. Batch mode passes `Spec.ExecutionGrant` to withhold `delegate` without
+rewriting the recorded contract. The TUI still uses its internal host for
+historical transcript replay; no public TUI package or `History` DTO exists.
 
 ## 10. Limits and timeouts
 

@@ -5,8 +5,11 @@
   §1.5 boundary, `Tool.ConcurrencySafe`, `Fork` contract overrides, the
   sequential-tool-call contract and its gate, `ListModels`, `SteerChild`, and
   `WebFetchConfig.UserAgent`.
-- **Status:** proposed; design only, no code changed. Current reference documents
-  win where they disagree; implementation must update them in the same change.
+- **Status:** implemented 2026-11-16 (M0–M6 and the M8 documentation work);
+  M7 TUI adoption is deferred, and the real-provider library smoke is pending
+  `AHARNESS_PROVIDER_TOKEN`. Current reference documents win where they
+  disagree; implementation updated them in the same change, and §13 records the
+  deviations and verification.
 - **Source:** [Go library research](../research/go-library-research.md).
 - **Target:** Go 1.27.3; module `aharness` today, publishable module path after
   M0.
@@ -2442,40 +2445,91 @@ design.
   call; stop by replying without a tool call; errors are data), and the two
   supported parallel patterns (batch tool, delegated children).
 
-## 12. Review checklist
+## 12. Implementation record and deviations
+
+**Implemented:** publishable module path `github.com/eddiectc/aharness`
+(the repository path named in the coding standard's local-module guidance),
+`internal/engine`, public facade, custom models/tools, policy hook,
+custom-tool recording/projection, fork contract overrides, grant presence,
+delegation bridge, session inspection and listing, batch CLI migration to the
+engine, external-module build fixture, runnable example, and the reference
+documentation updates.
+
+**Deviations from the design:**
+
+- **M7 TUI adoption is deferred.** The TUI still constructs its runs through
+  `internal/agent` and uses its internal JSONL reader for historical and
+  child-focus transcripts. Migrating the Bubble Tea host, session shell, model
+  picker, child-focus replay, and `-ui-json` goldens is a separate change; no
+  public TUI package or `History` DTO was added. The facade already covers the
+  run/event/result/session surface M7 needs.
+- **The session `tools` field uses `omitzero`, not “no tag”.** `encoding/json/v2`
+  encodes a nil slice as `[]`, so a plain `json:"tools"` could not preserve the
+  nil-versus-empty distinction. `omitzero` omits a nil grant (all tools) and
+  writes `[]` for an explicit empty grant (none); `null` still decodes as nil.
+- **The engine registry factory receives the workspace.** The design sketch's
+  factory signature had no workspace handle; the implementation passes
+  `*tools.Workspace` so a per-run factory can build the same registry without
+  reopening the root. This is internal-only.
+- **The engine adds an execution-only grant.** Batch mode withholds `delegate`
+  without rewriting a resumed session's recorded contract; the facade never
+  sets it.
+- **`RunSpec` carries per-run delegation resolvers.** The TUI/facade may switch
+  the parent model for one run, so the spawner's resolver and child completer
+  are per-run rather than fixed at `Open`.
+- **The README's library section and `doc.go` are the user-facing entry point;**
+  the plan's package-level doc sketch is folded there. The planned separate
+  `catalog.go` is folded into `model.go` and `version.go`; the public surface is
+  unchanged.
+
+**Verification performed:**
+
+- `go test -race -count=1 ./...` (public, engine, internal, CLI, TUI).
+- External-package lifecycle tests and `testdata/external` module build.
+- `go vet ./...`, `gofmt`, `go build ./...`, `make docs-check`.
+- Fake-provider tests only; no real-provider library smoke because
+  `AHARNESS_PROVIDER_TOKEN` is unset.
+
+**Pending before a stable release:** M7 TUI adoption, a real-provider library
+smoke, and publishing/tagging the module.
+
+
+## 13. Review checklist
 
 Before marking the plan implemented:
 
-- [ ] The public package imports only internal packages and the standard
+- [x] The public package imports only internal packages and the standard
       library; `go list -deps` shows no TUI or `cmd` dependency.
-- [ ] The CLI and TUI packages do not import the public package in a cycle.
-- [ ] Every exported identifier has a doc comment and a stable semantic.
-- [ ] `Config` has no field that is silently accepted but ignored.
-- [ ] Every proposed extension passes §1.5: no in-run parallel tools, nested
+- [x] The CLI and TUI packages do not import the public package in a cycle.
+- [x] Every exported identifier has a doc comment and a stable semantic.
+- [x] `Config` has no field that is silently accepted but ignored.
+- [x] Every proposed extension passes §1.5: no in-run parallel tools, nested
       delegation, structured output, store seam, provider matrix, graph
       orchestration, or public TUI package.
-- [ ] Resume rejects prompt/tool changes; Fork validates overrides before
+- [x] Resume rejects prompt/tool changes; Fork validates overrides before
       creating the new log, records `contract_override`, and copied history
       replays under the new contract.
-- [ ] Tool calls in one run execute and emit in arrival order; delegated fan-out
+- [x] Tool calls in one run execute and emit in arrival order; delegated fan-out
       uses only the built-in read-only set plus `ConcurrencySafe` custom tools;
       `Authorize` is never entered concurrently within one session.
-- [ ] `concurrency_safe` is recorded, reproduced on resume, and absent means
+- [x] `concurrency_safe` is recorded, reproduced on resume, and absent means
       false; a changed declaration is `ErrToolMismatch`.
-- [ ] Public events and `Result` alone can render the live transcript (text,
+- [x] Public events and `Result` alone can render the live transcript (text,
       tool blocks, todo, subagent roster, usage/cost, terminal status); the
       renderer test passes without log access.
-- [ ] The TUI uses the public facade for run construction and its own log reader
-      only for replay; the library never imports `internal/tui` or `cmd`.
-- [ ] A denied tool produces a model-visible result and a durable
+- [ ] **Deferred (M7):** the TUI still uses its internal run construction and
+      log reader. The library itself never imports `internal/tui` or `cmd`; see
+      §12.
+- [x] A denied tool produces a model-visible result and a durable
       `tool_result`; it does not corrupt the call/result pairing.
-- [ ] A custom tool schema recorded in `session_start` is semantically equal
+- [x] A custom tool schema recorded in `session_start` is semantically equal
       (canonical JSON) on resume and its concurrency declaration matches;
       projection and the model request carry it.
-- [ ] Breaking the event iterator cancels and waits; `go test -race` reports no
+- [x] Breaking the event iterator cancels and waits; `go test -race` reports no
       leaked goroutines.
-- [ ] `Result.Status`, `Result.Err`, and the durable `final` agree; the
+- [x] `Result.Status`, `Result.Err`, and the durable `final` agree; the
       iterator's separate error appears only when no `Result` exists.
-- [ ] Session v2 fixtures and CLI-created sessions still resume.
-- [ ] README and architecture describe the shipped behavior, not the plan.
-- [ ] `make dod` passes and the manual real-provider smoke is recorded.
+- [x] Session v2 fixtures and CLI-created sessions still resume.
+- [x] README and architecture describe the shipped behavior, not the plan.
+- [x] `make dod` passes. The manual real-provider smoke is **pending**
+      `AHARNESS_PROVIDER_TOKEN`; see §12.

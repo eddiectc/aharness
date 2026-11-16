@@ -20,9 +20,9 @@ only with a recorded reason; **MAY** = optional.
 - Use Go **1.27.3**. Keep `go 1.27.3` in `go.mod`; do not lower it. Go 1.27's
   `go test` runs the `stdversion` vet check by default, so the `go` line must
   admit every standard-library symbol used.
-- The module is `aharness` for a local binary. Before publishing or installing
-  from a URL, change the module to the repository import path (for example
-  `git.sr.ht/~user/aharness`).
+- The module is `github.com/eddiectc/aharness`. The root package is the public
+  library facade; `internal/*` stays internal and `cmd/aharness` is the CLI
+  consumer. A breaking public API change gets a new major module path.
 - Runtime dependencies: **stdlib by default**. The standard library is the
   default answer; a new runtime dependency MUST be justified in review against
   a stdlib alternative. The approved exception is the TUI stack in §3: Bubble

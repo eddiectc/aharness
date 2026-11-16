@@ -48,15 +48,26 @@ type httpTransport struct {
 // empty baseURL selects DefaultBaseURL; a trailing slash on the base URL is
 // trimmed so the dialect path is appended exactly once. A non-positive timeout
 // selects DefaultHTTPTimeout.
-func newHTTPTransport(baseURL, path, token, sessionID, version string, timeout time.Duration) *httpTransport {
+// newHTTPTransportWithClient is newHTTPTransport with an optional caller
+// client. A non-nil client replaces the bounded default and is used exactly as
+// supplied; a positive timeout on an otherwise unbounded client is applied to a
+// shallow copy so a caller-owned client is never mutated.
+func newHTTPTransportWithClient(baseURL, path, token, sessionID, version string, timeout time.Duration, client *http.Client) *httpTransport {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
 	if timeout <= 0 {
 		timeout = DefaultHTTPTimeout
 	}
+	if client == nil {
+		client = &http.Client{Timeout: timeout}
+	} else if client.Timeout == 0 {
+		clone := *client
+		clone.Timeout = timeout
+		client = &clone
+	}
 	return &httpTransport{
-		client:    &http.Client{Timeout: timeout},
+		client:    client,
 		url:       strings.TrimRight(baseURL, "/") + path,
 		token:     token,
 		sessionID: sessionID,

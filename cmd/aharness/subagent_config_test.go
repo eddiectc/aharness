@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/agent"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func TestMaxSubagentsConfig(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"aharness/internal/agent"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // chatDelegateResponse builds a Chat Completions response that calls delegate.

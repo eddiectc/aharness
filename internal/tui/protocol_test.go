@@ -8,8 +8,8 @@ import (
 
 	"github.com/charmbracelet/x/vt"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 func TestDecodeCommandValidation(t *testing.T) {

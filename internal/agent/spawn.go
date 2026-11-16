@@ -8,13 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // ModelResolution is the catalog-derived adapter and budget set a child run
@@ -36,10 +37,21 @@ type ModelResolver func(modelID, effort string) (ModelResolution, error)
 // the spawner never needs the provider token.
 type CompleterFunc func(dialect model.Dialect, baseURL, sessionID string) model.Completer
 
+// ChildCompleterFunc builds a child adapter from the resolved definition and
+// model resolution, so a public host can construct the right ModelConfig. It
+// takes precedence over CompleterFunc.
+type ChildCompleterFunc func(def AgentDefinition, resolution ModelResolution, sessionID string) model.Completer
+
 // ToolOptionsFunc builds the child registry options from the parent's
 // effective tool configuration. The spawner clears the spawn interface on the
 // result, so a child can never delegate.
 type ToolOptionsFunc func(sessionID, workDir, tmpDir string) tools.Options
+
+// RegistryFunc builds a fully configured child registry, including any custom
+// tools, for the given per-child work directories. The spawner applies the
+// child grant after the factory returns. A nil factory uses tools.NewRegistry.
+// A factory must not install a spawn interface: delegation depth is one.
+type RegistryFunc func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error)
 
 // SpawnerOptions configures one per-run spawner. The spawner is created with
 // the host's effective configuration and reused for every delegate call in the
@@ -47,13 +59,15 @@ type ToolOptionsFunc func(sessionID, workDir, tmpDir string) tools.Options
 // NewCompleter, NewToolOptions, ParentSeq, and Now from several child
 // goroutines, so each must be safe for concurrent use.
 type SpawnerOptions struct {
-	Config         Config
-	Workspace      *tools.Workspace
-	Definitions    *AgentCatalog
-	Resolve        ModelResolver
-	NewCompleter   CompleterFunc
-	NewToolOptions ToolOptionsFunc
-	Logger         *slog.Logger
+	Config            Config
+	Workspace         *tools.Workspace
+	Definitions       *AgentCatalog
+	Resolve           ModelResolver
+	NewCompleter      CompleterFunc
+	NewChildCompleter ChildCompleterFunc
+	NewToolOptions    ToolOptionsFunc
+	NewRegistry       RegistryFunc
+	Logger            *slog.Logger
 	// Display is the parent's display callback. Child progress is forwarded
 	// through it, serialized by the spawner.
 	Display func(DisplayEvent) error
@@ -242,9 +256,7 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 			reports[i] = notStartedReport(spec)
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			select {
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
@@ -257,7 +269,7 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 				return
 			}
 			reports[i] = s.spawnOne(ctx, call, i, spec)
-		}()
+		})
 	}
 	wg.Wait()
 	return tools.SpawnResult{Reports: reports, Execution: tools.ExecutionConcurrent}
@@ -273,8 +285,8 @@ func (s *Spawner) executionMode(specs []tools.SubagentSpec) (string, string) {
 		if !ok {
 			return tools.ExecutionSequential, fmt.Sprintf("task %d has no readable read-only tool grant", i+1)
 		}
-		if !isReadOnlyGrant(grant) {
-			return tools.ExecutionSequential, fmt.Sprintf("task %d: agent %q is not read-only", i+1, name)
+		if !s.grantConcurrencySafe(grant) {
+			return tools.ExecutionSequential, fmt.Sprintf("task %d: agent %q is not read-only or concurrency-safe", i+1, name)
 		}
 	}
 	return tools.ExecutionConcurrent, ""
@@ -312,7 +324,7 @@ func (s *Spawner) taskGrant(spec tools.SubagentSpec) ([]string, string, bool) {
 	return def.Tools, def.Name, true
 }
 
-// isReadOnlyGrant reports whether every granted tool is read-only. A nil or
+// isReadOnlyGrant reports whether every granted built-in is read-only. A nil or
 // empty grant is never read-only: nil means the full recorded toolset.
 func isReadOnlyGrant(grant []string) bool {
 	if len(grant) == 0 {
@@ -324,6 +336,143 @@ func isReadOnlyGrant(grant []string) bool {
 		}
 	}
 	return true
+}
+
+// grantConcurrencySafe reports whether every name in grant is a built-in
+// read-only tool or a custom tool that declared ConcurrencySafe. The claim is
+// host code, not verified by the harness.
+func (s *Spawner) grantConcurrencySafe(grant []string) bool {
+	if len(grant) == 0 {
+		return false
+	}
+	custom := s.customToolDecls()
+	for _, name := range grant {
+		if isReadOnlyTool(name) {
+			continue
+		}
+		if tool, ok := custom[name]; ok && tool.ConcurrencySafe {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// customToolDecls indexes the parent's recorded custom-tool declarations.
+func (s *Spawner) customToolDecls() map[string]CustomTool {
+	decls := make(map[string]CustomTool, len(s.opts.Config.CustomTools))
+	for _, tool := range s.opts.Config.CustomTools {
+		decls[tool.Schema.Name] = tool
+	}
+	return decls
+}
+
+// parentAllows reports whether the parent session may use name. A nil parent
+// grant means every tool of the recorded toolset plus every registered custom
+// tool; an explicit grant is the authority.
+func (s *Spawner) parentAllows(name string) bool {
+	if name == "delegate" {
+		return false
+	}
+	if _, ok := s.customToolDecls()[name]; ok {
+		// A custom tool must be registered on the parent to be inherited.
+	} else {
+		version := s.opts.Config.ToolsetVersion
+		if version == "" {
+			version = tools.Version
+		}
+		schemas, err := tools.SchemasFor(version)
+		if err != nil {
+			return false
+		}
+		found := false
+		for _, schema := range schemas {
+			if schema.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if s.opts.Config.Tools == nil {
+		return true
+	}
+	return slices.Contains(s.opts.Config.Tools, name)
+}
+
+// childGrant narrows a definition's requested grant to the parent's authority.
+// It returns the denied name when the definition asks for something the parent
+// does not have, so the task fails closed instead of widening authority.
+func (s *Spawner) childGrant(def AgentDefinition) ([]string, string) {
+	requested := def.Tools
+	if requested == nil {
+		requested = []string{}
+	}
+	grant := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, name := range requested {
+		if name == "delegate" {
+			return nil, "delegate"
+		}
+		if seen[name] {
+			continue
+		}
+		if !s.parentAllows(name) {
+			return nil, name
+		}
+		seen[name] = true
+		grant = append(grant, name)
+	}
+	return grant, ""
+}
+
+// narrowChildGrant applies the current parent's authority to a resumed child's
+// recorded grant. The result is always non-nil so an explicit empty child grant
+// stays empty; delegate is never inherited because delegation depth is one.
+func (s *Spawner) narrowChildGrant(recorded []string, toolsetVersion string) []string {
+	if recorded == nil {
+		return s.allParentTools(toolsetVersion)
+	}
+	grant := make([]string, 0, len(recorded))
+	for _, name := range recorded {
+		if name == "delegate" || !s.parentAllows(name) {
+			continue
+		}
+		grant = append(grant, name)
+	}
+	return append([]string{}, grant...)
+}
+
+// allParentTools returns the parent's authority as an explicit non-nil grant:
+// its recorded grant when present, otherwise every built-in of the child's
+// recorded toolset except delegate plus every registered custom tool.
+func (s *Spawner) allParentTools(toolsetVersion string) []string {
+	if s.opts.Config.Tools != nil {
+		grant := make([]string, 0, len(s.opts.Config.Tools))
+		for _, name := range s.opts.Config.Tools {
+			if name != "delegate" {
+				grant = append(grant, name)
+			}
+		}
+		return append([]string{}, grant...)
+	}
+	if toolsetVersion == "" {
+		toolsetVersion = tools.Version
+	}
+	grant := make([]string, 0, 8)
+	if schemas, err := tools.SchemasFor(toolsetVersion); err == nil {
+		for _, schema := range schemas {
+			if schema.Name != "delegate" {
+				grant = append(grant, schema.Name)
+			}
+		}
+	}
+	for _, tool := range s.opts.Config.CustomTools {
+		grant = append(grant, tool.Schema.Name)
+	}
+	return append([]string{}, grant...)
 }
 
 // reserveFits reports whether the fresh tasks in the call fit the remaining
@@ -360,6 +509,11 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 		return failedReport(spec, tools.CodeNotFound, tools.SubagentFailed,
 			fmt.Sprintf("unknown agent %q", spec.Agent))
 	}
+	grant, denied := s.childGrant(def)
+	if denied != "" {
+		return failedReport(spec, tools.CodeSpawnFailed, tools.SubagentFailed,
+			fmt.Sprintf("agent %q requests tool %q, which is not available to the parent session", def.Name, denied))
+	}
 	modelID, effort, resolution, err := s.resolveAgent(def)
 	if err != nil {
 		return failedReport(spec, tools.CodeInvalidArgs, tools.SubagentFailed,
@@ -377,7 +531,7 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 		}
 	}
 
-	childCfg := s.childConfig(def, modelID, effort, resolution, call)
+	childCfg := s.childConfig(def, modelID, effort, resolution, call, grant)
 	sessionID := session.NewID()
 	steering := s.registerSteering(sessionID)
 	defer s.unregisterSteering(sessionID)
@@ -388,7 +542,7 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 	if err := adapter.started(); err != nil {
 		return failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
 	}
-	report := s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task))
+	report := s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task), s.childCompleter(def, resolution, sessionID))
 	adapter.finished(report)
 	return report
 }
@@ -465,19 +619,28 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 		_ = store.Close()
 		return failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
 	}
+	def, _ := s.opts.Definitions.LookupDefinition(state.Agent)
+	resolution := ModelResolution{Dialect: state.Dialect, BaseURL: state.BaseURL, Limits: state.Limits, Pricing: state.Pricing}
+	completerDef := def
+	if state.Model != "" {
+		completerDef.Model = state.Model
+	}
+	if state.ThinkingEffort != "" {
+		completerDef.ThinkingEffort = state.ThinkingEffort
+	}
 	report := s.runChildOnStore(ctx, childCfg, store, adapter, spec.Session, RunOptions{
 		Task:           spec.Task,
 		TaskSet:        true,
 		TaskFrom:       taskFromDelegate,
 		ResumedFromSeq: state.LastEventSeq,
-	})
+	}, s.childCompleter(completerDef, resolution, spec.Session))
 	adapter.finished(report)
 	return report
 }
 
 // runChildSession creates the child log, runs the child, and removes its work
 // directory.
-func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *childDisplay, sessionID string, opts RunOptions) tools.SubagentReport {
+func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer) tools.SubagentReport {
 	store, err := session.Create(cfg.StateDir, sessionID)
 	if err != nil {
 		return failedReport(tools.SubagentSpec{Agent: cfg.Agent, Task: opts.Task},
@@ -489,13 +652,13 @@ func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *chil
 		return failedReport(tools.SubagentSpec{Agent: cfg.Agent, Task: opts.Task},
 			tools.CodeInternal, tools.SubagentFailed, fmt.Sprintf("record child session start: %v", err))
 	}
-	return s.runChildOnStore(ctx, cfg, store, adapter, sessionID, opts)
+	return s.runChildOnStore(ctx, cfg, store, adapter, sessionID, opts, completer)
 }
 
 // runChildOnStore runs one child over an open store, closes the store, and
 // maps the run result to a report. The store is synced and closed before the
 // report is returned, so a failed child stays resumable and inspectable.
-func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *session.Store, adapter *childDisplay, sessionID string, opts RunOptions) tools.SubagentReport {
+func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *session.Store, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer) tools.SubagentReport {
 	workDir, tmpDir := s.workPaths(sessionID)
 	if err := prepareChildWorkDir(workDir, tmpDir); err != nil {
 		_ = store.Close()
@@ -504,10 +667,16 @@ func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *sessio
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	registry := tools.NewRegistry(s.opts.Workspace, s.childToolOptions(sessionID, workDir, tmpDir))
+	registry, err := s.childRegistry(sessionID, workDir, tmpDir)
+	if err != nil {
+		_ = store.Close()
+		return failedReport(tools.SubagentSpec{Agent: cfg.Agent, Task: opts.Task},
+			tools.CodeInternal, tools.SubagentFailed, fmt.Sprintf("prepare child tool registry: %v", err))
+	}
 	registry.SetGrant(cfg.Tools)
 	cfg.Display = adapter.display
-	runner := New(cfg, s.newCompleter(cfg, sessionID), registry, store)
+	cfg.SessionID = sessionID
+	runner := New(cfg, completer, registry, store)
 	result, err := runner.Run(ctx, opts)
 	closeErr := store.Close()
 
@@ -552,7 +721,7 @@ func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *sessio
 }
 
 // childConfig builds a fresh child's immutable run configuration.
-func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resolution ModelResolution, call tools.Call) Config {
+func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resolution ModelResolution, call tools.Call, grant []string) Config {
 	parent := s.opts.Config
 	maxTurns := def.MaxTurns
 	if maxTurns <= 0 {
@@ -570,7 +739,9 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 		HarnessVersion: parent.HarnessVersion,
 		SystemPrompt:   childSystemPrompt(def, parent.Workspace, promptVersion(parent)),
 		Agent:          def.Name,
-		Tools:          append([]string(nil), def.Tools...),
+		Tools:          cloneGrant(grant),
+		CustomTools:    append([]CustomTool(nil), parent.CustomTools...),
+		ToolPolicy:     parent.ToolPolicy,
 		MaxTurns:       maxTurns,
 		MaxTotalTokens: s.remainingBudget(call),
 		Limits:         resolution.Limits,
@@ -585,14 +756,12 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 }
 
 // continuedConfig builds a resumed child's configuration from its own recorded
-// state. The recorded model, effort, prompt, and grant win; only the budget
-// comes from the parent.
+// state. The recorded model, effort, prompt, and grant win; the grant is
+// narrowed by the current parent's authority, and only the budget comes from
+// the parent.
 func (s *Spawner) continuedConfig(state State, call tools.Call) Config {
 	parent := s.opts.Config
-	grant := append([]string(nil), state.Tools...)
-	if grant == nil {
-		grant = tools.NamesWithout("delegate")
-	}
+	grant := s.narrowChildGrant(state.Tools, state.ToolsetVersion)
 	maxTurns := parent.MaxTurns
 	if def, ok := s.opts.Definitions.Lookup(state.Agent); ok && def.MaxTurns > 0 {
 		maxTurns = def.MaxTurns
@@ -610,6 +779,8 @@ func (s *Spawner) continuedConfig(state State, call tools.Call) Config {
 		SystemPrompt:   state.SystemPrompt,
 		Agent:          state.Agent,
 		Tools:          grant,
+		CustomTools:    append([]CustomTool(nil), parent.CustomTools...),
+		ToolPolicy:     parent.ToolPolicy,
 		MaxTurns:       maxTurns,
 		MaxTotalTokens: s.remainingBudget(call),
 		Limits:         state.Limits,
@@ -724,6 +895,16 @@ func (s *Spawner) workPaths(sessionID string) (string, string) {
 	return workDir, filepath.Join(workDir, "tmp")
 }
 
+// childRegistry builds the child's registry. The injected factory owns custom
+// tool registration; the default factory provides built-ins only. The parent
+// grant is applied by the caller after construction.
+func (s *Spawner) childRegistry(sessionID, workDir, tmpDir string) (*tools.Registry, error) {
+	if s.opts.NewRegistry != nil {
+		return s.opts.NewRegistry(s.opts.Workspace, sessionID, workDir, tmpDir)
+	}
+	return tools.NewRegistry(s.opts.Workspace, s.childToolOptions(sessionID, workDir, tmpDir)), nil
+}
+
 // childToolOptions builds the child's registry options. The spawn interface is
 // cleared so depth stays one even if the parent's options carry it.
 func (s *Spawner) childToolOptions(sessionID, workDir, tmpDir string) tools.Options {
@@ -737,12 +918,16 @@ func (s *Spawner) childToolOptions(sessionID, workDir, tmpDir string) tools.Opti
 	return opts
 }
 
-// newCompleter builds the child's provider adapter.
-func (s *Spawner) newCompleter(cfg Config, sessionID string) model.Completer {
+// childCompleter builds the child's provider adapter, preferring the
+// resolved-definition factory.
+func (s *Spawner) childCompleter(def AgentDefinition, resolution ModelResolution, sessionID string) model.Completer {
+	if s.opts.NewChildCompleter != nil {
+		return s.opts.NewChildCompleter(def, resolution, sessionID)
+	}
 	if s.opts.NewCompleter == nil {
 		return failingCompleter{}
 	}
-	return s.opts.NewCompleter(model.Dialect(cfg.Dialect), cfg.BaseURL, sessionID)
+	return s.opts.NewCompleter(model.Dialect(resolution.Dialect), resolution.BaseURL, sessionID)
 }
 
 // prepareChildWorkDir creates a fresh harness-owned work directory and TMPDIR

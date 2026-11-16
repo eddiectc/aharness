@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 type schemaDoc struct {

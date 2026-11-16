@@ -54,20 +54,26 @@ type crawl4AIEnvelope struct {
 // endpoint. The endpoint may be loopback or private; the provider's own guard
 // is the egress control.
 type crawl4AIFetcher struct {
-	endpoint string
-	key      string
-	client   *http.Client
-	timeout  time.Duration
+	endpoint  string
+	key       string
+	userAgent string
+	client    *http.Client
+	timeout   time.Duration
 }
 
 // newCrawl4AIFetcher constructs the provider client. It has the web timeout and
 // header cap but deliberately no address guard: the endpoint is the operator's
 // service.
 func newCrawl4AIFetcher(opts Options, endpoint string, timeout time.Duration) *crawl4AIFetcher {
+	userAgent := opts.WebFetchUserAgent
+	if userAgent == "" {
+		userAgent = opts.UserAgent
+	}
 	f := &crawl4AIFetcher{
-		endpoint: strings.TrimRight(endpoint, "/"),
-		key:      opts.WebFetchKey,
-		timeout:  timeout,
+		endpoint:  strings.TrimRight(endpoint, "/"),
+		key:       opts.WebFetchKey,
+		userAgent: userAgent,
+		timeout:   timeout,
 	}
 	var client *http.Client
 	if opts.WebClient != nil {
@@ -116,6 +122,9 @@ func (f *crawl4AIFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResu
 		return fetchResult{}, webErrorf(CodeFetchFailed, "web_fetch: build provider request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if f.userAgent != "" {
+		req.Header.Set("User-Agent", f.userAgent)
+	}
 	if f.key != "" {
 		req.Header.Set("Authorization", "Bearer "+f.key)
 	}

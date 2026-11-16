@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"aharness/internal/agent"
-	"aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/model"
 )
 
 func cfgTestGetenv(values map[string]string) func(string) string {

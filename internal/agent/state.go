@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 // PendingCall is a model tool call with no durable tool_result.
@@ -38,18 +38,24 @@ type State struct {
 	SystemPrompt string
 	// Agent is the definition name recorded for a child session.
 	Agent string
-	// Tools is the recorded tool grant; nil means every tool of the version.
-	Tools          []string
-	InitialModel   string
-	InitialDialect string
-	Model          string
-	Dialect        string
-	BaseURL        string
-	Limits         Limits
-	MaxTurns       int
-	MaxTotalTokens int
-	SessionTimeout time.Duration
-	ModelTimeout   time.Duration
+	// Tools is the recorded tool grant; nil means every tool of the version
+	// and a non-nil empty grant means none.
+	Tools []string
+	// CustomTools is the recorded caller-tool contract in declaration order.
+	CustomTools []CustomTool
+	// ContractOverride is non-nil when the session was forked with a prompt or
+	// tool-set change.
+	ContractOverride *ContractOverride
+	InitialModel     string
+	InitialDialect   string
+	Model            string
+	Dialect          string
+	BaseURL          string
+	Limits           Limits
+	MaxTurns         int
+	MaxTotalTokens   int
+	SessionTimeout   time.Duration
+	ModelTimeout     time.Duration
 	// ThinkingEffort is the latest recorded effective effort. Empty means the
 	// provider default, including for old logs without the field.
 	ThinkingEffort string
@@ -114,7 +120,9 @@ func Inspect(events []session.Event) (State, error) {
 			state.ParentCallID = data.ParentCallID
 			state.SystemPrompt = data.SystemPrompt
 			state.Agent = data.Agent
-			state.Tools = append([]string(nil), data.Tools...)
+			state.Tools = cloneGrant(data.Tools)
+			state.CustomTools = customToolsFromData(data.CustomTools)
+			state.ContractOverride = data.ContractOverride
 			state.InitialModel = data.Model
 			state.InitialDialect = data.Dialect
 			state.Model = data.Model

@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 
-	"aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/agent"
 )
 
 // textDisplay adapts the runner display stream to the batch stdout sink. It

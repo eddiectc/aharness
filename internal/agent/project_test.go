@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 func appendToolTurn(t *testing.T, events []session.Event, turn int, id, text, output string) []session.Event {

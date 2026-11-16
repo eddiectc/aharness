@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode"
 
-	"aharness/internal/model"
-	"aharness/internal/tools"
-	"aharness/internal/tui"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tui"
 )
 
 // SetSetting persists one config-file key. The file is re-read and validated

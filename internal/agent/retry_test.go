@@ -8,8 +8,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 func TestRunRetry429ThenSuccess(t *testing.T) {

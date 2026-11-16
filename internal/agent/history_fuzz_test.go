@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 func FuzzHistory(f *testing.F) {

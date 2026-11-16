@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"aharness/internal/agent"
+	"github.com/eddiectc/aharness/internal/agent"
 )
 
 func wheelMsg(up bool) tea.MouseWheelMsg {

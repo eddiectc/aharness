@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"aharness/internal/model"
-	"aharness/internal/session"
+	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/internal/session"
 )
 
 // Display history caps. They bound the UI projection only; the log is

@@ -16,7 +16,7 @@ import (
 	"github.com/NimbleMarkets/ntcharts/v2/picture"
 	"github.com/charmbracelet/x/ansi"
 
-	"aharness/internal/tools"
+	"github.com/eddiectc/aharness/internal/tools"
 )
 
 const (

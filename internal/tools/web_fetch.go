@@ -520,7 +520,10 @@ type builtinFetcher struct {
 // http.DefaultClient, never reads proxy environment variables, never disables
 // TLS verification, and keeps no cookie jar.
 func newBuiltinFetcher(opts Options, timeout time.Duration) *builtinFetcher {
-	userAgent := opts.UserAgent
+	userAgent := opts.WebFetchUserAgent
+	if userAgent == "" {
+		userAgent = opts.UserAgent
+	}
 	if userAgent == "" {
 		userAgent = "aharness/devel"
 	}
