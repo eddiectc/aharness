@@ -53,6 +53,7 @@ rewriting its conclusions.
 | Document | Status |
 |---|---|
 | [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
+| [plans/go-library-build.md](plans/go-library-build.md) | Proposed; embeddable Go library design and milestones |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
@@ -71,6 +72,7 @@ rewriting its conclusions.
 | [research/agent-harness-minimum.md](research/agent-harness-minimum.md) | 2026-11-09; minimum harness and primary sources |
 | [research/agent-tooling-research.md](research/agent-tooling-research.md) | 2026-11-11; tool set, limits, usage, and evaluation methodology |
 | [research/evaluation-research.md](research/evaluation-research.md) | 2026-11-15; private, harness-agnostic evaluation design, task sourcing, metrics, and experiment options |
+| [research/go-library-research.md](research/go-library-research.md) | 2026-11-16; comparable Go agent libraries and coding-harness SDK embedding APIs |
 | [research/subagent-research.md](research/subagent-research.md) | 2026-11-15; delegation and multi-agent features in Claude Code, Codex, OMP, and OpenCode, and which fit aharness |
 
 ## Link check

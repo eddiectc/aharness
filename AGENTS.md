@@ -24,6 +24,13 @@ Non-negotiables:
   library without that justification.
 - Start with the five-package layout in `docs/architecture.md` §3.1. Do not
   create `pkg/`, `util`, `common`, or one-package-per-type.
+- The public library is the coding agent's SDK, not a general ADK. Keep the
+  boundary in [the Go library build plan](docs/plans/go-library-build.md#15-boundary-coding-sdk-not-an-adk):
+  no provider matrix, graph/workflow orchestration, memory/RAG, session-store
+  seam, background or nested delegation, in-run parallel tool execution,
+  structured-output/report DTOs, prompt templating, or public TUI package. A
+  change that alters a recorded contract — session schema, prompt, tool grant,
+  projection, or concurrency model — is a different product, not an extension.
 - Route workspace paths through `os.Root` and `filepath.IsLocal`; reject `.git`
   components and symlink components for edits.
 - Wrap errors with `%w`; branch with `errors.Is`/`errors.As`; never match error
