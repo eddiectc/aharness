@@ -255,6 +255,16 @@ diagnostic, not a gate.
 
 ## 2. Integration tests
 
+- Tests that share no process state run concurrently: call `t.Parallel()` when
+  the test has its own `t.TempDir`, temp state directory, and fake servers.
+  Keep a test serial when it calls `t.Setenv`/`t.Chdir` or replaces a package
+  seam such as `terminalCheck`, and do not add parallel subtests, so a serial
+  test never shares the process environment with a paused parallel test.
+- A setup run that only records the session a later resume or fork asserts may
+  execute the CLI in-process (`runHarnessInProcess`) instead of spawning the
+  binary. The behavior under test still executes the built binary, so process
+  exit codes, signals, TTY handling, and file modes stay real where they are
+  asserted.
 - Run a fake models.dev catalog server and a fake `opencode-go` server with a
   temp workspace and temp state directory. Point the binary at the fake catalog
   with `AHARNESS_MODELS_DEV_URL` (loopback HTTP is allowed) and at the fake

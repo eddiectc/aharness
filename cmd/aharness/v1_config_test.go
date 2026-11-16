@@ -24,6 +24,7 @@ const v1TestSession = "0190a0c4-0000-7000-8000-0000000000aa"
 const v1OldBaseURL = "https://opencode.ai/inference/go/v1"
 
 func TestParseResumeDeferredValidation(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	cfg := cfgTestParseOK(t, []string{"-resume", v1TestSession, "-state-dir", stateDir}, nil)
 	if cfg.ResumeID != v1TestSession {
@@ -56,6 +57,7 @@ func TestParseResumeDeferredValidation(t *testing.T) {
 }
 
 func TestParseResumeAndForkValidation(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	if err := cfgTestParseErr(t, []string{"-resume", v1TestSession, "-fork", v1TestSession, "-state-dir", stateDir}, nil); !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("error = %v", err)
@@ -77,6 +79,7 @@ func TestParseResumeAndForkValidation(t *testing.T) {
 }
 
 func TestParseStreamWithoutTaskRequiresResume(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	args := []string{"-batch", "-stream", "-state-dir", stateDir, "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir()}
 	if err := cfgTestParseErr(t, args, nil); err == nil {
@@ -94,6 +97,7 @@ func TestParseStreamWithoutTaskRequiresResume(t *testing.T) {
 }
 
 func TestParseBaseURLRejectsUnsafeComponents(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		"http://user:pass@example.test/v1",
 		"http://example.test/v1?token=x",
@@ -146,6 +150,7 @@ func v1ResumeConfig(t *testing.T, args ...string) config {
 }
 
 func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
+	t.Parallel()
 	cfg := v1ResumeConfig(t)
 	state := v1State()
 	// A nil source proves inheritance does not consult the catalog.
@@ -191,6 +196,7 @@ func TestApplySessionDefaultsInheritsOffline(t *testing.T) {
 }
 
 func TestApplySessionDefaultsExplicitContextClamp(t *testing.T) {
+	t.Parallel()
 	cfg := v1ResumeConfig(t, "-max-context-tokens", "150000")
 	state := v1State()
 	if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
@@ -210,6 +216,7 @@ func TestApplySessionDefaultsExplicitContextClamp(t *testing.T) {
 }
 
 func TestApplySessionDefaultsContextCannotExceedRecord(t *testing.T) {
+	t.Parallel()
 	cfg := v1ResumeConfig(t, "-max-context-tokens", "400000")
 	state := v1State()
 	if err := applySessionDefaults(context.Background(), &cfg, state, nil, nil); err != nil {
@@ -224,6 +231,7 @@ func TestApplySessionDefaultsContextCannotExceedRecord(t *testing.T) {
 }
 
 func TestApplySessionDefaultsOutputOverrides(t *testing.T) {
+	t.Parallel()
 	t.Run("explicit zero clears", func(t *testing.T) {
 		cfg := v1ResumeConfig(t, "-max-output-tokens=0")
 		state := v1State()
@@ -247,6 +255,7 @@ func TestApplySessionDefaultsOutputOverrides(t *testing.T) {
 }
 
 func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 
 	t.Run("catalog values win", func(t *testing.T) {
@@ -334,6 +343,7 @@ func TestApplySessionDefaultsExplicitModelChange(t *testing.T) {
 }
 
 func TestApplySessionDefaultsOverrides(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	args := []string{
 		"-resume", v1TestSession,
@@ -374,6 +384,7 @@ func TestApplySessionDefaultsOverrides(t *testing.T) {
 }
 
 func TestApplySessionDefaultsProviderMismatch(t *testing.T) {
+	t.Parallel()
 	state := v1State()
 
 	t.Run("explicit provider differs", func(t *testing.T) {
@@ -403,6 +414,7 @@ func TestApplySessionDefaultsProviderMismatch(t *testing.T) {
 }
 
 func TestApplySessionDefaultsRejectsUnsupportedState(t *testing.T) {
+	t.Parallel()
 	base := v1ResumeConfig(t)
 	tests := []struct {
 		name   string
@@ -431,6 +443,7 @@ func TestApplySessionDefaultsRejectsUnsupportedState(t *testing.T) {
 }
 
 func TestValidateSessionRules(t *testing.T) {
+	t.Parallel()
 	makeCfg := func(t *testing.T, args ...string) config {
 		t.Helper()
 		base := []string{"-batch", "-resume", v1TestSession, "-state-dir", t.TempDir()}
@@ -489,6 +502,7 @@ func TestValidateSessionRules(t *testing.T) {
 }
 
 func TestSessionFailureExitCodes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		err  error

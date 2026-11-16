@@ -60,6 +60,7 @@ func requestToolNames(t *testing.T, body []byte) []string {
 }
 
 func TestSubagentEndToEnd(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "hello.txt"), []byte("hello\n"), 0o600); err != nil {
@@ -275,6 +276,7 @@ func TestSubagentEndToEnd(t *testing.T) {
 }
 
 func TestSubagentReadOnlyFanOutEndToEnd(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -449,6 +451,7 @@ func subagentOverrideScript() string {
 }
 
 func TestSubagentOverrideChangesChildModelAndCap(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -538,6 +541,7 @@ func TestSubagentOverrideChangesChildModelAndCap(t *testing.T) {
 }
 
 func TestSubagentOverrideUnknownAgentIsConfigError(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -561,6 +565,7 @@ func TestSubagentOverrideUnknownAgentIsConfigError(t *testing.T) {
 }
 
 func TestSubagentOverrideDisablesAgent(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -652,6 +657,7 @@ func TestSubagentOverrideDisablesAgent(t *testing.T) {
 }
 
 func TestBatchCannotDelegate(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()

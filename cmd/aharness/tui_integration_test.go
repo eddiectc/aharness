@@ -23,6 +23,7 @@ import (
 )
 
 func TestBinaryUIJSONScriptedSession(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -135,6 +136,7 @@ func TestBinaryUIJSONScriptedSession(t *testing.T) {
 // same workspace. The resumed session appends its second run; the new session
 // remains an empty session_start.
 func TestBinaryUIJSONNewAndResumeSession(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		switch call {
@@ -267,6 +269,7 @@ func sseFinal(t *testing.T, w http.ResponseWriter, text string) {
 // TestBinaryUIJSONShowsThinking proves the model's reasoning reaches the TUI
 // transcript while staying out of the durable log.
 func TestBinaryUIJSONShowsThinking(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -330,6 +333,7 @@ func TestBinaryUIJSONShowsThinking(t *testing.T) {
 // TestBinaryUIJSONShowsResponsesReasoning proves the Responses dialect's
 // reasoning summary reaches the transcript through the terminal event.
 func TestBinaryUIJSONShowsResponsesReasoning(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -380,6 +384,7 @@ func TestBinaryUIJSONShowsResponsesReasoning(t *testing.T) {
 }
 
 func TestBinaryUIJSONSeededTask(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		sseFinal(t, w, "seeded hello")
@@ -417,13 +422,14 @@ func TestBinaryUIJSONSeededTask(t *testing.T) {
 }
 
 func TestBinaryUIJSONResume(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	firstProvider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		sseFinal(t, w, "first done")
 	})
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
-	first := runHarness(t, bin, workspace, stateDir, firstProvider.url,
+	first := runHarnessInProcess(t, workspace, stateDir, firstProvider.url, nil,
 		"-task", "first task", "-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
 	if first.exit != 0 {
@@ -473,13 +479,14 @@ func TestBinaryUIJSONResume(t *testing.T) {
 }
 
 func TestBinaryUIJSONForkLeavesParentUnchanged(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	firstProvider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		sseFinal(t, w, "parent done")
 	})
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
-	first := runHarness(t, bin, workspace, stateDir, firstProvider.url,
+	first := runHarnessInProcess(t, workspace, stateDir, firstProvider.url, nil,
 		"-task", "parent task", "-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
 	if first.exit != 0 {
@@ -529,6 +536,7 @@ func TestBinaryUIJSONForkLeavesParentUnchanged(t *testing.T) {
 }
 
 func TestBinaryUIJSONSIGTERMCancelsAndExits130(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	started := make(chan struct{})
 	var once sync.Once
@@ -603,6 +611,7 @@ func TestBinaryUIJSONSIGTERMCancelsAndExits130(t *testing.T) {
 }
 
 func TestBinaryUIJSONSteeringReachesNextModelCall(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	firstDelta := make(chan struct{})
 	release := make(chan struct{})
@@ -747,6 +756,7 @@ snapped:
 }
 
 func TestBinaryUIJSONCtrlDActiveExits130(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		<-r.Context().Done()
@@ -758,7 +768,7 @@ func TestBinaryUIJSONCtrlDActiveExits130(t *testing.T) {
 		`{"v":1,"type":"wait","until":"run_started","timeout_ms":10000}`,
 		`{"v":1,"type":"key","key":"ctrl-d"}`,
 	}, "\n") + "\n"
-	_, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, f.url, strings.NewReader(script),
+	_, stderr, exit := runHarnessHeldStdin(t, bin, t.TempDir(), stateDir, f.url, script,
 		"-ui-json", "-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000", "-max-context-tokens", "200000")
 	if exit != 130 {
@@ -771,6 +781,7 @@ func TestBinaryUIJSONCtrlDActiveExits130(t *testing.T) {
 }
 
 func TestBinaryUIJSONStatusLineShowsContextOccupancy(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -819,6 +830,7 @@ func TestBinaryUIJSONStatusLineShowsContextOccupancy(t *testing.T) {
 }
 
 func TestBinaryUIJSONTwoRunsInOneSession(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -871,6 +883,7 @@ func TestBinaryUIJSONTwoRunsInOneSession(t *testing.T) {
 }
 
 func TestBinaryUIJSONModelPickerChangesNextRunOnly(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if r.URL.Path != "/responses" {
@@ -990,7 +1003,16 @@ func (h *interactiveHarness) send(line string) {
 	}
 }
 
-func (h *interactiveHarness) output() string { return h.stdout.String() }
+// output returns the protocol values read so far. The child writes
+// concurrently with the test's reads, so a snapshot can end mid-line; expose
+// only newline-terminated values so parsers never see a truncated frame.
+func (h *interactiveHarness) output() string {
+	raw := h.stdout.String()
+	if end := strings.LastIndexByte(raw, '\n'); end >= 0 {
+		return raw[:end+1]
+	}
+	return ""
+}
 
 func (h *interactiveHarness) waitFor(substr string) {
 	h.t.Helper()
@@ -1077,6 +1099,7 @@ func protocolFrames(t *testing.T, raw string) [][]string {
 }
 
 func TestBinaryUIJSONModelPickerListsCatalog(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	script := strings.Join([]string{
 		`{"v":1,"type":"key","key":"ctrl-p"}`,
@@ -1119,6 +1142,7 @@ func TestBinaryUIJSONModelPickerListsCatalog(t *testing.T) {
 }
 
 func TestBinaryUIJSONModelPickerSelectsAdapter(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	cases := []struct {
 		name    string
@@ -1190,6 +1214,7 @@ func TestBinaryUIJSONModelPickerSelectsAdapter(t *testing.T) {
 }
 
 func TestBinaryUIJSONModelPickerRefresh(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
@@ -1221,6 +1246,7 @@ func TestBinaryUIJSONModelPickerRefresh(t *testing.T) {
 }
 
 func TestBinaryUIJSONModelPickerRefreshFailure(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
@@ -1246,6 +1272,7 @@ func TestBinaryUIJSONModelPickerRefreshFailure(t *testing.T) {
 }
 
 func TestBinaryUIJSONOfflineResumeRefreshEnablesSwitching(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -1254,10 +1281,10 @@ func TestBinaryUIJSONOfflineResumeRefreshEnablesSwitching(t *testing.T) {
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
-	_, stderr, exit := runHarnessRawEnv(t, bin, workspace, stateDir, provider.url, extra, nil,
+	seed := runHarnessInProcess(t, workspace, stateDir, provider.url, extra,
 		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash")
-	if exit != 0 {
-		t.Fatalf("first exit = %d\nstderr:\n%s", exit, stderr)
+	if seed.exit != 0 {
+		t.Fatalf("first exit = %d\nstderr:\n%s", seed.exit, seed.stderr)
 	}
 	files := sessionFiles(t, stateDir)
 	if len(files) != 1 {
@@ -1305,6 +1332,7 @@ func TestBinaryUIJSONOfflineResumeRefreshEnablesSwitching(t *testing.T) {
 }
 
 func TestBinaryUIJSONDeprecatedModelSelectable(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if r.URL.Path != "/chat/completions" {
@@ -1350,6 +1378,7 @@ func TestBinaryUIJSONDeprecatedModelSelectable(t *testing.T) {
 }
 
 func TestBinaryUIJSONThinkingEffortPickerAndClearing(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	models := defaultFakeCatalogModels()
@@ -1515,6 +1544,7 @@ func TestBinaryUIJSONThinkingEffortPickerAndClearing(t *testing.T) {
 }
 
 func TestBinaryUIJSONDetailsShowsOutputBudget(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	cases := []struct {
 		name string
@@ -1546,4 +1576,40 @@ func TestBinaryUIJSONDetailsShowsOutputBudget(t *testing.T) {
 			}
 		})
 	}
+}
+
+// runHarnessHeldStdin runs the binary with a scripted stdin pipe that stays
+// open until the process exits. A quit key such as ctrl-d must win on its own;
+// closing stdin immediately would deliver EOF too, and the driver's disconnect
+// path races the key and exits 0.
+func runHarnessHeldStdin(t *testing.T, bin, workspace, stateDir, baseURL, script string, args ...string) (stdout, stderr string, exit int) {
+	t.Helper()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = pw.Close() }()
+	// The script is far smaller than the pipe buffer, so this cannot block.
+	if _, err := io.WriteString(pw, script); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = workspace
+	cmd.Env = integrationEnv(stateDir, baseURL)
+	cmd.Stdin = pr
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatalf("run harness: %v\nstderr:\n%s", err, errBuf.String())
+		}
+		exit = ee.ExitCode()
+	}
+	return out.String(), errBuf.String(), exit
 }

@@ -36,6 +36,7 @@ func makeReadOnlyTree(t *testing.T, root string) {
 }
 
 func TestRemoveTreeReadOnlyDirs(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "work", "session")
 	makeReadOnlyTree(t, root)
 	if err := removeTree(root); err != nil {
@@ -47,12 +48,14 @@ func TestRemoveTreeReadOnlyDirs(t *testing.T) {
 }
 
 func TestRemoveTreeMissing(t *testing.T) {
+	t.Parallel()
 	if err := removeTree(filepath.Join(t.TempDir(), "absent")); err != nil {
 		t.Fatalf("removeTree(absent) error = %v", err)
 	}
 }
 
 func TestRemoveWorkDirReportsLeftover(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	makeReadOnlyTree(t, filepath.Join(root, "work"))
 	var stderr bytes.Buffer
@@ -66,6 +69,7 @@ func TestRemoveWorkDirReportsLeftover(t *testing.T) {
 }
 
 func TestRestoreOwnerAccessSkipsSymlinks(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outside := filepath.Join(root, "outside")
 	inside := filepath.Join(root, "tree")

@@ -51,6 +51,7 @@ func chatTodoReadResponse() map[string]any {
 }
 
 func TestBinaryTodoRestoresOnResume(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -62,7 +63,7 @@ func TestBinaryTodoRestoresOnResume(t *testing.T) {
 		}
 		writeJSON(w, 200, chatFinalResponse("planned"))
 	})
-	run := runHarness(t, bin, workspace, stateDir, first.url,
+	run := runHarnessInProcess(t, workspace, stateDir, first.url, nil,
 		"-task", "plan the work", "-model", "deepseek-v4.1-flash", "-max-turns", "5")
 	if run.exit != 0 || run.id == "" {
 		t.Fatalf("exit = %d id = %q\nstderr:\n%s", run.exit, run.id, run.stderr)
@@ -97,6 +98,7 @@ func TestBinaryTodoRestoresOnResume(t *testing.T) {
 }
 
 func TestBinaryTodo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -158,6 +160,7 @@ func sseTodoToolCall(t *testing.T, w http.ResponseWriter) {
 // persistent widget in a frame, and that a resumed process restores the widget
 // from the session log before any new tool call.
 func TestBinaryUIJSONTodoWidget(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	workspace := t.TempDir()
 	stateDir := t.TempDir()

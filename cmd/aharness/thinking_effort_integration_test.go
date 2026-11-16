@@ -62,6 +62,7 @@ func assertRequestEffort(t *testing.T, body []byte, dialect, want string) {
 }
 
 func TestBinaryNewSessionThinkingEffort(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startEffortCatalog(t)
 	tests := []struct {
@@ -131,6 +132,7 @@ func TestBinaryNewSessionThinkingEffort(t *testing.T) {
 }
 
 func TestBinaryThinkingEffortValidationExitsTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	models := thinkingEffortCatalogModels()
 	models["plain-text"] = testCatalogModel("Plain Text", "", 100_000, 0, 8_192)
@@ -184,6 +186,7 @@ func TestBinaryThinkingEffortValidationExitsTwo(t *testing.T) {
 }
 
 func TestBinaryResumeThinkingEffortInheritanceOffline(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startEffortCatalog(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -198,7 +201,7 @@ func TestBinaryResumeThinkingEffortInheritanceOffline(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarnessEnv(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url,
 		[]string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()},
 		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash", "-thinking-effort", "high")
 	if first.exit != 0 {
@@ -263,6 +266,7 @@ func TestBinaryResumeThinkingEffortInheritanceOffline(t *testing.T) {
 }
 
 func TestBinaryResumeThinkingEffortExplicitRequiresCatalog(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startEffortCatalog(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -274,7 +278,7 @@ func TestBinaryResumeThinkingEffortExplicitRequiresCatalog(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarnessEnv(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url,
 		[]string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()},
 		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash")
 	if first.exit != 0 {
@@ -336,6 +340,7 @@ func TestBinaryResumeThinkingEffortExplicitRequiresCatalog(t *testing.T) {
 }
 
 func TestBinaryResumeThinkingEffortModelChange(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	tests := []struct {
 		name       string
@@ -376,7 +381,7 @@ func TestBinaryResumeThinkingEffortModelChange(t *testing.T) {
 			})
 			workspace := t.TempDir()
 			stateDir := filepath.Join(t.TempDir(), "state")
-			first := runHarnessEnv(t, bin, workspace, stateDir, f.url,
+			first := runHarnessInProcess(t, workspace, stateDir, f.url,
 				[]string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()},
 				"-batch", "-task", "first", "-model", "deepseek-v4.1-flash", "-thinking-effort", tc.first)
 			if first.exit != 0 {
@@ -425,6 +430,7 @@ func TestBinaryResumeThinkingEffortModelChange(t *testing.T) {
 }
 
 func TestBinaryForkThinkingEffortSessionStart(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startEffortCatalog(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -432,7 +438,7 @@ func TestBinaryForkThinkingEffortSessionStart(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	parent := runHarnessEnv(t, bin, workspace, stateDir, f.url,
+	parent := runHarnessInProcess(t, workspace, stateDir, f.url,
 		[]string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()},
 		"-batch", "-task", "parent", "-model", "deepseek-v4.1-flash", "-thinking-effort", "high")
 	if parent.exit != 0 {
@@ -498,6 +504,7 @@ func TestBinaryForkThinkingEffortSessionStart(t *testing.T) {
 }
 
 func TestBinaryListModelsEffortColumn(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startEffortCatalog(t)
 	stateDir := filepath.Join(t.TempDir(), "state")

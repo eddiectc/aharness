@@ -7,6 +7,7 @@ import (
 )
 
 func TestWriteBuildInfo(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	writeBuildInfo(&buf, buildInfo{
 		Version:     "v1.2.3",
@@ -24,6 +25,7 @@ func TestWriteBuildInfo(t *testing.T) {
 }
 
 func TestWriteBuildInfoUnknownVCS(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	writeBuildInfo(&buf, buildInfo{
 		Version:   "devel",

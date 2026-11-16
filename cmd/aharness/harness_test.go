@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -63,4 +66,28 @@ func cleanupHarness() {
 	if harnessDir != "" {
 		_ = os.RemoveAll(harnessDir)
 	}
+}
+
+// runCLIEnv runs the CLI in-process against an explicit environment. It mirrors
+// runWithIO, so stdout, stderr, and the exit code match a real process without
+// paying process startup. Use it for setup runs whose process boundary is not
+// under test; signals, TTY handling, file modes, and the run under test still
+// execute the real binary.
+func runCLIEnv(t *testing.T, getenv func(string) string, stdin io.Reader, args ...string) (stdout, stderr string, exit int) {
+	t.Helper()
+	var out, errBuf bytes.Buffer
+	exit = runWithIOEnv(args, getenv, stdin, &out, &errBuf)
+	return out.String(), errBuf.String(), exit
+}
+
+// envLookup turns environment entries into the getenv function parseConfig
+// expects. A missing key reads as unset, matching a child process.
+func envLookup(entries []string) func(string) string {
+	values := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			values[key] = value
+		}
+	}
+	return func(key string) string { return values[key] }
 }

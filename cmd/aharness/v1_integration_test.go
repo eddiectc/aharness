@@ -179,6 +179,7 @@ func writeSSE(t *testing.T, w http.ResponseWriter, event, data string) {
 }
 
 func TestBinaryBatchStdoutExcludesThinking(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -209,6 +210,7 @@ func TestBinaryBatchStdoutExcludesThinking(t *testing.T) {
 }
 
 func TestBinaryStreamsBothDialects(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	tests := []struct {
 		name   string
@@ -359,6 +361,7 @@ func mustRead(t *testing.T, path string) []byte {
 }
 
 func TestBinaryResumeAfterLimit(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -372,7 +375,7 @@ func TestBinaryResumeAfterLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "hit the limit",
 		"-model", "deepseek-v4.1-flash",
 		"-max-turns", "1",
@@ -443,6 +446,7 @@ func TestBinaryResumeAfterLimit(t *testing.T) {
 }
 
 func TestBinaryUnlimitedRunExceedsOldBudgets(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	const toolTurns = 31
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -509,6 +513,7 @@ func TestBinaryUnlimitedRunExceedsOldBudgets(t *testing.T) {
 }
 
 func TestBinaryResumeIgnoresRecordedBudgets(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -522,7 +527,7 @@ func TestBinaryResumeIgnoresRecordedBudgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "stop at one turn",
 		"-model", "deepseek-v4.1-flash",
 		"-max-turns", "1",
@@ -554,6 +559,7 @@ func TestBinaryResumeIgnoresRecordedBudgets(t *testing.T) {
 }
 
 func TestBinaryRepairsTornFinalLine(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -564,7 +570,7 @@ func TestBinaryRepairsTornFinalLine(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "first",
 		"-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000",
@@ -612,6 +618,7 @@ func TestBinaryRepairsTornFinalLine(t *testing.T) {
 }
 
 func TestBinaryForkIsSelfContained(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -622,7 +629,7 @@ func TestBinaryForkIsSelfContained(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	parent := runHarness(t, bin, workspace, stateDir, f.url,
+	parent := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "parent task",
 		"-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000",
@@ -762,6 +769,7 @@ func seedCrashSession(t *testing.T, stateDir, workspace, baseURL, id string) []s
 }
 
 func TestBinaryForkRepairsPendingCallsInCopy(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call != 1 {
@@ -859,6 +867,7 @@ func quoteJSON(t *testing.T, s string) string {
 }
 
 func TestBinaryResumeRepairsPendingCalls(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call != 1 {
@@ -944,6 +953,7 @@ func TestBinaryResumeRepairsPendingCalls(t *testing.T) {
 }
 
 func TestBinaryLockConflictExitsTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -1000,6 +1010,7 @@ func TestBinaryLockConflictExitsTwo(t *testing.T) {
 }
 
 func TestBinaryRejectsV0Log(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	dir := filepath.Join(stateDir, "sessions")
@@ -1028,6 +1039,7 @@ func TestBinaryRejectsV0Log(t *testing.T) {
 }
 
 func TestBinaryStaleWorkDirRecreated(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -1038,7 +1050,7 @@ func TestBinaryStaleWorkDirRecreated(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "first",
 		"-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000",
@@ -1073,6 +1085,7 @@ func TestBinaryStaleWorkDirRecreated(t *testing.T) {
 // unlink entries from such a directory, so clearing the work tree must restore
 // write permission instead of failing the run at start.
 func TestBinaryReadOnlyWorkDirRecreated(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -1083,7 +1096,7 @@ func TestBinaryReadOnlyWorkDirRecreated(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "first",
 		"-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000",
@@ -1130,6 +1143,7 @@ func TestBinaryReadOnlyWorkDirRecreated(t *testing.T) {
 }
 
 func TestBinaryUnknownV2EventTolerated(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -1140,7 +1154,7 @@ func TestBinaryUnknownV2EventTolerated(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "first",
 		"-model", "deepseek-v4.1-flash",
 		"-max-output-tokens", "1000",
@@ -1178,6 +1192,7 @@ func TestBinaryUnknownV2EventTolerated(t *testing.T) {
 }
 
 func TestBinaryOversizedResponseRejectedBeforeTools(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	huge := strings.Repeat("x", 1<<20)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -1221,6 +1236,7 @@ func TestBinaryOversizedResponseRejectedBeforeTools(t *testing.T) {
 }
 
 func TestBinaryOneMiBStreamedResponseRoundTrips(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	huge := strings.Repeat("x", 1<<20)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -1264,6 +1280,7 @@ func TestBinaryOneMiBStreamedResponseRoundTrips(t *testing.T) {
 }
 
 func TestBinaryRequireUsageStopsBeforeTools(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call != 1 {
@@ -1326,6 +1343,7 @@ func TestBinaryRequireUsageStopsBeforeTools(t *testing.T) {
 }
 
 func TestBinaryRecordsCatalogCost(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	catalog.SetRawBody([]byte(`{

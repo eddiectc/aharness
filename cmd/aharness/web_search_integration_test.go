@@ -46,6 +46,7 @@ func newFakeSearx(t *testing.T, status int, body string) *httptest.Server {
 }
 
 func TestBinaryWebSearch(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 
 	t.Run("configured", func(t *testing.T) {

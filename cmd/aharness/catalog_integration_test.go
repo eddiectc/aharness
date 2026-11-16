@@ -114,6 +114,7 @@ func assertNoSessionFiles(t *testing.T, stateDir string) {
 }
 
 func TestBinaryListModels(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	fake := startFakeModelsDev(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -173,6 +174,7 @@ func TestBinaryListModels(t *testing.T) {
 }
 
 func TestBinaryListModelsUnknownProviderExitsTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	_, stderr, exit := runHarnessRaw(t, bin, t.TempDir(), stateDir, "", nil,
@@ -187,6 +189,7 @@ func TestBinaryListModelsUnknownProviderExitsTwo(t *testing.T) {
 }
 
 func TestBinaryRefreshModels(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	fake := startFakeModelsDev(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -287,6 +290,7 @@ func TestBinaryRefreshModels(t *testing.T) {
 }
 
 func TestBinaryRefreshThenList(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	fake := startFakeModelsDev(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -334,6 +338,7 @@ func TestBinaryRefreshThenList(t *testing.T) {
 }
 
 func TestBinaryListRevalidatesAndFallsBackToCache(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	fake := startFakeModelsDev(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -377,6 +382,7 @@ func TestBinaryListRevalidatesAndFallsBackToCache(t *testing.T) {
 }
 
 func TestBinaryFreshCacheSkipsCatalogRequests(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	fake := startFakeModelsDev(t)
 	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -408,6 +414,7 @@ func TestBinaryFreshCacheSkipsCatalogRequests(t *testing.T) {
 }
 
 func TestBinaryExplicitOutputBudgetPassThrough(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	cases := []struct {
 		model string
@@ -461,6 +468,7 @@ func providerBodies(f *fakeProvider) [][]byte {
 }
 
 func TestBinaryResumeOutputBudget(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		switch call {
@@ -474,7 +482,7 @@ func TestBinaryResumeOutputBudget(t *testing.T) {
 	})
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
-	first := runHarness(t, bin, workspace, stateDir, f.url,
+	first := runHarnessInProcess(t, workspace, stateDir, f.url, nil,
 		"-task", "first", "-model", "deepseek-v4.1-flash", "-max-output-tokens", "777")
 	if first.exit != 0 {
 		t.Fatalf("first exit = %d\nstderr:\n%s", first.exit, first.stderr)
@@ -523,6 +531,7 @@ func TestBinaryResumeOutputBudget(t *testing.T) {
 }
 
 func TestBinaryTranslatedModelUsesChat(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if r.URL.Path != "/chat/completions" {
@@ -549,6 +558,7 @@ func TestBinaryTranslatedModelUsesChat(t *testing.T) {
 }
 
 func TestBinaryDeprecatedModelWarnsAndRuns(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if r.URL.Path != "/chat/completions" {
@@ -572,6 +582,7 @@ func TestBinaryDeprecatedModelWarnsAndRuns(t *testing.T) {
 }
 
 func TestBinaryResumeOfflineWithoutExplicitModel(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -580,10 +591,10 @@ func TestBinaryResumeOfflineWithoutExplicitModel(t *testing.T) {
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
-	_, stderr, exit := runHarnessRawEnv(t, bin, workspace, stateDir, f.url, extra, nil,
+	seed := runHarnessInProcess(t, workspace, stateDir, f.url, extra,
 		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash")
-	if exit != 0 {
-		t.Fatalf("first exit = %d\nstderr:\n%s", exit, stderr)
+	if seed.exit != 0 {
+		t.Fatalf("first exit = %d\nstderr:\n%s", seed.exit, seed.stderr)
 	}
 	files := sessionFiles(t, stateDir)
 	if len(files) != 1 {
@@ -628,6 +639,7 @@ func TestBinaryResumeOfflineWithoutExplicitModel(t *testing.T) {
 }
 
 func TestBinaryResumeExplicitModelChange(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -647,10 +659,10 @@ func TestBinaryResumeExplicitModelChange(t *testing.T) {
 	workspace := t.TempDir()
 	stateDir := filepath.Join(t.TempDir(), "state")
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}
-	_, stderr, exit := runHarnessRawEnv(t, bin, workspace, stateDir, f.url, extra, nil,
+	seed := runHarnessInProcess(t, workspace, stateDir, f.url, extra,
 		"-batch", "-task", "first", "-model", "deepseek-v4.1-flash")
-	if exit != 0 {
-		t.Fatalf("first exit = %d\nstderr:\n%s", exit, stderr)
+	if seed.exit != 0 {
+		t.Fatalf("first exit = %d\nstderr:\n%s", seed.exit, seed.stderr)
 	}
 	files := sessionFiles(t, stateDir)
 	id := strings.TrimSuffix(filepath.Base(files[0]), ".jsonl")
@@ -693,6 +705,7 @@ func TestBinaryResumeExplicitModelChange(t *testing.T) {
 }
 
 func TestBinaryCatalogFailureExitCodes(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	cases := []struct {
 		name   string
@@ -726,6 +739,7 @@ func TestBinaryCatalogFailureExitCodes(t *testing.T) {
 }
 
 func TestBinaryLengthFinishStopsWithTokenLimit(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		writeJSON(w, 200, map[string]any{
@@ -755,6 +769,7 @@ func TestBinaryLengthFinishStopsWithTokenLimit(t *testing.T) {
 }
 
 func TestBinaryContextOverflowCompactsAndRetries(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	const toolTurns = 12
 	cmdJSON := `{"command":"head -c 8000 /dev/zero | tr '\\0' x","timeout_ms":30000}`
@@ -818,6 +833,7 @@ func ageCatalogCache(t *testing.T, path string) {
 }
 
 func TestBinaryStaleCacheFallbackOnImplicitRefresh(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	provider := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -855,6 +871,7 @@ func TestBinaryStaleCacheFallbackOnImplicitRefresh(t *testing.T) {
 }
 
 func TestBinaryRefreshCacheWriteFailureExitsTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -878,6 +895,7 @@ func TestBinaryRefreshCacheWriteFailureExitsTwo(t *testing.T) {
 }
 
 func TestBinaryExplicitOutputRejectedByProvider(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		writeJSON(w, 400, map[string]any{"error": map[string]any{
@@ -965,6 +983,7 @@ func seedLegacyBudgetSession(t *testing.T, stateDir, workspace, baseURL string) 
 }
 
 func TestBinaryResumeLegacyRecordedOutputBudget(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if r.URL.Path != "/chat/completions" {

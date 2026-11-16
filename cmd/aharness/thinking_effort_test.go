@@ -35,6 +35,7 @@ func thinkingEffortCatalogModels() map[string]fakeCatalogModel {
 }
 
 func TestConfigThinkingEffort(t *testing.T) {
+	t.Parallel()
 	tooLong := strings.Repeat("a", model.MaxThinkingEffortBytes+1)
 	tests := []struct {
 		name    string
@@ -142,6 +143,7 @@ func TestConfigThinkingEffort(t *testing.T) {
 }
 
 func TestConfigThinkingEffortTerminalActionsIgnoreSetting(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"-list-models", "-refresh-models"} {
 		for _, value := range []string{"", "High", "high\x01", strings.Repeat("z", model.MaxThinkingEffortBytes+1)} {
 			t.Run(action+"_"+value, func(t *testing.T) {
@@ -166,6 +168,7 @@ func TestConfigThinkingEffortTerminalActionsIgnoreSetting(t *testing.T) {
 }
 
 func TestResolveNewModelThinkingEffort(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		model   string
@@ -225,6 +228,7 @@ func TestResolveNewModelThinkingEffort(t *testing.T) {
 }
 
 func TestResolveSessionThinkingEffort(t *testing.T) {
+	t.Parallel()
 	state := v1State()
 	state.ThinkingEffort = "high"
 
@@ -279,6 +283,7 @@ func TestResolveSessionThinkingEffort(t *testing.T) {
 }
 
 func TestWriteCatalogListEffortColumn(t *testing.T) {
+	t.Parallel()
 	models := []model.CatalogModel{
 		{
 			ID:               "alpha",
@@ -317,6 +322,7 @@ func TestWriteCatalogListEffortColumn(t *testing.T) {
 }
 
 func TestInspectLegacySessionWithoutThinkingEffort(t *testing.T) {
+	t.Parallel()
 	id := "0190a0c4-0000-7000-8000-0000000000dd"
 	events := []session.Event{
 		{

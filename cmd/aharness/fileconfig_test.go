@@ -35,6 +35,7 @@ func cfgWithFile(t *testing.T, body string, extra ...string) config {
 }
 
 func TestConfigPrecedenceFlagEnvFileDefault(t *testing.T) {
+	t.Parallel()
 	envWorkspace := t.TempDir()
 	flagWorkspace := t.TempDir()
 	fileWorkspace := t.TempDir()
@@ -109,6 +110,7 @@ func TestConfigPrecedenceFlagEnvFileDefault(t *testing.T) {
 }
 
 func TestConfigFileDefaultsWhenNothingElseSet(t *testing.T) {
+	t.Parallel()
 	workspace := t.TempDir()
 	cfg := cfgWithFile(t, `{
 		"model": "file-model",
@@ -129,6 +131,7 @@ func TestConfigFileDefaultsWhenNothingElseSet(t *testing.T) {
 }
 
 func TestConfigFileDefaultsApplyToBuiltInDefaults(t *testing.T) {
+	t.Parallel()
 	// With no file and no overrides the documented defaults still hold.
 	stateDir := t.TempDir()
 	args := []string{
@@ -153,6 +156,7 @@ func TestConfigFileDefaultsApplyToBuiltInDefaults(t *testing.T) {
 }
 
 func TestConfigImplicitFileUnderStateDir(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	path := filepath.Join(stateDir, "config.json")
@@ -169,6 +173,7 @@ func TestConfigImplicitFileUnderStateDir(t *testing.T) {
 }
 
 func TestConfigEnvSelectsFile(t *testing.T) {
+	t.Parallel()
 	path := writeConfigFile(t, `{"model":"env-file-model","workspace":"`+t.TempDir()+`"}`)
 	cfg := cfgTestParseOK(t, []string{"-task", "env file", "-state-dir", t.TempDir()},
 		map[string]string{"AHARNESS_CONFIG": path})
@@ -181,6 +186,7 @@ func TestConfigEnvSelectsFile(t *testing.T) {
 }
 
 func TestConfigFlagOverridesEnvFileSelection(t *testing.T) {
+	t.Parallel()
 	envPath := writeConfigFile(t, `{"model":"env-file-model"}`)
 	flagPath := writeConfigFile(t, `{"model":"flag-file-model","workspace":"`+t.TempDir()+`"}`)
 	cfg := cfgTestParseOK(t, []string{"-task", "flag file", "-state-dir", t.TempDir(), "-config", flagPath},
@@ -194,6 +200,7 @@ func TestConfigFlagOverridesEnvFileSelection(t *testing.T) {
 }
 
 func TestConfigFileDisabledWithEmptyFlag(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	path := filepath.Join(stateDir, "config.json")
@@ -211,6 +218,7 @@ func TestConfigFileDisabledWithEmptyFlag(t *testing.T) {
 }
 
 func TestConfigFileErrors(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	base := []string{"-task", "task", "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir(), "-state-dir", stateDir}
 
@@ -302,6 +310,7 @@ func TestConfigFileErrors(t *testing.T) {
 }
 
 func TestConfigHTTPTimeoutPrecedenceAndValidation(t *testing.T) {
+	t.Parallel()
 	path := writeConfigFile(t, `{"http_timeout": "45s", "catalog_timeout": "9s"}`)
 
 	cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-config", path,
@@ -342,6 +351,7 @@ func TestConfigHTTPTimeoutPrecedenceAndValidation(t *testing.T) {
 }
 
 func TestConfigTimeoutFlagsReachTerminalActions(t *testing.T) {
+	t.Parallel()
 	cfg := cfgTestParseOK(t, []string{"-list-models", "-state-dir", t.TempDir(),
 		"-catalog-timeout", "4s", "-http-timeout", "11s"}, nil)
 	if cfg.CatalogTimeout != 4*time.Second {
@@ -365,6 +375,7 @@ func TestConfigTimeoutFlagsReachTerminalActions(t *testing.T) {
 }
 
 func TestLayerResolution(t *testing.T) {
+	t.Parallel()
 	fileValue := 5
 	cases := []struct {
 		name      string
@@ -390,6 +401,7 @@ func TestLayerResolution(t *testing.T) {
 }
 
 func TestConfigFileRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -416,6 +428,7 @@ func TestConfigFileRejectsMalformedInput(t *testing.T) {
 }
 
 func TestConfigFileEmptyObjectIsValid(t *testing.T) {
+	t.Parallel()
 	path := writeConfigFile(t, `{}`)
 	cfg, err := loadFileConfig(path, true)
 	if err != nil {
@@ -427,6 +440,7 @@ func TestConfigFileEmptyObjectIsValid(t *testing.T) {
 }
 
 func TestConfigFileAcceptsAbsentPath(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFileConfig("", false)
 	if err != nil {
 		t.Fatalf("loadFileConfig(\"\"): %v", err)
@@ -444,6 +458,7 @@ func TestConfigFileAcceptsAbsentPath(t *testing.T) {
 }
 
 func TestConfigFileHTTPTimeoutReachesAdapter(t *testing.T) {
+	t.Parallel()
 	path := writeConfigFile(t, `{"http_timeout": "7m"}`)
 	cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-config", path), nil)
 	// The flag default is the built-in 15m, so a naive implementation would
@@ -457,6 +472,7 @@ func TestConfigFileHTTPTimeoutReachesAdapter(t *testing.T) {
 }
 
 func TestConfigFileAgentOverrides(t *testing.T) {
+	t.Parallel()
 	path := writeConfigFile(t, `{
 		"agent_overrides": {
 			"reviewer": {"model": "review-model", "thinking_effort": "high", "max_turns": 4, "enabled": false},
@@ -484,6 +500,7 @@ func TestConfigFileAgentOverrides(t *testing.T) {
 }
 
 func TestConfigFileAgentOverrideErrors(t *testing.T) {
+	t.Parallel()
 	var tooMany strings.Builder
 	tooMany.WriteString(`{"agent_overrides":{`)
 	for i := 0; i <= 32; i++ {
@@ -531,6 +548,7 @@ func fileDuration(value time.Duration) *configDuration {
 }
 
 func TestWriteFileConfigRoundTrip(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.json")
 	original := fileConfig{
 		Model:            fileStr("model-x"),
@@ -606,6 +624,7 @@ func TestWriteFileConfigRoundTrip(t *testing.T) {
 }
 
 func TestWriteFileConfigPreservesOtherKeys(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{
 		"model": "keep-me",
@@ -641,6 +660,7 @@ func TestWriteFileConfigPreservesOtherKeys(t *testing.T) {
 }
 
 func TestWriteFileConfigFailureLeavesTargetIntact(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.json")
 	if err := os.Mkdir(target, 0o700); err != nil {

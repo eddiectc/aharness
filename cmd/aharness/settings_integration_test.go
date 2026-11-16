@@ -13,6 +13,7 @@ import (
 // lists the config-file keys, persists display preferences, and edits a numeric
 // run setting through the real config writer.
 func TestBinaryUIJSONSettingsWritesConfig(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	catalog := startFakeModelsDev(t)
 	extra := []string{"AHARNESS_MODELS_DEV_URL=" + catalog.URL()}

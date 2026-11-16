@@ -14,6 +14,7 @@ import (
 // -model/workspace/max-turns flags, a config file under the state directory
 // supplies them, and the environment and flags still win over the file.
 func TestBinaryReadsConfigFile(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
@@ -89,6 +90,7 @@ func TestBinaryReadsConfigFile(t *testing.T) {
 // TestBinaryHTTPTimeoutDoesNotBreakFastCall proves -http-timeout reaches the
 // adapter without disturbing a normal request.
 func TestBinaryHTTPTimeoutDoesNotBreakFastCall(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, _ *http.Request, _ int, _ []byte) {
 		writeJSON(w, 200, chatFinalResponse("fast"))
@@ -113,6 +115,7 @@ func TestBinaryHTTPTimeoutDoesNotBreakFastCall(t *testing.T) {
 // TestBinaryConfigFileErrorsExitTwo covers the operator-visible failure modes:
 // a broken explicit file is a config error before any session state exists.
 func TestBinaryConfigFileErrorsExitTwo(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	path := filepath.Join(t.TempDir(), "broken.json")

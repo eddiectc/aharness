@@ -70,6 +70,7 @@ func createTestSession(t *testing.T, stateDir, workspace, modelName, thinkingEff
 }
 
 func TestListPreviousSessionsFiltersWorkspaceAndOrdersNewest(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	otherWorkspace := t.TempDir()
@@ -116,6 +117,7 @@ func TestListPreviousSessionsFiltersWorkspaceAndOrdersNewest(t *testing.T) {
 }
 
 func TestListPreviousSessionsMissingDirectory(t *testing.T) {
+	t.Parallel()
 	choices, err := listPreviousSessions(t.TempDir(), "/workspace", "")
 	if err != nil {
 		t.Fatalf("listPreviousSessions: %v", err)
@@ -126,6 +128,7 @@ func TestListPreviousSessionsMissingDirectory(t *testing.T) {
 }
 
 func TestSessionPreviewCapsAndSanitizes(t *testing.T) {
+	t.Parallel()
 	got := sessionPreview(strings.Repeat("x", sessionPreviewBytes+5) + "\n\x1b")
 	if len(got) > sessionPreviewBytes+32 {
 		t.Fatalf("preview length = %d", len(got))
@@ -161,6 +164,7 @@ func newSessionHost(t *testing.T, stateDir, workspace string) (*tuiHost, string)
 }
 
 func TestTUIHostNewSessionReplacesTheStore(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	host, current := newSessionHost(t, stateDir, workspace)
@@ -203,6 +207,7 @@ func TestTUIHostNewSessionReplacesTheStore(t *testing.T) {
 }
 
 func TestTUIHostResumeSessionInheritsRecordedSettings(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	host, current := newSessionHost(t, stateDir, workspace)
@@ -237,6 +242,7 @@ func TestTUIHostResumeSessionInheritsRecordedSettings(t *testing.T) {
 }
 
 func TestTUIHostResumeRejectsOtherWorkspaceAndKeepsCurrent(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	otherWorkspace := t.TempDir()
@@ -262,6 +268,7 @@ func TestTUIHostResumeRejectsOtherWorkspaceAndKeepsCurrent(t *testing.T) {
 }
 
 func TestTUIHostResumeLockedSessionKeepsCurrent(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	host, current := newSessionHost(t, stateDir, workspace)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestConfigWebFetchPrecedence(t *testing.T) {
+	t.Parallel()
 	workspace := t.TempDir()
 	path := writeConfigFile(t, `{
 		"model": "file-model",
@@ -97,6 +98,7 @@ func TestConfigWebFetchPrecedence(t *testing.T) {
 }
 
 func TestConfigWebFetchValidation(t *testing.T) {
+	t.Parallel()
 	base := cfgTestBaseArgs(t)
 	workspace := t.TempDir()
 
@@ -211,6 +213,7 @@ func TestConfigWebFetchValidation(t *testing.T) {
 }
 
 func TestConfigWebFetchHelp(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	_, err := parseConfig([]string{"-h"}, cfgTestGetenv(nil), &out)
 	if !errors.Is(err, flag.ErrHelp) {

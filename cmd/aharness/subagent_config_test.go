@@ -13,6 +13,7 @@ import (
 )
 
 func TestMaxSubagentsConfig(t *testing.T) {
+	t.Parallel()
 	cfg := cfgTestParseOK(t, cfgTestArgs(t), nil)
 	if cfg.MaxSubagents != defaultMaxSubagents || cfg.maxSubagentsSet {
 		t.Fatalf("default max subagents = %d (set %v), want %d", cfg.MaxSubagents, cfg.maxSubagentsSet, defaultMaxSubagents)
@@ -37,6 +38,7 @@ func TestMaxSubagentsConfig(t *testing.T) {
 }
 
 func TestMaxSubagentsConfigFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{"max_subagents": 5}`), 0o600); err != nil {
@@ -55,6 +57,7 @@ func TestMaxSubagentsConfigFile(t *testing.T) {
 }
 
 func TestBatchGrantExcludesDelegate(t *testing.T) {
+	t.Parallel()
 	grant := batchTools(config{Mode: ModeBatch, ToolsetVersion: tools.Version})
 	if slices.Contains(grant, "delegate") {
 		t.Fatalf("batch grant includes delegate: %v", grant)
@@ -81,6 +84,7 @@ func TestBatchGrantExcludesDelegate(t *testing.T) {
 }
 
 func TestRunnerConfigRecordsTheAgentContract(t *testing.T) {
+	t.Parallel()
 	cfg := config{
 		Provider: "opencode-go", Model: "m", Dialect: "openai-chat",
 		PromptVersion: agent.PromptVersion, ToolsetVersion: tools.Version,
@@ -101,6 +105,7 @@ func TestRunnerConfigRecordsTheAgentContract(t *testing.T) {
 }
 
 func TestResumePickerExcludesChildren(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	parent := createTestSession(t, stateDir, workspace, "model-a", "", "parent task")
@@ -141,6 +146,7 @@ func TestResumePickerExcludesChildren(t *testing.T) {
 }
 
 func TestSessionGrantNarrowsPreDelegateSessions(t *testing.T) {
+	t.Parallel()
 	// A recorded grant always wins.
 	if got := sessionGrant([]string{"read_file"}, tools.Version); len(got) != 1 || got[0] != "read_file" {
 		t.Fatalf("recorded grant = %v", got)

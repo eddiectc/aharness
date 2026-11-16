@@ -39,13 +39,20 @@ func runArgs(args []string, stdout, stderr io.Writer) int {
 }
 
 func runWithIO(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runWithIOEnv(args, os.Getenv, stdin, stdout, stderr)
+}
+
+// runWithIOEnv is runWithIO with the environment source injected. Tests use it
+// to exercise CLI behavior in-process against an explicit environment instead
+// of mutating os.Environ.
+func runWithIOEnv(args []string, getenv func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if stdout == nil {
 		stdout = io.Discard
 	}
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	cfg, err := parseConfig(args, os.Getenv, stderr)
+	cfg, err := parseConfig(args, getenv, stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0

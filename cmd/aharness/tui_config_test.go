@@ -10,6 +10,7 @@ import (
 )
 
 func TestParseModeSelection(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	base := []string{"-state-dir", stateDir, "-model", "deepseek-v4.1-flash", "-workspace", t.TempDir()}
 	cfg := cfgTestParseOK(t, base, nil)
@@ -30,6 +31,7 @@ func TestParseModeSelection(t *testing.T) {
 }
 
 func TestParseRemovedInteractiveFlag(t *testing.T) {
+	t.Parallel()
 	args := append(cfgTestBaseArgs(t), "-interactive")
 	if err := cfgTestParseErr(t, args, nil); err == nil {
 		t.Fatal("-interactive accepted")
@@ -37,6 +39,7 @@ func TestParseRemovedInteractiveFlag(t *testing.T) {
 }
 
 func TestParseModeExclusionsAndUISize(t *testing.T) {
+	t.Parallel()
 	base := cfgTestBaseArgs(t)
 	if err := cfgTestParseErr(t, append(append([]string{}, base...), "-batch", "-ui-json"), nil); err == nil {
 		t.Fatal("-batch and -ui-json accepted together")
@@ -56,6 +59,7 @@ func TestParseModeExclusionsAndUISize(t *testing.T) {
 }
 
 func TestModeTaskAndStreamRules(t *testing.T) {
+	t.Parallel()
 	// Batch requires a task for a new session; TUI does not.
 	batch := config{Mode: ModeBatch}
 	if err := validateModeRules(&batch); err == nil || !strings.Contains(err.Error(), "task") {
@@ -84,6 +88,7 @@ func TestModeTaskAndStreamRules(t *testing.T) {
 }
 
 func TestVersionSkipsModeSelection(t *testing.T) {
+	t.Parallel()
 	cfg, err := parseConfig([]string{"-version", "-ui-json", "-batch"}, cfgTestGetenv(nil), io.Discard)
 	if err != nil || !cfg.ShowVersion {
 		t.Fatalf("version config = %+v err=%v", cfg, err)
@@ -135,6 +140,7 @@ func TestSelectModeMatrix(t *testing.T) {
 }
 
 func TestParseTUIDefersCatalogResolution(t *testing.T) {
+	t.Parallel()
 	// The TUI host resolves the catalog after parseConfig; an unknown model is
 	// not rejected until the host loads the catalog.
 	cfg := cfgTestParseOK(t, []string{
@@ -181,6 +187,7 @@ func TestParseCatalogTerminalActionsIgnoreTTYRules(t *testing.T) {
 }
 
 func TestTUISelectModelReportsContextClamp(t *testing.T) {
+	t.Parallel()
 	host := &tuiHost{
 		cfg: config{
 			Provider:         providerName,
@@ -221,6 +228,7 @@ func TestTUISelectModelReportsContextClamp(t *testing.T) {
 }
 
 func TestTUIModelChoiceCopiesReasoningEfforts(t *testing.T) {
+	t.Parallel()
 	source := model.CatalogModel{
 		ID:               "deepseek-v4.1-flash",
 		Name:             "DeepSeek V4.1 Flash",
@@ -244,6 +252,7 @@ func TestTUIModelChoiceCopiesReasoningEfforts(t *testing.T) {
 }
 
 func TestTUIHostInfoTracksEffectiveEffort(t *testing.T) {
+	t.Parallel()
 	host := &tuiHost{
 		cfg:  config{ThinkingEffort: "high"},
 		info: tui.Info{Model: "deepseek-v4.1-flash"},
@@ -258,6 +267,7 @@ func TestTUIHostInfoTracksEffectiveEffort(t *testing.T) {
 }
 
 func TestTUIResolveRunThinkingEffort(t *testing.T) {
+	t.Parallel()
 	catalog := map[string]model.CatalogModel{
 		"supported": {ID: "supported", Reasoning: true, ReasoningEfforts: []string{"low", "high"}},
 		"no-values": {ID: "no-values", Reasoning: true},

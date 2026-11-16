@@ -54,6 +54,7 @@ func fakeCrawl4AI(t *testing.T, status int, envelope string) *httptest.Server {
 }
 
 func TestBinaryWebFetchCrawl4AI(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	provider := fakeCrawl4AI(t, http.StatusOK, `{
 		"success": true,
@@ -131,6 +132,7 @@ func TestBinaryWebFetchCrawl4AI(t *testing.T) {
 }
 
 func TestBinaryWebFetchBuiltinBlockedAddress(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	model := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -160,6 +162,7 @@ func TestBinaryWebFetchBuiltinBlockedAddress(t *testing.T) {
 }
 
 func TestBinaryWebFetchProviderFailure(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	provider := fakeCrawl4AI(t, http.StatusInternalServerError, `{"detail":"boom"}`)
 	model := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
@@ -190,6 +193,7 @@ func TestBinaryWebFetchProviderFailure(t *testing.T) {
 }
 
 func TestBinaryWebFetchResumeKeepsToolsetV1(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	workspace := t.TempDir()
@@ -201,7 +205,7 @@ func TestBinaryWebFetchResumeKeepsToolsetV1(t *testing.T) {
 		}
 		writeJSON(w, 200, chatFinalResponse("done"))
 	})
-	run := runHarnessEnv(t, bin, workspace, stateDir, model.url, nil,
+	run := runHarnessInProcess(t, workspace, stateDir, model.url, nil,
 		"-task", "hello",
 		"-model", "deepseek-v4.1-flash",
 		"-max-turns", "2",

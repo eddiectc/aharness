@@ -9,6 +9,7 @@ import (
 )
 
 func TestConfigSearXNGURLPrecedence(t *testing.T) {
+	t.Parallel()
 	workspace := t.TempDir()
 	path := writeConfigFile(t, `{
 		"model": "file-model",
@@ -67,6 +68,7 @@ func TestConfigSearXNGURLPrecedence(t *testing.T) {
 }
 
 func TestConfigSearXNGURLValidation(t *testing.T) {
+	t.Parallel()
 	base := cfgTestBaseArgs(t)
 	workspace := t.TempDir()
 
@@ -154,6 +156,7 @@ func TestConfigSearXNGURLValidation(t *testing.T) {
 }
 
 func TestConfigSearXNGURLHelp(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	_, err := parseConfig([]string{"-h"}, cfgTestGetenv(nil), &out)
 	if !errors.Is(err, flag.ErrHelp) {

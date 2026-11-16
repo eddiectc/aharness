@@ -106,6 +106,7 @@ func cfgTestResolveErr(t *testing.T, cfg config, fake *fakeModelsDev) error {
 }
 
 func TestConfigDefaults(t *testing.T) {
+	t.Parallel()
 	cfg := cfgTestParseOK(t, cfgTestBaseArgs(t), nil)
 
 	if cfg.Task != "fix the bug" {
@@ -168,6 +169,7 @@ func TestConfigDefaults(t *testing.T) {
 }
 
 func TestConfigEnvFlagPrecedence(t *testing.T) {
+	t.Parallel()
 	envWorkspace := t.TempDir()
 	envState := t.TempDir()
 	flagWorkspace := t.TempDir()
@@ -218,6 +220,7 @@ func TestConfigEnvFlagPrecedence(t *testing.T) {
 }
 
 func TestConfigEnvOverridesDefaults(t *testing.T) {
+	t.Parallel()
 	envWorkspace := t.TempDir()
 	envState := t.TempDir()
 	env := map[string]string{
@@ -261,6 +264,7 @@ func TestConfigEnvOverridesDefaults(t *testing.T) {
 }
 
 func TestConfigTaskSources(t *testing.T) {
+	t.Parallel()
 	common := []string{
 		"-batch",
 		"-model", "deepseek-v4.1-flash",
@@ -314,6 +318,7 @@ func TestConfigTaskSources(t *testing.T) {
 }
 
 func TestConfigTaskRequiredExactlyOne(t *testing.T) {
+	t.Parallel()
 	common := []string{
 		"-batch",
 		"-model", "deepseek-v4.1-flash",
@@ -347,6 +352,7 @@ func TestConfigTaskRequiredExactlyOne(t *testing.T) {
 }
 
 func TestConfigNewSessionResolvedValues(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	env := map[string]string{"AHARNESS_MODELS_DEV_URL": fake.URL()}
 	cases := []struct {
@@ -412,6 +418,7 @@ func TestConfigNewSessionResolvedValues(t *testing.T) {
 }
 
 func TestConfigModelRequired(t *testing.T) {
+	t.Parallel()
 	args := []string{
 		"-task", "task",
 		"-workspace", t.TempDir(),
@@ -424,6 +431,7 @@ func TestConfigModelRequired(t *testing.T) {
 }
 
 func TestConfigUnknownModelResolvesAsConfigError(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	cfg := cfgTestParseOK(t, append(cfgTestArgs(t), "-model", "unknown-model"), nil)
 	err := cfgTestResolveErr(t, cfg, fake)
@@ -436,6 +444,7 @@ func TestConfigUnknownModelResolvesAsConfigError(t *testing.T) {
 }
 
 func TestConfigIneligibleModelsResolveAsConfigErrors(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	cases := []struct {
 		model string
@@ -460,6 +469,7 @@ func TestConfigIneligibleModelsResolveAsConfigErrors(t *testing.T) {
 }
 
 func TestConfigExplicitContext(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 
 	t.Run("flag below window", func(t *testing.T) {
@@ -511,6 +521,7 @@ func TestConfigExplicitContext(t *testing.T) {
 }
 
 func TestConfigOutputBudget(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 
 	t.Run("unset omits the budget", func(t *testing.T) {
@@ -557,6 +568,7 @@ func TestConfigOutputBudget(t *testing.T) {
 }
 
 func TestConfigProviderSelection(t *testing.T) {
+	t.Parallel()
 	t.Run("default", func(t *testing.T) {
 		cfg := cfgTestParseOK(t, cfgTestBaseArgs(t), nil)
 		if cfg.Provider != providerName || cfg.providerSet {
@@ -596,6 +608,7 @@ func TestConfigProviderSelection(t *testing.T) {
 }
 
 func TestConfigTerminalActions(t *testing.T) {
+	t.Parallel()
 	stateDir := t.TempDir()
 	env := map[string]string{
 		"AHARNESS_STATE_DIR":      stateDir,
@@ -666,6 +679,7 @@ func TestConfigTerminalActions(t *testing.T) {
 }
 
 func TestConfigVersionPrecedence(t *testing.T) {
+	t.Parallel()
 	cfg, err := parseConfig(
 		[]string{"-version", "-list-models", "-refresh-models", "-provider", "other"},
 		cfgTestGetenv(map[string]string{"AHARNESS_MAX_CONTEXT_TOKENS": "many"}),
@@ -688,6 +702,7 @@ func TestConfigVersionPrecedence(t *testing.T) {
 }
 
 func TestConfigStateDirResolution(t *testing.T) {
+	t.Parallel()
 	common := []string{
 		"-task", "task",
 		"-model", "deepseek-v4.1-flash",
@@ -738,6 +753,7 @@ func TestConfigStateDirResolution(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		flag string
@@ -762,6 +778,7 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestConfigRunBudgets(t *testing.T) {
+	t.Parallel()
 	t.Run("explicit zero is unlimited", func(t *testing.T) {
 		cfg := cfgTestParseOK(t, cfgTestArgs(t,
 			"-max-turns=0", "-max-total-tokens=0", "-session-timeout=0s", "-model-timeout=0s"), nil)
@@ -788,6 +805,7 @@ func TestConfigRunBudgets(t *testing.T) {
 }
 
 func TestConfigLimitBoundary(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 
 	t.Run("one input token remains", func(t *testing.T) {
@@ -819,6 +837,7 @@ func TestConfigLimitBoundary(t *testing.T) {
 }
 
 func TestConfigSafetyMargin(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	for _, contextTokens := range []int{10_000, 20_000, 40_000, 100_000, 200_000, 250_000} {
 		t.Run(strconv.Itoa(contextTokens), func(t *testing.T) {
@@ -847,6 +866,7 @@ func TestConfigSafetyMargin(t *testing.T) {
 }
 
 func TestConfigBaseURL(t *testing.T) {
+	t.Parallel()
 	fake := startFakeModelsDev(t)
 	common := []string{
 		"-task", "task",
@@ -914,6 +934,7 @@ func TestConfigBaseURL(t *testing.T) {
 }
 
 func TestConfigEnvErrors(t *testing.T) {
+	t.Parallel()
 	common := []string{
 		"-task", "task",
 		"-model", "deepseek-v4.1-flash",
@@ -952,6 +973,7 @@ func TestConfigEnvErrors(t *testing.T) {
 }
 
 func TestCatalogExitCodes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		err  error
 		want int
@@ -970,6 +992,7 @@ func TestCatalogExitCodes(t *testing.T) {
 }
 
 func TestVersionRequested(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		args []string
@@ -1047,6 +1070,7 @@ func TestRunArgsHelp(t *testing.T) {
 }
 
 func TestConfigRequireUsage(t *testing.T) {
+	t.Parallel()
 	cfg := cfgTestParseOK(t, cfgTestArgs(t), nil)
 	if cfg.RequireUsage {
 		t.Error("RequireUsage default = true, want false")

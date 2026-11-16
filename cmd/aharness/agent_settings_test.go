@@ -35,6 +35,7 @@ func settingsCatalog() *agent.AgentCatalog {
 }
 
 func TestAgentViewsProvenance(t *testing.T) {
+	t.Parallel()
 	base := settingsCatalog()
 	effective, err := agent.ApplyAgentOverrides(base, map[string]agent.AgentOverride{
 		"reviewer": {
@@ -95,6 +96,7 @@ func TestAgentViewsProvenance(t *testing.T) {
 }
 
 func TestAgentViewsEffortOnlyOverride(t *testing.T) {
+	t.Parallel()
 	effective, err := agent.ApplyAgentOverrides(settingsCatalog(), map[string]agent.AgentOverride{
 		"reviewer": {ThinkingEffort: settingsStr("low")},
 	})
@@ -117,6 +119,7 @@ func TestAgentViewsEffortOnlyOverride(t *testing.T) {
 }
 
 func TestTUIHostSavesAgentOverrides(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	base := agent.LoadAgents(dir)
@@ -213,6 +216,7 @@ func TestTUIHostSavesAgentOverrides(t *testing.T) {
 }
 
 func TestTUIHostRefusesWorkspaceConfig(t *testing.T) {
+	t.Parallel()
 	workspace := t.TempDir()
 	ws, err := tools.OpenWorkspace(workspace)
 	if err != nil {
@@ -235,6 +239,7 @@ func TestTUIHostRefusesWorkspaceConfig(t *testing.T) {
 }
 
 func TestTUIHostRefusesSymlinkedWorkspaceConfig(t *testing.T) {
+	t.Parallel()
 	outside := t.TempDir()
 	workspace := t.TempDir()
 	link := filepath.Join(outside, "link")
@@ -258,6 +263,7 @@ func TestTUIHostRefusesSymlinkedWorkspaceConfig(t *testing.T) {
 }
 
 func TestTUIHostSaveRejectsBrokenConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{"unknown_key": true}`), 0o600); err != nil {

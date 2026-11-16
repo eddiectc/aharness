@@ -49,6 +49,7 @@ func fieldByKey(t *testing.T, view tui.SettingsView, key string) tui.SettingFiel
 }
 
 func TestConfigSettingCoverage(t *testing.T) {
+	t.Parallel()
 	configKeys := make(map[string]bool)
 	typ := reflect.TypeOf(fileConfig{})
 	for i := range typ.NumField() {
@@ -81,6 +82,7 @@ func TestConfigSettingCoverage(t *testing.T) {
 }
 
 func TestParseConfigSettingSources(t *testing.T) {
+	t.Parallel()
 	base := cfgTestBaseArgs(t)
 	cfg := cfgTestParseOK(t, base, nil)
 	if got := cfg.SettingSources["model"]; got != "flag -model" {
@@ -115,6 +117,7 @@ func TestParseConfigSettingSources(t *testing.T) {
 }
 
 func TestTUIHostSettingsView(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{
@@ -162,6 +165,7 @@ func TestTUIHostSettingsView(t *testing.T) {
 }
 
 func TestTUIHostSetsEveryConfigSetting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	workspace := t.TempDir()
@@ -322,6 +326,7 @@ func durationDeref(value *configDuration) time.Duration {
 }
 
 func TestTUIHostSettingValidation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		key   string
@@ -379,6 +384,7 @@ func TestTUIHostSettingValidation(t *testing.T) {
 }
 
 func TestTUIHostSettingCatalogValidation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	host := settingsHost(t, path, dir)
@@ -411,6 +417,7 @@ func TestTUIHostSettingCatalogValidation(t *testing.T) {
 }
 
 func TestTUIHostResetsConfigSettings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{
@@ -484,6 +491,7 @@ func TestTUIHostResetsConfigSettings(t *testing.T) {
 }
 
 func TestTUIHostSecretSetting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{"web_fetch_key": "first-secret"}`), 0o600); err != nil {
@@ -526,6 +534,7 @@ func TestTUIHostSecretSetting(t *testing.T) {
 }
 
 func TestTUIHostWarnsAboutWebFetchPair(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte(`{"web_fetch_provider": "crawl4ai"}`), 0o600); err != nil {
@@ -546,6 +555,7 @@ func TestTUIHostWarnsAboutWebFetchPair(t *testing.T) {
 }
 
 func TestTUIHostRefusesConfigWrites(t *testing.T) {
+	t.Parallel()
 	if err := (&tuiHost{}).SetSetting("max_turns", "4"); err == nil ||
 		!strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("disabled config error = %v, want a disabled-file message", err)

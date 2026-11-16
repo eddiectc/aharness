@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,6 +69,30 @@ func runHarnessEnv(t *testing.T, bin, workspace, stateDir, baseURL string, extra
 		}
 		exit = ee.ExitCode()
 	}
+	return harnessRunResult(t, stateDir, stdout.String(), stderr.String(), exit)
+}
+
+// runHarnessInProcess records a session in-process with the same arguments and
+// result as runHarnessEnv. Resume and fork tests use it for the seed run: the
+// recorded session is their subject, and the seed's process boundary adds
+// nothing. The run under test still executes the real binary, so signals, TTY
+// handling, exit codes, and file modes stay real where they matter.
+//
+// The injected environment covers the CLI itself. Tool subprocesses still
+// inherit the test process environment, so a seed must not inspect env vars
+// through run_command.
+func runHarnessInProcess(t *testing.T, workspace, stateDir, baseURL string, extraEnv []string, args ...string) harnessRun {
+	t.Helper()
+	if !hasFlag(args, "workspace") {
+		args = append([]string{"-workspace", workspace}, args...)
+	}
+	env := integrationEnvWith(stateDir, baseURL, extraEnv)
+	stdout, stderr, exit := runCLIEnv(t, envLookup(env), nil, args...)
+	return harnessRunResult(t, stateDir, stdout, stderr, exit)
+}
+
+func harnessRunResult(t *testing.T, stateDir, stdout, stderr string, exit int) harnessRun {
+	t.Helper()
 	files, err := filepath.Glob(filepath.Join(stateDir, "sessions", "*.jsonl"))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("session logs: %v, %v", files, err)
@@ -77,7 +102,16 @@ func runHarnessEnv(t *testing.T, bin, workspace, stateDir, baseURL string, extra
 		t.Fatal(err)
 	}
 	id := strings.TrimSuffix(filepath.Base(files[0]), ".jsonl")
-	return harnessRun{stdout: stdout.String(), stderr: stderr.String(), exit: exit, log: string(data), id: id}
+	return harnessRun{stdout: stdout, stderr: stderr, exit: exit, log: string(data), id: id}
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == "-"+name || strings.HasPrefix(arg, "-"+name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeProvider struct {
@@ -241,6 +275,7 @@ func responsesFinalResponse(text string) map[string]any {
 }
 
 func TestBinaryRunsBothDialects(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	for _, tc := range []struct {
 		model      string
@@ -380,6 +415,7 @@ func rawResponse(w http.ResponseWriter, status int, body string) {
 }
 
 func TestBinaryProviderFailures(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	tests := []struct {
 		name      string
@@ -455,6 +491,7 @@ func TestBinaryProviderFailures(t *testing.T) {
 }
 
 func TestBinaryMissingTokenHint(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		writeJSON(w, 401, map[string]any{"error": map[string]any{"message": "Go requires a credential"}})
@@ -486,6 +523,7 @@ func TestBinaryMissingTokenHint(t *testing.T) {
 }
 
 func TestSignalKillsChildAndCleansWorkDir(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
 		if call == 1 {
@@ -595,6 +633,7 @@ func TestSignalKillsChildAndCleansWorkDir(t *testing.T) {
 }
 
 func TestBinaryCompactsLargeToolHistory(t *testing.T) {
+	t.Parallel()
 	bin := buildHarness(t)
 	const toolTurns = 20
 	cmdJSON := `{"command":"head -c 2000 /dev/zero | tr '\\0' x","timeout_ms":30000}`
@@ -654,5 +693,72 @@ func TestBinaryCompactsLargeToolHistory(t *testing.T) {
 	}
 	if got := strings.Count(run.log, `"type":"tool_result"`); got != toolTurns {
 		t.Errorf("tool results = %d, want %d", got, toolTurns)
+	}
+}
+
+// generatedIDPattern matches the UUIDs the harness generates for sessions and
+// runs, which necessarily differ between two equivalent runs.
+var generatedIDPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// nondeterministicEventFields are recorded values that differ between two
+// equivalent runs: the built binary and the test binary stamp different build
+// versions, and latencies vary. Neither is part of the resume contract.
+var nondeterministicEventFields = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`"harness_version":"[^"]*"`), `"harness_version":"<version>"`},
+	{regexp.MustCompile(`"(latency|delay|duration)_ms":[0-9]+`), `"$1_ms":0`},
+}
+
+// TestInProcessCLIMatchesBinarySession guards the setup path used by resume and
+// fork tests: the in-process CLI must record the same session contract as the
+// built binary, or seeding a test in-process would silently change what the
+// resumed run observes.
+func TestInProcessCLIMatchesBinarySession(t *testing.T) {
+	t.Parallel()
+	bin := buildHarness(t)
+	f := newFakeProvider(t, func(w http.ResponseWriter, r *http.Request, call int, body []byte) {
+		writeJSON(w, 200, chatFinalResponse("done"))
+	})
+	args := []string{"-task", "first", "-model", "deepseek-v4.1-flash", "-max-output-tokens", "777"}
+
+	// stream returns each event's type and payload with run-specific values
+	// (paths, generated IDs, build version, timing) normalized.
+	stream := func(run harnessRun, workspace, stateDir string) []string {
+		t.Helper()
+		events := readSessionEvents(t, sessionPathFor(stateDir, run.id))
+		paths := strings.NewReplacer(workspace, "<workspace>", stateDir, "<state>")
+		out := make([]string, 0, len(events))
+		for _, ev := range events {
+			data := generatedIDPattern.ReplaceAllString(paths.Replace(string(ev.Data)), "<id>")
+			for _, field := range nondeterministicEventFields {
+				data = field.pattern.ReplaceAllString(data, field.replacement)
+			}
+			out = append(out, string(ev.Type)+" "+data)
+		}
+		return out
+	}
+
+	builtWorkspace, builtState := t.TempDir(), filepath.Join(t.TempDir(), "state")
+	built := runHarness(t, bin, builtWorkspace, builtState, f.url, args...)
+	if built.exit != 0 {
+		t.Fatalf("binary exit = %d\nstderr:\n%s", built.exit, built.stderr)
+	}
+	procWorkspace, procState := t.TempDir(), filepath.Join(t.TempDir(), "state")
+	proc := runHarnessInProcess(t, procWorkspace, procState, f.url, nil, args...)
+	if proc.exit != 0 {
+		t.Fatalf("in-process exit = %d\nstderr:\n%s", proc.exit, proc.stderr)
+	}
+
+	want := stream(built, builtWorkspace, builtState)
+	got := stream(proc, procWorkspace, procState)
+	if len(got) != len(want) {
+		t.Fatalf("in-process events = %d, want %d\nin-process:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event %d mismatch\ngot:  %s\nwant: %s", i, got[i], want[i])
+		}
 	}
 }
