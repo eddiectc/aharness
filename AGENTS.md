@@ -2,19 +2,15 @@
 
 The Go coding standard is [docs/coding-standard.md](docs/coding-standard.md).
 Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
-are defined there, and it wins over other docs on Go practice. Product scope
-and milestones live in [docs/plans/v1-build.md](docs/plans/v1-build.md) (v0
-history is in [docs/plans/v0-build.md](docs/plans/v0-build.md)); system
-structure, tool behavior, and CLI/config contracts live in
-[docs/architecture.md](docs/architecture.md); the flag/env/config-file layers
-are in [docs/configuration.md](docs/configuration.md); the testing strategy
-lives in
-[docs/testing-strategy.md](docs/testing-strategy.md). Every implementation and
-build plan verifies against the project-wide
-[docs/definition-of-done.md](docs/definition-of-done.md); feature-specific
-criteria are in the plan's §1.4. The
-[documentation map](docs/README.md) explains where current reference, plans,
-and research live.
+are defined there, and it wins over other docs on Go practice. System
+structure, tool behavior, the public library contract, and CLI/config contracts
+live in [docs/architecture.md](docs/architecture.md); the flag/env/config-file
+layers are in [docs/configuration.md](docs/configuration.md); the testing
+strategy lives in [docs/testing-strategy.md](docs/testing-strategy.md); caps and
+numbers live in [docs/limits.md](docs/limits.md). Every change verifies against
+the project-wide [docs/definition-of-done.md](docs/definition-of-done.md). The
+[documentation map](docs/README.md) explains where current reference, dated
+plans, and research live.
 
 Non-negotiables:
 
@@ -25,7 +21,8 @@ Non-negotiables:
 - Start with the five-package layout in `docs/architecture.md` §3.1. Do not
   create `pkg/`, `util`, `common`, or one-package-per-type.
 - The public library is the coding agent's SDK, not a general ADK. Keep the
-  boundary in [the Go library build plan](docs/plans/go-library-build.md#15-boundary-coding-sdk-not-an-adk):
+  boundary recorded in
+  [architecture.md §3.2.1](docs/architecture.md#321-public-library-facade):
   no provider matrix, graph/workflow orchestration, memory/RAG, session-store
   seam, background or nested delegation, in-run parallel tool execution,
   structured-output/report DTOs, prompt templating, or public TUI package. A

@@ -77,10 +77,10 @@ repository's package structure. The rules below apply to every package.
   `charm.land/lipgloss/v2`, `charm.land/glamour/v2`,
   `github.com/NimbleMarkets/ntcharts/v2`, and `github.com/charmbracelet/x/vt`.
   The TUI also directly imports their support packages
-  (`colorprofile`, `ultraviolet`, `x/ansi`) and `golang.org/x/term`. The
-  justification, alternatives, and risk are in
-  [tui-build.md §2.8](plans/tui-build.md#28-package-layout-and-wiring); the
-  shipped caps and protocol are in [tui.md](tui.md). Do not add a second
+  (`colorprofile`, `ultraviolet`, `x/ansi`) and `golang.org/x/term`. These are
+  the only approved application-framework modules: the standard library has no
+  maintained full-screen TUI, markdown renderer, or chart package to build on,
+  and the shipped caps and protocol are in [tui.md](tui.md). Do not add a second
   application framework, a theme system, or another markdown/chart library.
   Binary impact is measured and recorded: a `-trimpath` build grew from
   11,671,823 bytes at the last stdlib-only v1 revision to 26,127,685 bytes

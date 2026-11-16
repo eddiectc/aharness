@@ -1,15 +1,11 @@
 # aharness TUI (shipped)
 
 - **Date:** 2026-11-15
-- **Status:** implemented (TUI build plan M0–M5) with the catalog-backed model
-  picker from [model discovery](plans/model-discovery-build.md), the thinking
-  effort controls from [thinking effort](plans/thinking-effort-build.md), the
-  transcript folding from [transcript folding](plans/transcript-folding-build.md),
-  the persistent todo widget, and the delegated-child roster and focus view
-  from [subagent build](plans/subagent-build.md) M1–M2.
-  The full contract and milestone rationale are in
-  [tui-build.md](plans/tui-build.md); this document records the shipped surface
-  and verification status.
+- **Status:** implemented, covering the catalog-backed model picker, thinking
+  effort controls, transcript folding, the persistent todo widget, and the
+  delegated-child roster and focus view. This document records the shipped
+  surface; caps live in [limits.md](limits.md) and commands in
+  [commands.md](commands.md).
 - **Verified:** fake-provider TUI/`-ui-json` integration (streaming, tools,
   steering, interrupts, resume, fork, signals, `F3` folding, and the todo
   widget's render/restore path), headless `x/vt` frames and SVG snapshots, race
@@ -480,8 +476,8 @@ Output lines:
   `image`, `agent-hub`, `agents`, or `settings`. Frames contain no ANSI and no
   raw image bytes.
 - `event`: `run_started`, `run_finished`, `tool_started`, `tool_finished`,
-  `model_changed`, `notice`, `error`, with the fields documented in
-  [tui-build.md §2.7](plans/tui-build.md#27-machine-readable-ui-mode---ui-json).
+  `model_changed`, `notice`, `error`, with the fields described in this
+  section.
   `run_started` and `model_changed` carry an optional `thinking_effort` field
   for the effective value; an omitted field means the provider default.
   Selecting an effort with `F2` emits a `notice` with

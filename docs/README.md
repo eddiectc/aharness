@@ -26,12 +26,12 @@ rewriting its conclusions.
   limits, and shipped surface: [architecture.md](architecture.md),
   [limits.md](limits.md), [tui.md](tui.md), [commands.md](commands.md), and
   [testing-strategy.md](testing-strategy.md).
-- A plan records intent and decisions; it never overrides the current
-  reference. Where they disagree, the reference wins and the plan records the
-  deviation.
-- [definition-of-done.md](definition-of-done.md) applies to every task and
-  every build plan. A plan's §1.4 adds feature-specific criteria; it does not
-  replace the project checklist.
+- A dated plan or research document records intent and evidence; it never
+  overrides the current reference. Where they disagree, the reference wins.
+  Plans and research are frozen: later behavior changes update the reference,
+  never the dated record.
+- [definition-of-done.md](definition-of-done.md) applies to every task,
+  documentation change, and dated record.
 
 ## Index
 
@@ -39,7 +39,7 @@ rewriting its conclusions.
 
 | Document | Defines |
 |---|---|
-| [architecture.md](architecture.md) | System structure, packages, loop and tool contracts, CLI, and configuration |
+| [architecture.md](architecture.md) | System structure, packages, loop and tool contracts, the public library facade, CLI, and configuration |
 | [configuration.md](configuration.md) | Flag > environment > config file > default precedence, the JSON config file, environment variables, and configurable vs fixed limits |
 | [coding-standard.md](coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [commands.md](commands.md) | Shipped slash commands, autocomplete, arguments, and `-ui-json` mapping |

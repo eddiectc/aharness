@@ -4,7 +4,7 @@
 - **Status:** normative testing strategy for v1, the shipped TUI (including the
   todo widget), the public Go library, model discovery, thinking effort, and
   the builtin tool set
-- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md), [model discovery build plan](plans/model-discovery-build.md), [thinking effort build plan](plans/thinking-effort-build.md), [web search build plan](plans/web-search-build.md)
+- **Related:** [system architecture](architecture.md), [Go coding standard](coding-standard.md), [shipped TUI](tui.md), [slash commands](commands.md), [limits](limits.md), [configuration](configuration.md)
 
 v1 uses four layers: unit tests for component behavior, integration tests
 against a fake provider and the built binary, fuzz targets at the session and
@@ -577,8 +577,7 @@ For web search: point `-searxng-url` or `AHARNESS_SEARXNG_URL` at a local
 SearXNG instance that includes `json` in `search.formats`, run a task that
 calls `web_search`, and confirm the title/URL/snippet list, entity/tag
 sanitization, and the documented 403 and malformed-JSON outcomes. Record the
-instance version, query, and observed results in the
-[web search plan](plans/web-search-build.md#10-implementation-status-and-deviations).
+instance version, query, and observed results in the change description.
 A 2026-11-13 smoke against a local instance at `http://localhost:28080` passed.
 
 For the read/search/command contract: read a 1,175-line, roughly 42 KB Go file

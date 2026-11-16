@@ -5,9 +5,7 @@
   structure and runtime contracts
 - **Related:** [Go coding standard](coding-standard.md),
   [bare-minimum harness research](research/agent-harness-minimum.md),
-  [v1 build plan](plans/v1-build.md), [TUI build plan](plans/tui-build.md),
-  [shipped TUI](tui.md), [slash commands](commands.md),
-  [thinking effort build plan](plans/thinking-effort-build.md)
+  [shipped TUI](tui.md), [slash commands](commands.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This document
@@ -135,8 +133,6 @@ base URL is a constructor argument so tests and local deployments can point the
 adapters at another OpenAI-compatible server. The CLI resolves the base URL from
 an explicit `-provider-base-url` / `AHARNESS_PROVIDER_BASE_URL`, then the
 catalog entry; the flag also supports integration tests and local endpoints.
-This is the resolution of
-[v0-build.md §4.3 item 4](plans/v0-build.md#43-prerequisites-and-resolutions).
 Production runs use the catalog URL.
 
 Both adapters send the full projected input on every call and keep no
@@ -514,8 +510,10 @@ boundary justifies it; do not add `pkg/`, `util`, `common`, or `types`.
 
 Dependencies stay deliberately small: the Go standard library by default. The
 TUI is the one approved framework-scale exception (Bubble Tea v2, Bubbles v2,
-Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt`); its rationale and binary
-impact are in the coding standard §3 and the [TUI plan](plans/tui-build.md#28-package-layout-and-wiring).
+Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt`); its approved module set,
+measured binary impact, and constraints are in [coding standard
+§3](coding-standard.md#3-dependencies), and the shipped caps and protocol are in
+[tui.md](tui.md).
 Typed structs and explicit checks validate tool arguments; a JSON Schema
 validator is not needed. The provider adapters use `net/http` with the OpenAI
 Chat Completions and Responses dialects; no provider SDK is used (Section 2.1).
@@ -639,7 +637,7 @@ dependencies. `internal/tui` imports `agent`, `model`, and `tools`; `agent`,
 
 The module root is `package aharness`; it is the only public Go package. It
 copies DTOs at the boundary instead of aliasing internal types, so internal
-fields remain free to change. The shipped contract:
+fields remain free to change. The shipped surface, by area:
 
 - Construction: `Config`, `New`, `Resume`, `Fork`, `Agent.ID/SessionPath/
   Workspace/State/Close`. `New` requires workspace, state directory, and model;
@@ -671,8 +669,65 @@ fields remain free to change. The shipped contract:
   `ProviderError`. `InspectSession` canonicalizes the ID and reads a snapshot
   without the exclusive lock; `Sessions` lists newest first and tolerates a live
   writer.
-- See [the plan](plans/go-library-build.md) for the full field-level contract
-  and compatibility rules.
+
+**Field-level contract.** The exported surface is listed here; the `go doc`
+comment on a field narrows these rules but never widens them.
+
+| Group | Types and fields |
+|---|---|
+| Construction | `Config`: `Workspace`, `StateDir`, `Model`, `Tools`, `Limits`, `MaxTurns`, `MaxTotalTokens`, `RunTimeout`, `ModelTimeout`, `ThinkingEffort`, `Instructions`, `SystemPrompt`, `Authorize`, `RequireUsage`, `LogModelRequests`, `Logger` |
+| Lifecycle | `Agent`: `ID`, `SessionPath`, `Workspace`, `State`, `Run`, `Start`, `Close`; `RunOptions`: `Model`, `ThinkingEffort`, `MaxTurns`, `MaxTotalTokens`, `Timeout`; `Run`: `Events`, `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, `Close` |
+| Outcome | `Result`: `Status`, `Session`, `Err`, `FinalText`, `RunTurns`, `RunUsage`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `RunCostMicroUSD`, `CostMicroUSD`, `RunCostComplete`, `CostComplete`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete` |
+| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `SystemPrompt`, `Tools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
+| Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`; `RunFinished`: `Result`, `Reason`, `Duration` |
+| Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent` |
+| Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
+| Discovery | `OpenAIModelOptions`: `Spec`, `APIKey`, `HTTPClient`, `Timeout`; `DiscoverModelOptions`: `Catalog`, `Provider`, `Model`, `APIKey`, `BaseURL`, `HTTPClient`, `Timeout`; `CatalogConfig`: `URL`, `StateDir`, `HTTPClient`, `TTL`, `Timeout`, `UserAgent`; `CatalogModel`: `ID`, `Name`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `InputLimit`, `MaxOutputTokens`, `ToolCall`, `Reasoning`, `ThinkingEfforts`, `Deprecated`, `Status`, `Unavailable`, `Pricing`; `CatalogListing`: `Provider`, `FetchedAt`, `Models`, `Warnings` |
+| Tools | `Tool`: `Name`, `Description`, `InputSchema`, `Run`, `ConcurrencySafe`; `ToolResult`: `OK`, `Code`, `Output`, `Error`, `ExitCode`, `TimedOut`, `Truncated`, `Details`; `ToolSchema`: `Name`, `Description`, `Parameters`; `ToolsConfig`: `Disable`, `Extra`, `WebSearch`, `WebFetch`, `Delegation`; `ToolRequest`: `Tool`, `Call`, `Intent`, `Turn`, `Session`, `Agent`; `Deny`: `Reason`; `WebSearchConfig`: `BaseURL`, `Timeout`; `WebFetchConfig`: `Provider`, `Endpoint`, `Key`, `Timeout`, `UserAgent`; helpers `TextResult`, `ErrorResult` |
+| Delegation | `AgentDefinition`: `Name`, `Description`, `Prompt`, `Tools`, `Model`, `ThinkingEffort`, `MaxTurns`; `DelegationConfig`: `Agents`, `MaxSubagents`, `ResolveModel`; `DefaultAgents()` |
+| Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the seven built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI` |
+| Errors and versions | Sentinels `ErrClosed`, `ErrBusy`, `ErrEmptyTask`, `ErrIteratorConsumed`, `ErrSessionNotFound`, `ErrSessionLocked`, `ErrInvalidSessionID`, `ErrModelRequired`, `ErrToolConflict`, `ErrToolMismatch`, `ErrSteeringFull`, `ErrNoSuchChild`; `ConfigError`: `Field`, `Value`, `Detail`; `ProviderError`: `StatusCode`, `Retryable`, `Err`; `SchemaVersion`, `Version()` |
+
+Behavioral rules that the field lists do not show:
+
+- `Config.Workspace` is required for `New` and inherited when empty on
+  `Resume`/`Fork`; `StateDir` and `Model` are always required; a zero
+  `Model.Spec` inherits the recorded identity. `MaxTurns` and `MaxTotalTokens`
+  are cumulative across the agent's runs and are not inherited from the log;
+  `RunTimeout` bounds one run and `ModelTimeout` one model attempt.
+  `ThinkingEffort` uses nil to inherit, `""` to clear, and a value to set.
+  `Instructions` and `SystemPrompt` are mutually exclusive and invalid on
+  `Resume`. A nil `Logger` discards.
+- `RunOptions` applies to one run and never rewrites the session; its `Timeout`
+  replaces `Config.RunTimeout`. `Run.Events` applies backpressure, can be
+  consumed once, and breaking the iterator cancels and drains the run.
+  `Interrupt` keeps the run alive; `Cancel` ends it; `Steer` and `SteerChild`
+  enqueue input at turn boundaries.
+- `Result.Status` is authoritative and `Result.Err` is the same cause
+  `Agent.Run` returns. `EventMeta.Time` is observation time, not a durable
+  timestamp; events are display-only and the session log is the only durable
+  truth.
+- `Pricing` is an observational snapshot and never a billing authority.
+  `Usage.Reported` distinguishes provider-reported totals from estimates.
+- `Authorize` errors deny with a `permission_denied` result unless they are
+  context cancellations. `Deny.Reason` is shown to the model.
+
+**Compatibility rules.** These constrain every future change to the facade:
+
+- Adding a field to `Config`, `RunOptions`, `ModelSpec`, `Tool`, `ToolResult`,
+  `State`, `Result`, or an event struct is backward compatible. Adding a
+  concrete event type is also compatible; consumers keep a default branch.
+- Adding a method to `Model` or `StreamingModel` is a breaking change; both are
+  caller-implemented interfaces. A new capability is a new optional interface or
+  a `Config` field. `StreamHandler` is a struct, so an added callback field is
+  additive.
+- Renaming or removing an exported identifier requires a major module version.
+  `SchemaVersion` is independent of the module version and stays 2 across
+  library minor versions.
+- A session that records `custom_tools` cannot be resumed without matching
+  `Tools.Extra`; it fails with `ErrToolMismatch` rather than replaying a
+  different contract. A recorded toolset version the binary does not support is
+  rejected, not approximated.
 
 The agent MAY define unexported consumer interfaces (`completer`, `toolset`,
 `eventStore`) so loop tests use fakes. Keep each interface to one or two

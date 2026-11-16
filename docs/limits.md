@@ -6,12 +6,7 @@
   library facade and custom tools, model discovery, thinking effort, web
   search, and the flag/env/config-file configuration layers.
 - **Related:** [architecture](architecture.md), [configuration](configuration.md),
-  [v1 build plan](plans/v1-build.md),
-  [TUI build plan](plans/tui-build.md), [shipped TUI](tui.md),
-  [slash commands](commands.md),
-  [model discovery build plan](plans/model-discovery-build.md),
-  [thinking effort build plan](plans/thinking-effort-build.md),
-  [web search build plan](plans/web-search-build.md),
+  [shipped TUI](tui.md), [slash commands](commands.md),
   [coding standard](coding-standard.md).
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,

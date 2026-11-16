@@ -3,28 +3,29 @@
 - **Date:** 2026-11-11
 - **Status:** normative for every task, fix, feature, refactor, and
   documentation change
-- **Applies to:** every implementation and every build plan in
-  [docs/plans](plans/)
+- **Applies to:** every change in this repository, and every dated record in
+  [docs/plans](plans/) and [docs/research](research/)
 - **Related:** [Go coding standard](coding-standard.md),
   [system architecture](architecture.md),
   [testing strategy](testing-strategy.md), [limits](limits.md), and the
   [documentation map](README.md)
 
 A change is done only when every applicable item below holds. Do not silently
-skip an item: state why it does not apply. A build plan adds feature-specific
-criteria in its §1.4, but it never replaces this checklist.
+skip an item: state why it does not apply.
 
 Precedence: the [coding standard](coding-standard.md) wins on Go practice; the
 current reference documents ([architecture](architecture.md),
 [limits](limits.md), [tui](tui.md), [commands](commands.md),
 [testing strategy](testing-strategy.md)) win on structure and runtime
-contracts. A plan records intent and decisions; where a plan and the current
-reference disagree, the reference wins and the plan records the deviation.
+contracts. A dated plan or research document records intent and evidence; where
+one disagrees with the current reference, the reference wins. Plans and research
+are frozen: later behavior changes update the current reference, never the dated
+record.
 
 ## 1. Behavior and scope
 
 - [ ] **Requested behavior.** The task works end to end, and every acceptance
-      criterion in the issue or build plan is satisfied.
+      criterion in the issue or change request is satisfied.
 - [ ] **No unfinished work.** No stubs, placeholders, fake fallbacks,
       `TODO: implement`, or misleading "scaffold" claims. If a real
       implementation needs unavailable information or credentials, name the
@@ -39,9 +40,9 @@ reference disagree, the reference wins and the plan records the deviation.
       outcomes.
 - [ ] **Errors and pairing.** Errors wrap with `%w` and are classified with
       `errors.Is`/`errors.As`; every tool call has exactly one result.
-- [ ] **Coding-SDK boundary.** A public-library change passes the recorded-
-      contract test in the
-      [Go library plan §1.5](plans/go-library-build.md#15-boundary-coding-sdk-not-an-adk):
+- [ ] **Coding-SDK boundary.** A public-library change passes the compatibility
+      rules in
+      [architecture §3.2.1](architecture.md#321-public-library-facade):
       if it alters the session schema, prompt, tool grant, projection, or
       concurrency model, it is a different product rather than an extension.
       No new provider matrix, graph/workflow orchestration, memory/RAG,
@@ -79,8 +80,8 @@ reference disagree, the reference wins and the plan records the deviation.
 - [ ] **No stale authority.** A plan does not claim to be normative for
       behavior that ships; it records intent, milestones, deviations, and
       verification.
-- [ ] **Plan status.** If the work came from a build plan, update its status,
-      §1.4 checklist, and deviations section.
+- [ ] **Frozen records.** A dated plan or research document is not rewritten for
+      later behavior; the current reference carries the shipped truth.
 - [ ] **User-facing surface.** A user-visible change updates the README
       feature description, examples, or CLI contract as applicable.
 - [ ] **New interfaces.** New flags, environment variables, exit codes, events,
@@ -119,6 +120,3 @@ reference disagree, the reference wins and the plan records the deviation.
       [documentation map](README.md).
 - [ ] **Handoff.** The change description states what changed, what was
       verified, and any gate, smoke, or prerequisite still pending.
-
-The historical v0 verification record is preserved in
-[v0-build.md §6](plans/v0-build.md#6-v0-completion-record).
