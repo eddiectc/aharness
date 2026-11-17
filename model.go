@@ -44,6 +44,16 @@ type ToolCall struct {
 	// Intent is display metadata parsed from the arguments' "intent" member on
 	// events. It is empty on model requests and is never acted on by the loop.
 	Intent string
+	// Session is the session that invoked the tool. It is set on the call
+	// passed to Tool.Run and Config.Authorize: a delegated child sees its own
+	// session ID, and the root session sees the root ID. It is empty on model
+	// request, model response, and event DTOs.
+	Session string
+	// Agent is the delegated agent definition name for a child tool call and
+	// empty for the root session. Like Session, it is set only on the call
+	// passed to Tool.Run and Config.Authorize, and is empty on model request,
+	// model response, and event DTOs.
+	Agent string
 }
 
 // Message is one canonical conversation message.

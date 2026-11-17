@@ -67,6 +67,11 @@ type Call struct {
 	// child spends inside the parent's call, so it may not exceed what is left
 	// of the parent's budget.
 	ParentUsage model.Usage
+	// Session is the canonical ID of the session executing this call. It is a
+	// child session ID for a delegated child and the root session ID otherwise.
+	Session string
+	// Agent is the delegated agent definition name, empty for the session root.
+	Agent string
 }
 
 // SubagentReport is one finished (or failed) delegated task.

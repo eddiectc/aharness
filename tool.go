@@ -111,6 +111,14 @@ type ToolRequest struct {
 	Turn    int
 	Session string
 	Agent   string
+	// Path is the absolute, lexically cleaned target of a built-in file tool:
+	// read_file, edit_file, or search. It is resolved against the workspace and
+	// search defaults to the workspace root when its path is omitted. Path is
+	// empty for every other tool and when the arguments do not carry a usable
+	// path. It is not symlink-resolved, and run_command has no Path because its
+	// writes are not constrained by its cwd. The tools still perform their own
+	// containment and symlink checks; Path is policy input, not validation.
+	Path string
 }
 
 // toolSetup is the resolved tool contract and registry factory.
@@ -255,6 +263,8 @@ func registerPublicTool(registry *tools.Registry, tool Tool) error {
 			Name:      tool.Name,
 			Arguments: append(json.RawMessage(nil), args...),
 			Intent:    tools.Intent(args),
+			Session:   call.Session,
+			Agent:     call.Agent,
 		}
 		result, err := tool.Run(ctx, publicCall)
 		if err != nil {

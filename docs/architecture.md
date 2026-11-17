@@ -680,10 +680,10 @@ comment on a field narrows these rules but never widens them.
 | Outcome | `Result`: `Status`, `Session`, `Err`, `FinalText`, `RunTurns`, `RunUsage`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `RunCostMicroUSD`, `CostMicroUSD`, `RunCostComplete`, `CostComplete`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete` |
 | Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `SystemPrompt`, `Tools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
 | Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`; `RunFinished`: `Result`, `Reason`, `Duration` |
-| Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent` |
+| Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent`, `Session`, `Agent` |
 | Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
 | Discovery | `OpenAIModelOptions`: `Spec`, `APIKey`, `HTTPClient`, `Timeout`; `DiscoverModelOptions`: `Catalog`, `Provider`, `Model`, `APIKey`, `BaseURL`, `HTTPClient`, `Timeout`; `CatalogConfig`: `URL`, `StateDir`, `HTTPClient`, `TTL`, `Timeout`, `UserAgent`; `CatalogModel`: `ID`, `Name`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `InputLimit`, `MaxOutputTokens`, `ToolCall`, `Reasoning`, `ThinkingEfforts`, `Deprecated`, `Status`, `Unavailable`, `Pricing`; `CatalogListing`: `Provider`, `FetchedAt`, `Models`, `Warnings` |
-| Tools | `Tool`: `Name`, `Description`, `InputSchema`, `Run`, `ConcurrencySafe`; `ToolResult`: `OK`, `Code`, `Output`, `Error`, `ExitCode`, `TimedOut`, `Truncated`, `Details`; `ToolSchema`: `Name`, `Description`, `Parameters`; `ToolsConfig`: `Disable`, `Extra`, `WebSearch`, `WebFetch`, `Delegation`; `ToolRequest`: `Tool`, `Call`, `Intent`, `Turn`, `Session`, `Agent`; `Deny`: `Reason`; `WebSearchConfig`: `BaseURL`, `Timeout`; `WebFetchConfig`: `Provider`, `Endpoint`, `Key`, `Timeout`, `UserAgent`; helpers `TextResult`, `ErrorResult` |
+| Tools | `Tool`: `Name`, `Description`, `InputSchema`, `Run`, `ConcurrencySafe`; `ToolResult`: `OK`, `Code`, `Output`, `Error`, `ExitCode`, `TimedOut`, `Truncated`, `Details`; `ToolSchema`: `Name`, `Description`, `Parameters`; `ToolsConfig`: `Disable`, `Extra`, `WebSearch`, `WebFetch`, `Delegation`; `ToolRequest`: `Tool`, `Call`, `Intent`, `Turn`, `Session`, `Agent`, `Path`; `Deny`: `Reason`; `WebSearchConfig`: `BaseURL`, `Timeout`; `WebFetchConfig`: `Provider`, `Endpoint`, `Key`, `Timeout`, `UserAgent`; helpers `TextResult`, `ErrorResult` |
 | Delegation | `AgentDefinition`: `Name`, `Description`, `Prompt`, `Tools`, `Model`, `ThinkingEffort`, `MaxTurns`; `DelegationConfig`: `Agents`, `MaxSubagents`, `ResolveModel`; `DefaultAgents()` |
 | Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the seven built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI` |
 | Errors and versions | Sentinels `ErrClosed`, `ErrBusy`, `ErrEmptyTask`, `ErrIteratorConsumed`, `ErrSessionNotFound`, `ErrSessionLocked`, `ErrInvalidSessionID`, `ErrModelRequired`, `ErrToolConflict`, `ErrToolMismatch`, `ErrSteeringFull`, `ErrNoSuchChild`; `ConfigError`: `Field`, `Value`, `Detail`; `ProviderError`: `StatusCode`, `Retryable`, `Err`; `SchemaVersion`, `Version()` |
@@ -711,12 +711,29 @@ Behavioral rules that the field lists do not show:
   `Usage.Reported` distinguishes provider-reported totals from estimates.
 - `Authorize` errors deny with a `permission_denied` result unless they are
   context cancellations. `Deny.Reason` is shown to the model.
+- `Tool.Run` and `Authorize` receive the calling session in `ToolCall.Session`
+  and the delegated definition name in `ToolCall.Agent` (empty at the session
+  root). `Session` is the unique identity because one definition may run more
+  than once. Both fields are empty on model request, response, and event DTOs.
+- `ToolRequest.Path` is the absolute, lexically cleaned target of `read_file`,
+  `edit_file`, or `search`; a relative argument is joined to the workspace and
+  `search` defaults to the workspace root. It is empty for every other tool and
+  when the arguments carry no usable path. It is not symlink-resolved, and
+  `run_command` has no `Path` because its writes are not constrained by `cwd`.
+  The built-in tools still perform containment and symlink checks; `Path` is
+  policy input, not validation.
+- `Tool.ConcurrencySafe` remains a static, recorded grant-level declaration.
+  The spawner chooses concurrent or sequential execution from the child grant
+  before any child tool call exists, so an argument-dependent predicate could
+  not affect the choice. A tool that shares resources across concurrently
+  running children must serialize internally or declare false.
 
 **Compatibility rules.** These constrain every future change to the facade:
 
 - Adding a field to `Config`, `RunOptions`, `ModelSpec`, `Tool`, `ToolResult`,
-  `State`, `Result`, or an event struct is backward compatible. Adding a
-  concrete event type is also compatible; consumers keep a default branch.
+  `ToolCall`, `ToolRequest`, `State`, `Result`, or an event struct is backward
+  compatible. Adding a concrete event type is also compatible; consumers keep a
+  default branch.
 - Adding a method to `Model` or `StreamingModel` is a breaking change; both are
   caller-implemented interfaces. A new capability is a new optional interface or
   a `Config` field. `StreamHandler` is a struct, so an added callback field is
@@ -728,6 +745,56 @@ Behavioral rules that the field lists do not show:
   `Tools.Extra`; it fails with `ErrToolMismatch` rather than replaying a
   different contract. A recorded toolset version the binary does not support is
   rejected, not approximated.
+
+**Large child reports.** The 16 KiB task and child-report caps are part of the
+parent-context budget and stay fixed. To return more, the child writes a
+host-routed report file and returns its path in the bounded report:
+
+1. Register a custom `write_report` tool whose `Run` derives the target from
+   `call.Session` (and optionally `call.Agent`) under a host-owned directory,
+   writes it, and returns a short result naming the workspace-relative path.
+   The path must not come from model-supplied arguments.
+2. Grant the tool only to the child definitions that need it.
+3. Keep the delegated task and the child's final report at or below 16 KiB; the
+   report names the file and carries the summary.
+4. Read the file with `read_file` (60 KiB per page with `offset` continuation)
+   or host-side. A file under `Workspace` is reachable by the built-in tool; a
+   file under `StateDir` is not when the state directory is outside the
+   workspace.
+
+The report file is auxiliary. The child session log is the durable record, and
+the `delegate` result still carries only the bounded report into the parent
+context. A per-session report path lets `write_report` declare
+`ConcurrencySafe` for concurrent children; a shared ledger needs internal
+locking or a false declaration.
+
+**State directory inside the workspace.** The default state directory is
+outside `Workspace`. A host may colocate it, for example as
+`<workspace>/.aharness`, so the logs are visible to another workspace tool. The
+built-in file tools are workspace-contained, so the agent can then reach its own
+logs. Deny writes with the normalized policy path:
+
+```go
+stateDir := filepath.Join(workspace, ".aharness")
+authorize := func(ctx context.Context, req aharness.ToolRequest) error {
+    if req.Tool == aharness.ToolEditFile && within(stateDir, req.Path) {
+        return &aharness.Deny{Reason: "the state directory is read-only to the agent"}
+    }
+    return nil
+}
+
+func within(dir, path string) bool {
+    rel, err := filepath.Rel(dir, path)
+    return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+```
+
+Deny `read_file` and `search` as well when session logs must not be readable.
+`Path` is lexical, not symlink-resolved; `edit_file` independently rejects
+symlink components. This is policy, not a sandbox: `run_command` has no `Path`
+and is not confined, so deny `run_command` or isolate the process when writes
+must be impossible. The log supports debugging and resume; it is not a
+tamper-proof audit trail against a same-UID process.
 
 The agent MAY define unexported consumer interfaces (`completer`, `toolset`,
 `eventStore`) so loop tests use fakes. Keep each interface to one or two

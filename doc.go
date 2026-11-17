@@ -28,6 +28,12 @@
 // run with the host process's privileges; run_command inherits the host
 // environment through the existing allowlist.
 //
+// Tool.Run and Config.Authorize receive the calling session and delegated agent
+// name on ToolCall, and Authorize also receives a normalized Path for read_file,
+// edit_file, and search. The 16 KiB child-report cap is intentional: a child
+// that must return more writes a host-routed report file and returns its path.
+// See the architecture's large-child-report pattern.
+//
 // # Replacing the system prompt
 //
 // Config.SystemPrompt replaces the harness prompt entirely; Config.Instructions

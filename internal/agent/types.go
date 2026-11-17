@@ -142,6 +142,11 @@ type ToolPolicyRequest struct {
 	Turn    int
 	Session string
 	Agent   string
+	// Path is the absolute, lexically cleaned target of a built-in file tool:
+	// read_file, edit_file, or search. It is empty for other tools and when the
+	// arguments do not carry a usable path. It is not symlink-resolved; the
+	// tool remains responsible for containment and symlink checks.
+	Path string
 }
 
 // ContractOverride records that a fork replaced part of the inherited

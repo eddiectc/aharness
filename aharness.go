@@ -298,11 +298,14 @@ func authorizeAdapter(authorize func(context.Context, ToolRequest) error) func(c
 				Name:      req.Name,
 				Arguments: append([]byte(nil), req.Args...),
 				Intent:    tools.Intent(req.Args),
+				Session:   req.Call.Session,
+				Agent:     req.Call.Agent,
 			},
 			Intent:  tools.Intent(req.Args),
 			Turn:    req.Turn,
 			Session: req.Session,
 			Agent:   req.Agent,
+			Path:    req.Path,
 		})
 	}
 }

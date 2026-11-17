@@ -149,6 +149,75 @@ work belongs in one batch tool that fans out internally, or in delegated
 children whose grants are read-only or declare `ConcurrencySafe`. Delegation
 depth is one.
 
+`Tool.Run` and `Config.Authorize` receive the calling session in
+`ToolCall.Session` and, for a delegated child, the definition name in
+`ToolCall.Agent`. A root call has an empty `Agent`. Use `Session` as the unique
+identity: the same definition can run more than once. Both fields are empty on
+model request, response, and event DTOs.
+
+`ToolRequest.Path` is the absolute, lexically cleaned target of a built-in file
+tool: `read_file`, `edit_file`, or `search` (defaulting to the workspace root).
+It is empty for other tools and when the arguments do not contain a usable
+path. It is not symlink-resolved, and `run_command` has no `Path`; the tools
+still perform their own containment checks, and authorization remains policy
+rather than a sandbox.
+
+`Tool.ConcurrencySafe` is a static, recorded declaration because the fan-out
+decision is made from the child grant before any child tool call exists. An
+argument-dependent predicate could not change that decision. Declare it only
+when the tool is safe for every call in concurrently running children; use
+per-session state or internal locking when calls share resources.
+
+### Large child reports
+
+The 16 KiB `delegate` task and report caps protect the parent transcript; keep
+them. When a child must return more, hand off a file instead of enlarging the
+report:
+
+1. Register a custom `write_report` tool. Its `Run` derives the target from
+   `call.Session` (and optionally `call.Agent`), writes under a host-owned
+   directory, and returns the workspace-relative path. Do not take the path
+   from model-supplied arguments; that would make routing forgeable.
+2. Grant `write_report` to the child definitions that need it. A child can use
+   only its grant.
+3. Have the child return a short summary plus the path in its 16 KiB report.
+4. Read the file in the parent with `read_file` (60 KiB per page, `offset`
+   continuation), or read it host-side. Keep it under the workspace if the
+   built-in `read_file` must reach it.
+
+The report file is auxiliary; the child session log remains the durable record,
+and the `delegate` result still carries only the bounded summary into the parent
+context.
+
+### State directory inside the workspace
+
+The default state directory is outside the workspace. A host may place it
+inside for co-location, for example `StateDir: filepath.Join(workspace,
+".aharness")`. The built-in file tools are workspace-contained, so the agent
+can then reach its own session logs. Add an `Authorize` write deny using
+`ToolRequest.Path`:
+
+```go
+stateDir := filepath.Join(workspace, ".aharness")
+Authorize: func(ctx context.Context, req aharness.ToolRequest) error {
+    if req.Tool == aharness.ToolEditFile && within(stateDir, req.Path) {
+        return &aharness.Deny{Reason: "the state directory is read-only to the agent"}
+    }
+    return nil
+}
+
+func within(dir, path string) bool {
+    rel, err := filepath.Rel(dir, path)
+    return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+```
+
+Deny `read_file` and `search` too if session logs must not be readable. This is
+policy, not a sandbox: `run_command` has no `Path` and is not confined, so deny
+`ToolRunCommand` or isolate the process when writes must be impossible. The log
+is for debugging and resume, not tamper-proof audit; a same-UID process can
+edit it.
+
 ### Scope of the library
 
 The library is a coding-agent SDK, not a general agent development kit. It adds

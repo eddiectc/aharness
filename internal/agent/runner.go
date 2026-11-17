@@ -810,7 +810,13 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 
 		started := time.Now()
-		meta := tools.Call{ID: call.ID, Turn: turn, ParentUsage: st.cumulativeUsage()}
+		meta := tools.Call{
+			ID:          call.ID,
+			Turn:        turn,
+			ParentUsage: st.cumulativeUsage(),
+			Session:     r.cfg.SessionID,
+			Agent:       r.cfg.Agent,
+		}
 		opCtx, finish := r.beginOperation(ctx)
 		result, panicked, policyCanceled := r.executeGuarded(opCtx, call, meta)
 		duration := time.Since(started)
@@ -982,6 +988,7 @@ func (r *Runner) authorize(ctx context.Context, call model.ToolCall, meta tools.
 		Turn:    meta.Turn,
 		Session: r.cfg.SessionID,
 		Agent:   r.cfg.Agent,
+		Path:    tools.FileArgumentPath(r.cfg.Workspace, call.Name, call.Arguments),
 	})
 }
 
