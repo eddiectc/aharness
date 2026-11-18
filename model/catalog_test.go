@@ -540,17 +540,18 @@ func TestNewModelsDevSourceValidation(t *testing.T) {
 		opts    CatalogOptions
 		wantErr string
 	}{
-		{name: "default", opts: CatalogOptions{StateDir: stateDir}},
-		{name: "https override", opts: CatalogOptions{URL: "https://mirror.example/api.json", StateDir: stateDir}},
-		{name: "loopback v4", opts: CatalogOptions{URL: "http://127.0.0.1:1234/api.json", StateDir: stateDir}},
-		{name: "loopback v6", opts: CatalogOptions{URL: "http://[::1]:1234/api.json", StateDir: stateDir}},
-		{name: "loopback localhost", opts: CatalogOptions{URL: "http://localhost:1234/api.json", StateDir: stateDir}},
-		{name: "http public host", opts: CatalogOptions{URL: "http://models.dev/api.json", StateDir: stateDir}, wantErr: "loopback"},
-		{name: "non-http scheme", opts: CatalogOptions{URL: "ftp://models.dev/api.json", StateDir: stateDir}, wantErr: "scheme"},
-		{name: "missing host", opts: CatalogOptions{URL: "https:///api.json", StateDir: stateDir}, wantErr: "absolute URL"},
-		{name: "userinfo", opts: CatalogOptions{URL: "http://user:pass@127.0.0.1:1234/api.json", StateDir: stateDir}, wantErr: "user information"},
-		{name: "https userinfo", opts: CatalogOptions{URL: "https://user@models.dev/api.json", StateDir: stateDir}, wantErr: "user information"},
+		{name: "default", opts: CatalogOptions{StateDir: stateDir, UserAgent: "test"}},
+		{name: "https override", opts: CatalogOptions{URL: "https://mirror.example/api.json", StateDir: stateDir, UserAgent: "test"}},
+		{name: "loopback v4", opts: CatalogOptions{URL: "http://127.0.0.1:1234/api.json", StateDir: stateDir, UserAgent: "test"}},
+		{name: "loopback v6", opts: CatalogOptions{URL: "http://[::1]:1234/api.json", StateDir: stateDir, UserAgent: "test"}},
+		{name: "loopback localhost", opts: CatalogOptions{URL: "http://localhost:1234/api.json", StateDir: stateDir, UserAgent: "test"}},
+		{name: "http public host", opts: CatalogOptions{URL: "http://models.dev/api.json", StateDir: stateDir, UserAgent: "test"}, wantErr: "loopback"},
+		{name: "non-http scheme", opts: CatalogOptions{URL: "ftp://models.dev/api.json", StateDir: stateDir, UserAgent: "test"}, wantErr: "scheme"},
+		{name: "missing host", opts: CatalogOptions{URL: "https:///api.json", StateDir: stateDir, UserAgent: "test"}, wantErr: "absolute URL"},
+		{name: "userinfo", opts: CatalogOptions{URL: "http://user:pass@127.0.0.1:1234/api.json", StateDir: stateDir, UserAgent: "test"}, wantErr: "user information"},
+		{name: "https userinfo", opts: CatalogOptions{URL: "https://user@models.dev/api.json", StateDir: stateDir, UserAgent: "test"}, wantErr: "user information"},
 		{name: "missing state dir", opts: CatalogOptions{URL: "https://models.dev/api.json"}, wantErr: "state directory"},
+		{name: "missing user agent", opts: CatalogOptions{URL: "https://models.dev/api.json", StateDir: stateDir}, wantErr: "user agent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -695,20 +696,13 @@ func TestCatalogSourceFreshCacheSkipsHTTP(t *testing.T) {
 	}
 }
 
-func TestCatalogSourceUserAgentFallback(t *testing.T) {
-	fixture := readCatalogFixture(t)
-	fake, server := startCatalogServer(t, fixture)
-	source := newCatalogSource(t, CatalogOptions{
-		URL:      server.URL,
+func TestCatalogSourceRequiresUserAgent(t *testing.T) {
+	if _, err := NewModelsDevSource(CatalogOptions{
+		URL:      "https://models.dev/api.json",
 		StateDir: t.TempDir(),
 		Now:      newFakeClock().Now,
-	})
-	if _, err := source.Load(t.Context(), testProvider); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	recorded := fake.recorded()
-	if recorded.userAgents[0] != "aharness/unknown" {
-		t.Errorf("User-Agent = %q, want %q", recorded.userAgents[0], "aharness/unknown")
+	}); err == nil || !strings.Contains(err.Error(), "user agent") {
+		t.Fatalf("NewModelsDevSource error = %v, want missing user agent", err)
 	}
 }
 

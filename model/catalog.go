@@ -256,9 +256,9 @@ type CatalogSource interface {
 	Refresh(ctx context.Context, provider string) (Catalog, error)
 }
 
-// CatalogOptions configures the models.dev source. StateDir is required;
-// other zero values select production defaults. Tests inject a client, clock,
-// and temporary state directory.
+// CatalogOptions configures the models.dev source. StateDir and UserAgent are
+// required; other zero values select production defaults. Tests inject a
+// client, clock, and temporary state directory.
 type CatalogOptions struct {
 	// URL is the catalog source. Empty selects DefaultCatalogURL.
 	URL string
@@ -267,7 +267,8 @@ type CatalogOptions struct {
 	StateDir string
 	// Client is the HTTP client. Nil selects a client bounded by Timeout.
 	Client *http.Client
-	// UserAgent is sent with the request, for example "aharness/<version>".
+	// UserAgent is sent with every request and identifies the host, for example
+	// "acode/1.2.0". Required.
 	UserAgent string
 	// Now supplies the clock. Nil selects time.Now.
 	Now func() time.Time

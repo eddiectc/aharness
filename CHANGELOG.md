@@ -8,6 +8,21 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-11-18
+
+### Changed
+
+- Outbound `User-Agent` values are now required host input and are sent
+  verbatim. `Config.UserAgent`, `OpenAIModelOptions.UserAgent`, and
+  `CatalogConfig.UserAgent` are required; the model adapters and catalog source
+  reject a missing identity. The SDK no longer defaults any request to
+  `aharness/<version>`; web tools return `unavailable` when the host supplies no
+  identity.
+- `model.NewOpenAIChat`, `model.NewOpenAIChatWithClient`,
+  `model.NewOpenAIResponses`, and `model.NewOpenAIResponsesWithClient` now take
+  the full `User-Agent` identity instead of a version string. A request without
+  one fails with `model.ErrUserAgentRequired`.
+
 ## [v0.0.1] - 2026-11-18
 
 The first tagged release of the aharness SDK. The module is a library: it ships
@@ -54,4 +69,5 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[v0.1.0]: https://github.com/eddiectc/aharness/compare/v0.0.1...v0.1.0
 [v0.0.1]: https://github.com/eddiectc/aharness/releases/tag/v0.0.1

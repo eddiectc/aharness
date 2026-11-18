@@ -35,9 +35,10 @@ type webFetchArgs struct {
 // webFetchTool executes one web fetch through the configured provider and owns
 // target validation, extraction, sanitization, paging, and result construction.
 type webFetchTool struct {
-	provider string
-	timeout  time.Duration
-	fetcher  fetcher
+	provider  string
+	userAgent string
+	timeout   time.Duration
+	fetcher   fetcher
 }
 
 // webFetchDetails is the stable, small details object for a fetch result.
@@ -68,10 +69,21 @@ func newWebFetchTool(opts Options) *webFetchTool {
 		provider = opts.WebFetchProvider
 	}
 	return &webFetchTool{
-		provider: provider,
-		timeout:  timeout,
-		fetcher:  newWebFetcher(opts, timeout),
+		provider:  provider,
+		userAgent: webFetchUserAgent(opts),
+		timeout:   timeout,
+		fetcher:   newWebFetcher(opts, timeout),
 	}
+}
+
+// webFetchUserAgent resolves the per-fetch override or the host identity. It
+// returns an empty string only when the caller supplied neither, and the tool
+// then refuses to send a request.
+func webFetchUserAgent(opts Options) string {
+	if opts.WebFetchUserAgent != "" {
+		return opts.WebFetchUserAgent
+	}
+	return opts.UserAgent
 }
 
 // executeWebFetch validates the arguments and performs one fetch. Every
@@ -91,6 +103,10 @@ func (r *Registry) executeWebFetch(ctx context.Context, args json.RawMessage) Re
 	target, err := parseWebFetchTarget(a.URL)
 	if err != nil {
 		return Failure(CodeInvalidArgs, "web_fetch: "+err.Error())
+	}
+	if strings.TrimSpace(r.web.userAgent) == "" {
+		return Failure(CodeUnavailable,
+			"web_fetch: a User-Agent is required; set it in the host configuration")
 	}
 	return r.web.fetch(ctx, target, offset)
 }
@@ -520,17 +536,10 @@ type builtinFetcher struct {
 // http.DefaultClient, never reads proxy environment variables, never disables
 // TLS verification, and keeps no cookie jar.
 func newBuiltinFetcher(opts Options, timeout time.Duration) *builtinFetcher {
-	userAgent := opts.WebFetchUserAgent
-	if userAgent == "" {
-		userAgent = opts.UserAgent
-	}
-	if userAgent == "" {
-		userAgent = "aharness/devel"
-	}
 	connectTimeout := min(10*time.Second, timeout)
 	f := &builtinFetcher{
 		dialer:        &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second},
-		userAgent:     userAgent,
+		userAgent:     webFetchUserAgent(opts),
 		timeout:       timeout,
 		allowLoopback: opts.WebAllowLoopback,
 	}

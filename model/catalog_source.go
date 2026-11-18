@@ -20,11 +20,10 @@ import (
 )
 
 const (
-	catalogCacheVersion     = 3
-	maxCatalogModelIDBytes  = 256
-	defaultCatalogUserAgent = "aharness/unknown"
-	catalogCacheFileMode    = 0o600
-	catalogCacheDirMode     = 0o700
+	catalogCacheVersion    = 3
+	maxCatalogModelIDBytes = 256
+	catalogCacheFileMode   = 0o600
+	catalogCacheDirMode    = 0o700
 )
 
 // ModelsDevSource is the models.dev catalog source. It fetches the catalog,
@@ -44,11 +43,15 @@ type ModelsDevSource struct {
 var _ CatalogSource = (*ModelsDevSource)(nil)
 
 // NewModelsDevSource validates opts and returns a catalog source. The state
-// directory is required. The catalog URL defaults to DefaultCatalogURL; an
-// override must use HTTPS except for loopback HTTP test servers.
+// directory and UserAgent are required. The catalog URL defaults to
+// DefaultCatalogURL; an override must use HTTPS except for loopback HTTP test
+// servers.
 func NewModelsDevSource(opts CatalogOptions) (*ModelsDevSource, error) {
 	if opts.StateDir == "" {
 		return nil, fmt.Errorf("catalog state directory is required")
+	}
+	if strings.TrimSpace(opts.UserAgent) == "" {
+		return nil, fmt.Errorf("catalog user agent is required")
 	}
 	rawURL := opts.URL
 	if rawURL == "" {
@@ -74,10 +77,6 @@ func NewModelsDevSource(opts CatalogOptions) (*ModelsDevSource, error) {
 		return nil, fmt.Errorf("invalid catalog URL %q: scheme must be https", rawURL)
 	}
 
-	userAgent := opts.UserAgent
-	if userAgent == "" {
-		userAgent = defaultCatalogUserAgent
-	}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -102,7 +101,7 @@ func NewModelsDevSource(opts CatalogOptions) (*ModelsDevSource, error) {
 		url:       parsed.String(),
 		stateDir:  opts.StateDir,
 		client:    client,
-		userAgent: userAgent,
+		userAgent: opts.UserAgent,
 		now:       now,
 		ttl:       ttl,
 		timeout:   timeout,

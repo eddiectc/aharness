@@ -63,7 +63,8 @@ only for tests.
 - Catalog: models.dev decode/normalize, eligibility, dialect mapping, cache
   versioning, TTL/conditional GET, stale fallback, refresh, URL policy, and
   warnings.
-- User-Agent overrides are verbatim; the default remains `aharness/<version>`.
+- User-Agent values are required, sent verbatim, and never defaulted; a missing
+  value is a construction error or an `unavailable` tool result.
 
 ### `tools`
 

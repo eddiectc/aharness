@@ -20,21 +20,22 @@ type OpenAIChat struct {
 }
 
 // NewOpenAIChat constructs a Chat Completions adapter. An empty baseURL uses
-// DefaultBaseURL. An empty token omits the Authorization header. A
-// non-positive timeout selects DefaultHTTPTimeout.
-func NewOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIChat {
-	return newOpenAIChat(baseURL, token, sessionID, version, timeout, nil)
+// DefaultBaseURL. An empty token omits the Authorization header. userAgent is
+// sent verbatim and is required. A non-positive timeout selects
+// DefaultHTTPTimeout.
+func NewOpenAIChat(baseURL, token, sessionID, userAgent string, timeout time.Duration) *OpenAIChat {
+	return newOpenAIChat(baseURL, token, sessionID, userAgent, timeout, nil)
 }
 
 // NewOpenAIChatWithClient constructs a Chat Completions adapter that uses the
 // caller's HTTP client. A nil client selects the default bounded client.
-func NewOpenAIChatWithClient(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIChat {
-	return newOpenAIChat(baseURL, token, sessionID, version, timeout, client)
+func NewOpenAIChatWithClient(baseURL, token, sessionID, userAgent string, timeout time.Duration, client *http.Client) *OpenAIChat {
+	return newOpenAIChat(baseURL, token, sessionID, userAgent, timeout, client)
 }
 
-func newOpenAIChat(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIChat {
+func newOpenAIChat(baseURL, token, sessionID, userAgent string, timeout time.Duration, client *http.Client) *OpenAIChat {
 	return &OpenAIChat{
-		transport:    newHTTPTransportWithClient(baseURL, "/chat/completions", token, sessionID, version, timeout, client),
+		transport:    newHTTPTransportWithClient(baseURL, "/chat/completions", token, sessionID, userAgent, timeout, client),
 		continuation: newContinuationCache(func(s string) int { return len(s) }),
 	}
 }
@@ -52,7 +53,7 @@ func (a *OpenAIChat) WithSessionID(sessionID string) *OpenAIChat {
 }
 
 // WithUserAgent returns a copy of the adapter that sends the given User-Agent
-// verbatim. An empty value keeps the default "aharness/<version>" identity.
+// verbatim. An empty value leaves the current identity unchanged.
 func (a *OpenAIChat) WithUserAgent(userAgent string) *OpenAIChat {
 	if userAgent == "" {
 		return a

@@ -65,14 +65,10 @@ type crawl4AIFetcher struct {
 // header cap but deliberately no address guard: the endpoint is the operator's
 // service.
 func newCrawl4AIFetcher(opts Options, endpoint string, timeout time.Duration) *crawl4AIFetcher {
-	userAgent := opts.WebFetchUserAgent
-	if userAgent == "" {
-		userAgent = opts.UserAgent
-	}
 	f := &crawl4AIFetcher{
 		endpoint:  strings.TrimRight(endpoint, "/"),
 		key:       opts.WebFetchKey,
-		userAgent: userAgent,
+		userAgent: webFetchUserAgent(opts),
 		timeout:   timeout,
 	}
 	var client *http.Client
@@ -122,9 +118,7 @@ func (f *crawl4AIFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResu
 		return fetchResult{}, webErrorf(CodeFetchFailed, "web_fetch: build provider request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if f.userAgent != "" {
-		req.Header.Set("User-Agent", f.userAgent)
-	}
+	req.Header.Set("User-Agent", f.userAgent)
 	if f.key != "" {
 		req.Header.Set("Authorization", "Bearer "+f.key)
 	}

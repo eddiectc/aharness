@@ -11,6 +11,10 @@ import (
 // not fit the model context window.
 var ErrContextOverflow = errors.New("model context overflow")
 
+// ErrUserAgentRequired marks an outbound request made without a caller-supplied
+// User-Agent.
+var ErrUserAgentRequired = errors.New("user agent is required")
+
 // HTTPError is a non-success HTTP response from a provider.
 type HTTPError struct {
 	StatusCode    int

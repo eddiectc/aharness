@@ -539,3 +539,16 @@ func FuzzSearchJSON(f *testing.F) {
 		}
 	})
 }
+
+// TestWebSearchRequiresUserAgent verifies that the search tool refuses to send
+// a request without the host-supplied identity.
+func TestWebSearchRequiresUserAgent(t *testing.T) {
+	registry := NewRegistry(nil, Options{SearXNGURL: "http://127.0.0.1:1"})
+	result := executeArgs(t, registry, "web_search", map[string]any{"query": "aharness"})
+	if result.OK || result.Code != CodeUnavailable {
+		t.Fatalf("result = %+v, want unavailable", result)
+	}
+	if !strings.Contains(result.Error, "User-Agent") {
+		t.Errorf("error = %q, want User-Agent guidance", result.Error)
+	}
+}

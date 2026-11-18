@@ -35,6 +35,7 @@ func Example() {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: workspace,
 		StateDir:  stateDir,
+		UserAgent: "example/1.0.0",
 		Model: aharness.CustomModel(aharness.ModelSpec{
 			ID:            "example-model",
 			Provider:      "example",

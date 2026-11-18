@@ -69,6 +69,7 @@ func newTestAgent(t *testing.T, tools *aharness.ToolsConfig, model aharness.Mode
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: workspace,
 		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
 		Model:     testModel(model),
 		Tools:     tools,
 	})
@@ -192,8 +193,9 @@ func TestResumeCustomToolAndInspect(t *testing.T) {
 	}
 
 	if _, err := aharness.Resume(context.Background(), aharness.Config{
-		StateDir: stateDir,
-		Model:    testModel(&scriptedModel{}),
+		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(&scriptedModel{}),
 	}, sessionID); !errors.Is(err, aharness.ErrToolMismatch) {
 		t.Fatalf("Resume without custom tools error = %v, want ErrToolMismatch", err)
 	}
@@ -204,6 +206,7 @@ func TestResumeCustomToolAndInspect(t *testing.T) {
 	resumed, err := aharness.Resume(context.Background(), aharness.Config{
 		StateDir:  stateDir,
 		Workspace: workspace,
+		UserAgent: "aharness-test/1.0",
 		Model:     testModel(second),
 		Tools:     customTools(t, &called),
 	}, sessionID)

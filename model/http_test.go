@@ -77,7 +77,7 @@ func checkRequiredHeaders(t *testing.T, header http.Header, wantToken bool) {
 	if got, want := header.Get("x-opencode-session"), testSessionID; got != want {
 		t.Errorf("x-opencode-session = %q, want %q", got, want)
 	}
-	if got, want := header.Get("User-Agent"), "aharness/"+testVersion; got != want {
+	if got, want := header.Get("User-Agent"), testVersion; got != want {
 		t.Errorf("User-Agent = %q, want %q", got, want)
 	}
 	if wantToken {
@@ -466,7 +466,7 @@ func strconvQuote(s string) string {
 }
 
 // TestWithUserAgent verifies that the public adapter identity override is sent
-// verbatim, and that an empty override keeps the SDK default.
+// verbatim, and that an empty override leaves the constructor identity intact.
 func TestWithUserAgent(t *testing.T) {
 	type completer interface {
 		Complete(context.Context, Request) (Response, error)
@@ -530,8 +530,45 @@ func TestWithUserAgent(t *testing.T) {
 			if _, err := adapter.Complete(context.Background(), Request{Model: "model", Messages: []Message{{Role: RoleUser, Content: "hi"}}}); err != nil {
 				t.Fatalf("Complete: %v", err)
 			}
-			if want := "aharness/" + testVersion; got != want {
+			if want := testVersion; got != want {
 				t.Errorf("User-Agent = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestAdapterRequiresUserAgent verifies that an adapter without a
+// caller-supplied identity refuses to build a provider request.
+func TestAdapterRequiresUserAgent(t *testing.T) {
+	req := Request{Model: "model", Messages: []Message{{Role: RoleUser, Content: "hi"}}}
+	cases := []struct {
+		name string
+		new  func() interface {
+			Complete(context.Context, Request) (Response, error)
+		}
+	}{
+		{
+			name: "chat",
+			new: func() interface {
+				Complete(context.Context, Request) (Response, error)
+			} {
+				return NewOpenAIChat("https://provider.test", "", testSessionID, "", 0)
+			},
+		},
+		{
+			name: "responses",
+			new: func() interface {
+				Complete(context.Context, Request) (Response, error)
+			} {
+				return NewOpenAIResponses("https://provider.test", "", testSessionID, "", 0)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.new().Complete(t.Context(), req)
+			if !errors.Is(err, ErrUserAgentRequired) {
+				t.Fatalf("error = %T %v, want ErrUserAgentRequired", err, err)
 			}
 		})
 	}

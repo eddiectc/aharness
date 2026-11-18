@@ -20,21 +20,22 @@ type OpenAIResponses struct {
 }
 
 // NewOpenAIResponses constructs a Responses adapter. An empty baseURL uses
-// DefaultBaseURL. An empty token omits the Authorization header. A
-// non-positive timeout selects DefaultHTTPTimeout.
-func NewOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration) *OpenAIResponses {
-	return newOpenAIResponses(baseURL, token, sessionID, version, timeout, nil)
+// DefaultBaseURL. An empty token omits the Authorization header. userAgent is
+// sent verbatim and is required. A non-positive timeout selects
+// DefaultHTTPTimeout.
+func NewOpenAIResponses(baseURL, token, sessionID, userAgent string, timeout time.Duration) *OpenAIResponses {
+	return newOpenAIResponses(baseURL, token, sessionID, userAgent, timeout, nil)
 }
 
 // NewOpenAIResponsesWithClient constructs a Responses adapter that uses the
 // caller's HTTP client. A nil client selects the default bounded client.
-func NewOpenAIResponsesWithClient(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIResponses {
-	return newOpenAIResponses(baseURL, token, sessionID, version, timeout, client)
+func NewOpenAIResponsesWithClient(baseURL, token, sessionID, userAgent string, timeout time.Duration, client *http.Client) *OpenAIResponses {
+	return newOpenAIResponses(baseURL, token, sessionID, userAgent, timeout, client)
 }
 
-func newOpenAIResponses(baseURL, token, sessionID, version string, timeout time.Duration, client *http.Client) *OpenAIResponses {
+func newOpenAIResponses(baseURL, token, sessionID, userAgent string, timeout time.Duration, client *http.Client) *OpenAIResponses {
 	return &OpenAIResponses{
-		transport:    newHTTPTransportWithClient(baseURL, "/responses", token, sessionID, version, timeout, client),
+		transport:    newHTTPTransportWithClient(baseURL, "/responses", token, sessionID, userAgent, timeout, client),
 		continuation: newContinuationCache(responsesReasoningBytes),
 	}
 }
@@ -52,7 +53,7 @@ func (a *OpenAIResponses) WithSessionID(sessionID string) *OpenAIResponses {
 }
 
 // WithUserAgent returns a copy of the adapter that sends the given User-Agent
-// verbatim. An empty value keeps the default "aharness/<version>" identity.
+// verbatim. An empty value leaves the current identity unchanged.
 func (a *OpenAIResponses) WithUserAgent(userAgent string) *OpenAIResponses {
 	if userAgent == "" {
 		return a

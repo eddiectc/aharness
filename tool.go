@@ -132,7 +132,7 @@ type toolSetup struct {
 
 // resolveToolSetup normalizes ToolsConfig into an explicit grant, the recorded
 // custom declarations, tool options, and a registry factory.
-func resolveToolSetup(cfg *ToolsConfig, delegation bool) (*toolSetup, error) {
+func resolveToolSetup(cfg *ToolsConfig, userAgent string, delegation bool) (*toolSetup, error) {
 	setup := &toolSetup{enabled: make(map[ToolName]bool)}
 	builtinSchemas, err := tools.SchemasFor(tools.Version)
 	if err != nil {
@@ -231,7 +231,7 @@ func resolveToolSetup(cfg *ToolsConfig, delegation bool) (*toolSetup, error) {
 	if cfg != nil && cfg.WebFetch != nil {
 		setup.options.WebTimeout = cfg.WebFetch.Timeout
 	}
-	setup.options.UserAgent = "aharness/" + Version()
+	setup.options.UserAgent = userAgent
 	setup.factory = func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error) {
 		opts := setup.options
 		opts.WorkDir = workDir

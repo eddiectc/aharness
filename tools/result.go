@@ -104,16 +104,19 @@ var (
 // used to spill oversized command output, and an empty WorkDir disables
 // spilling. SearXNGURL is the validated base URL for web_search; an empty value
 // keeps the tool registered but returns an actionable unavailable result.
-// UserAgent identifies the harness on outbound tool requests.
+// UserAgent identifies the host on outbound web requests, for example
+// "acode/1.2.0". It is required for web_search and web_fetch; a missing value
+// makes those tools return an unavailable result.
 //
 // WebTimeout bounds one web_fetch request, covering connect, redirects, and
 // body reads; zero selects WebTimeoutDefault. WebFetchProvider selects the
 // compiled-in adapter (WebFetchProviderBuiltin or WebFetchProviderCrawl4AI)
 // once; an empty value selects builtin. WebFetchURL is the Crawl4AI endpoint and
-// WebFetchKey its bearer token, which is never logged. WebClient is a test seam
-// that routes fixture requests; production leaves it nil, and constructors
-// build a dedicated client with the address guard. WebAllowLoopback is the
-// matching test-only seam: it relaxes the address guard so httptest servers are
+// WebFetchKey its bearer token, which is never logged. WebFetchUserAgent
+// overrides UserAgent for web_fetch only. WebClient is a test seam that routes
+// fixture requests; production leaves it nil, and constructors build a
+// dedicated client with the address guard. WebAllowLoopback is the matching
+// test-only seam: it relaxes the address guard so httptest servers are
 // reachable. It is not a flag, environment variable, or config key, and
 // production wiring never sets it.
 //

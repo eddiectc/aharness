@@ -250,6 +250,7 @@ func validateEndpoint(raw string) error {
 type OpenAIModelOptions struct {
 	Spec       ModelSpec
 	APIKey     string
+	UserAgent  string
 	HTTPClient *http.Client
 	Timeout    time.Duration
 }
@@ -267,12 +268,15 @@ func OpenAIModel(opts OpenAIModelOptions) (*ModelConfig, error) {
 	if spec.BaseURL == "" {
 		return nil, &ConfigError{Field: "Model.Spec.BaseURL", Detail: "is required for the OpenAI adapter"}
 	}
+	if strings.TrimSpace(opts.UserAgent) == "" {
+		return nil, &ConfigError{Field: "Model.UserAgent", Detail: "is required"}
+	}
 	var completer Model
 	switch spec.Dialect {
 	case DialectChat:
-		completer = wrapInternalCompleter(model.NewOpenAIChatWithClient(spec.BaseURL, opts.APIKey, "", Version(), opts.Timeout, opts.HTTPClient))
+		completer = wrapInternalCompleter(model.NewOpenAIChatWithClient(spec.BaseURL, opts.APIKey, "", opts.UserAgent, opts.Timeout, opts.HTTPClient))
 	case DialectResponses:
-		completer = wrapInternalCompleter(model.NewOpenAIResponsesWithClient(spec.BaseURL, opts.APIKey, "", Version(), opts.Timeout, opts.HTTPClient))
+		completer = wrapInternalCompleter(model.NewOpenAIResponsesWithClient(spec.BaseURL, opts.APIKey, "", opts.UserAgent, opts.Timeout, opts.HTTPClient))
 	default:
 		return nil, &ConfigError{Field: "Model.Spec.Dialect", Value: string(spec.Dialect), Detail: "OpenAIModel supports openai-chat or openai-responses"}
 	}
@@ -293,6 +297,9 @@ func (c CatalogConfig) options() (model.CatalogOptions, error) {
 	if c.StateDir == "" {
 		return model.CatalogOptions{}, &ConfigError{Field: "Catalog.StateDir", Detail: "is required"}
 	}
+	if strings.TrimSpace(c.UserAgent) == "" {
+		return model.CatalogOptions{}, &ConfigError{Field: "Catalog.UserAgent", Detail: "is required"}
+	}
 	return model.CatalogOptions{
 		URL:       c.URL,
 		StateDir:  c.StateDir,
@@ -307,9 +314,6 @@ func newCatalog(cfg CatalogConfig) (*model.ModelsDevSource, error) {
 	opts, err := cfg.options()
 	if err != nil {
 		return nil, err
-	}
-	if opts.UserAgent == "" {
-		opts.UserAgent = "aharness/" + Version()
 	}
 	source, err := model.NewModelsDevSource(opts)
 	if err != nil {
@@ -373,6 +377,7 @@ func DiscoverModel(ctx context.Context, opts DiscoverModelOptions) (*ModelConfig
 	return OpenAIModel(OpenAIModelOptions{
 		Spec:       spec,
 		APIKey:     opts.APIKey,
+		UserAgent:  opts.Catalog.UserAgent,
 		HTTPClient: opts.HTTPClient,
 		Timeout:    opts.Timeout,
 	})

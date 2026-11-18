@@ -770,3 +770,16 @@ func TestWebFetchDetailsShape(t *testing.T) {
 		t.Errorf("output header incomplete:\n%s", res.Output)
 	}
 }
+
+// TestWebFetchRequiresUserAgent verifies that the fetch tool refuses to send a
+// request without the host-supplied identity.
+func TestWebFetchRequiresUserAgent(t *testing.T) {
+	registry := NewRegistry(nil, Options{})
+	result := fetch(t, registry, `{"url":"https://example.com/"}`)
+	if result.OK || result.Code != CodeUnavailable {
+		t.Fatalf("result = %+v, want unavailable", result)
+	}
+	if !strings.Contains(result.Error, "User-Agent") {
+		t.Errorf("error = %q, want User-Agent guidance", result.Error)
+	}
+}

@@ -33,6 +33,7 @@ func main() {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: workspace,
 		StateDir:  stateDir,
+		UserAgent: "external/1.0.0",
 		Model: aharness.CustomModel(aharness.ModelSpec{
 			ID:            "external-model",
 			Provider:      "external",

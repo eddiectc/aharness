@@ -57,6 +57,7 @@ func TestResearchAcceptanceShape(t *testing.T) {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace:    t.TempDir(),
 		StateDir:     t.TempDir(),
+		UserAgent:    "aharness-test/1.0",
 		Model:        testModel(model),
 		Tools:        tools,
 		SystemPrompt: prompt,

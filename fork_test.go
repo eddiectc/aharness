@@ -38,6 +38,7 @@ func TestForkReplaysHistoryWithToolAbsentFromNewGrant(t *testing.T) {
 	forked, err := aharness.Fork(context.Background(), aharness.Config{
 		StateDir:  stateDir,
 		Workspace: workspace,
+		UserAgent: "aharness-test/1.0",
 		Model:     testModel(forkModel),
 		Tools:     &aharness.ToolsConfig{},
 	}, parentID)
@@ -87,6 +88,7 @@ func TestForkContractOverrideAndResumeRejection(t *testing.T) {
 	forked, err := aharness.Fork(context.Background(), aharness.Config{
 		StateDir:     stateDir,
 		Workspace:    workspace,
+		UserAgent:    "aharness-test/1.0",
 		Model:        testModel(forkModel),
 		Tools:        newTools,
 		SystemPrompt: "you are an analyst",
@@ -132,6 +134,7 @@ func TestForkContractOverrideAndResumeRejection(t *testing.T) {
 
 	if _, err := aharness.Resume(context.Background(), aharness.Config{
 		StateDir:     stateDir,
+		UserAgent:    "aharness-test/1.0",
 		Model:        testModel(&scriptedModel{}),
 		Tools:        tools,
 		SystemPrompt: "changed",
@@ -145,9 +148,10 @@ func TestForkContractOverrideAndResumeRejection(t *testing.T) {
 	changed := customTools(t, &called)
 	changed.Disable = []aharness.ToolName{aharness.ToolEditFile}
 	if _, err := aharness.Resume(context.Background(), aharness.Config{
-		StateDir: stateDir,
-		Model:    testModel(&scriptedModel{}),
-		Tools:    changed,
+		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(&scriptedModel{}),
+		Tools:     changed,
 	}, parentID); !errors.Is(err, aharness.ErrToolMismatch) {
 		t.Fatalf("Resume changed tools error = %v, want ErrToolMismatch", err)
 	}

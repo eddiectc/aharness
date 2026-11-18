@@ -31,37 +31,38 @@ func TestConfigValidation(t *testing.T) {
 		cfg  aharness.Config
 		want error
 	}{
-		{name: "missing workspace", cfg: aharness.Config{StateDir: t.TempDir(), Model: model}},
-		{name: "missing state dir", cfg: aharness.Config{Workspace: t.TempDir(), Model: model}},
-		{name: "missing model", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir()}, want: aharness.ErrModelRequired},
-		{name: "zero context", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: aharness.CustomModel(aharness.ModelSpec{ID: "m", Dialect: aharness.DialectCustom}, &scriptedModel{})}},
-		{name: "prompt conflict", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model, SystemPrompt: "a", Instructions: "b"}},
-		{name: "negative turns", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model, MaxTurns: -1}},
+		{name: "missing workspace", cfg: aharness.Config{StateDir: t.TempDir(), UserAgent: "test", Model: model}},
+		{name: "missing state dir", cfg: aharness.Config{Workspace: t.TempDir(), UserAgent: "test", Model: model}},
+		{name: "missing model", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test"}, want: aharness.ErrModelRequired},
+		{name: "missing user agent", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model}},
+		{name: "zero context", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: aharness.CustomModel(aharness.ModelSpec{ID: "m", Dialect: aharness.DialectCustom}, &scriptedModel{})}},
+		{name: "prompt conflict", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model, SystemPrompt: "a", Instructions: "b"}},
+		{name: "negative turns", cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model, MaxTurns: -1}},
 		{
 			name: "unknown disable",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Disable: []aharness.ToolName{"nope"}}},
 		},
 		{
 			name: "disable delegate",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Disable: []aharness.ToolName{aharness.ToolDelegate}}},
 		},
 		{
 			name: "duplicate custom tool",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Extra: []aharness.Tool{validTool("lookup"), validTool("lookup")}}},
 			want: aharness.ErrToolConflict,
 		},
 		{
 			name: "builtin collision",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Extra: []aharness.Tool{validTool("read_file")}}},
 			want: aharness.ErrToolConflict,
 		},
 		{
 			name: "bad custom schema",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Extra: []aharness.Tool{{
 					Name: "lookup", Description: "d", InputSchema: json.RawMessage(`[]`),
 					Run: validTool("lookup").Run,
@@ -69,12 +70,12 @@ func TestConfigValidation(t *testing.T) {
 		},
 		{
 			name: "empty delegation",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Delegation: &aharness.DelegationConfig{}}},
 		},
 		{
 			name: "delegation delegate",
-			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), Model: model,
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
 				Tools: &aharness.ToolsConfig{Delegation: &aharness.DelegationConfig{Agents: []aharness.AgentDefinition{{
 					Name: "a", Description: "d", Prompt: "p", Tools: []aharness.ToolName{"delegate"},
 				}}}}},

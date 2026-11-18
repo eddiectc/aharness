@@ -60,6 +60,7 @@ func TestDelegationFanOutAndChildSteering(t *testing.T) {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: workspace,
 		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
 		Model:     modelCfg,
 		Tools:     tools,
 	})
@@ -220,6 +221,7 @@ func TestConcurrencySafeCustomToolFansOut(t *testing.T) {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: t.TempDir(),
 		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
 		Model:     modelCfg,
 		Tools:     tools,
 		Authorize: func(_ context.Context, _ aharness.ToolRequest) error {

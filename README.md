@@ -82,6 +82,7 @@ func run() error {
     ag, err := aharness.New(ctx, aharness.Config{
         Workspace: "/repo",
         StateDir:  filepath.Join(home, ".aharness"),
+        UserAgent: "my-product/1.0.0",
         Model: aharness.CustomModel(aharness.ModelSpec{
             ID:            "my-model",
             Provider:      "my-provider",
@@ -126,7 +127,10 @@ display-only observations, and the session log is the durable record.
 OpenAI-compatible endpoint. `DiscoverModel` and `ListModels` resolve models and
 limits from the [models.dev](https://models.dev) catalog. `CustomModel` wraps
 any implementation of the `Model` interface; implement the optional
-`StreamingModel` interface to emit deltas.
+`StreamingModel` interface to emit deltas. `Config.UserAgent`,
+`OpenAIModelOptions.UserAgent`, and `CatalogConfig.UserAgent` are required: the
+SDK sends the caller's identity on every outbound request and never substitutes
+its own.
 
 `Config.MaxTurns` and `MaxTotalTokens` bound the agent's cumulative turn and
 token usage, while `RunTimeout` and `ModelTimeout` bound one run and one model

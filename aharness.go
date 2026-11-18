@@ -28,6 +28,9 @@ type Config struct {
 	// Model is the model implementation and identity. Required for New. On
 	// Resume/Fork a zero Spec inherits the recorded identity.
 	Model *ModelConfig
+	// UserAgent identifies the host on outbound tool requests, for example
+	// "acode/1.2.0". Required.
+	UserAgent string
 
 	// Tools selects built-in tools, registers custom ones, and configures the
 	// web and delegation tools. Nil selects the default built-in set. On
@@ -121,6 +124,9 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 	if cfg.Model.Completer == nil {
 		return nil, &ConfigError{Field: "Model.Completer", Detail: "is required"}
 	}
+	if strings.TrimSpace(cfg.UserAgent) == "" {
+		return nil, &ConfigError{Field: "UserAgent", Detail: "is required"}
+	}
 	if cfg.MaxTurns < 0 {
 		return nil, &ConfigError{Field: "MaxTurns", Detail: "must not be negative"}
 	}
@@ -153,7 +159,7 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 	if err := validateEffortValue(cfg.ThinkingEffort, modelCfg.Spec); err != nil {
 		return nil, err
 	}
-	setup, err := resolveToolSetup(cfg.Tools, delegationConfigured(cfg.Tools))
+	setup, err := resolveToolSetup(cfg.Tools, cfg.UserAgent, delegationConfigured(cfg.Tools))
 	if err != nil {
 		return nil, err
 	}

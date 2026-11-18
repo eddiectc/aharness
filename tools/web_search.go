@@ -131,17 +131,13 @@ func isLoopbackHost(host string) bool {
 }
 
 func newSearchClient(opts Options) *searchClient {
-	userAgent := opts.UserAgent
-	if userAgent == "" {
-		userAgent = "aharness/devel"
-	}
 	timeout := opts.SearchTimeout
 	if timeout <= 0 {
 		timeout = SearchTimeout
 	}
 	return &searchClient{
 		baseURL:   opts.SearXNGURL,
-		userAgent: userAgent,
+		userAgent: opts.UserAgent,
 		http:      &http.Client{},
 		timeout:   timeout,
 	}
@@ -159,6 +155,10 @@ func (r *Registry) executeWebSearch(ctx context.Context, args json.RawMessage) R
 	if r.search.baseURL == "" {
 		return Failure(CodeUnavailable,
 			"SearXNG is not configured; set the web_search URL in the host configuration")
+	}
+	if strings.TrimSpace(r.search.userAgent) == "" {
+		return Failure(CodeUnavailable,
+			"web_search: a User-Agent is required; set it in the host configuration")
 	}
 	return r.search.search(ctx, req)
 }

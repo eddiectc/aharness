@@ -52,7 +52,7 @@ type httpTransport struct {
 // client. A non-nil client replaces the bounded default and is used exactly as
 // supplied; a positive timeout on an otherwise unbounded client is applied to a
 // shallow copy so a caller-owned client is never mutated.
-func newHTTPTransportWithClient(baseURL, path, token, sessionID, version string, timeout time.Duration, client *http.Client) *httpTransport {
+func newHTTPTransportWithClient(baseURL, path, token, sessionID, userAgent string, timeout time.Duration, client *http.Client) *httpTransport {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
@@ -71,7 +71,7 @@ func newHTTPTransportWithClient(baseURL, path, token, sessionID, version string,
 		url:       strings.TrimRight(baseURL, "/") + path,
 		token:     token,
 		sessionID: sessionID,
-		userAgent: "aharness/" + version,
+		userAgent: userAgent,
 	}
 }
 
@@ -123,6 +123,9 @@ func (t *httpTransport) postStream(ctx context.Context, payload any) (*http.Resp
 }
 
 func (t *httpTransport) do(ctx context.Context, payload any) (*http.Response, error) {
+	if strings.TrimSpace(t.userAgent) == "" {
+		return nil, &ProtocolError{Err: ErrUserAgentRequired}
+	}
 	requestBody, err := jsonv2.Marshal(payload)
 	if err != nil {
 		return nil, &ProtocolError{Err: fmt.Errorf("encode provider request: %w", err)}

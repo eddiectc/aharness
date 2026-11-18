@@ -40,8 +40,8 @@ const catalogFixture = `{
 func catalogServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("User-Agent"); got == "" {
-			t.Errorf("catalog request has no User-Agent")
+		if got, want := r.Header.Get("User-Agent"), "aharness-test/1.0"; got != want {
+			t.Errorf("catalog User-Agent = %q, want %q", got, want)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, catalogFixture)
@@ -53,8 +53,9 @@ func catalogServer(t *testing.T) *httptest.Server {
 func TestListModelsAndDiscoverModel(t *testing.T) {
 	server := catalogServer(t)
 	cfg := aharness.CatalogConfig{
-		URL:      server.URL,
-		StateDir: t.TempDir(),
+		URL:       server.URL,
+		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
 	}
 	listing, err := aharness.ListModels(context.Background(), cfg, "testprovider")
 	if err != nil {
@@ -111,9 +112,10 @@ func TestListModelsAndDiscoverModel(t *testing.T) {
 }
 
 func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
-	var sawAuth string
+	var sawAuth, sawUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawAuth = r.Header.Get("Authorization")
+		sawUserAgent = r.Header.Get("User-Agent")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":"chatcmpl","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"adapter hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
 	}))
@@ -128,6 +130,7 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 			ContextWindow: 10_000,
 		},
 		APIKey:     "token-1",
+		UserAgent:  "aharness-test/1.0",
 		HTTPClient: server.Client(),
 	})
 	if err != nil {
@@ -136,6 +139,7 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: t.TempDir(),
 		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
 		Model:     model,
 	})
 	if err != nil {
@@ -152,6 +156,9 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 	if sawAuth != "Bearer token-1" {
 		t.Fatalf("authorization = %q", sawAuth)
 	}
+	if sawUserAgent != "aharness-test/1.0" {
+		t.Fatalf("User-Agent = %q, want aharness-test/1.0", sawUserAgent)
+	}
 
 	failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -165,6 +172,7 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 			BaseURL:       failServer.URL,
 			ContextWindow: 10_000,
 		},
+		UserAgent:  "aharness-test/1.0",
 		HTTPClient: failServer.Client(),
 	})
 	if err != nil {
@@ -173,6 +181,7 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 	failAgent, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: t.TempDir(),
 		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
 		Model:     failModel,
 	})
 	if err != nil {
@@ -189,5 +198,31 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 	}
 	if providerErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("provider status = %d", providerErr.StatusCode)
+	}
+}
+
+func TestOpenAIModelRequiresUserAgent(t *testing.T) {
+	_, err := aharness.OpenAIModel(aharness.OpenAIModelOptions{
+		Spec: aharness.ModelSpec{
+			ID:            "openai-test",
+			Dialect:       aharness.DialectChat,
+			BaseURL:       "https://provider.example",
+			ContextWindow: 10_000,
+		},
+	})
+	var configErr *aharness.ConfigError
+	if !errors.As(err, &configErr) || configErr.Field != "Model.UserAgent" {
+		t.Fatalf("error = %v, want ConfigError for Model.UserAgent", err)
+	}
+}
+
+func TestCatalogRequiresUserAgent(t *testing.T) {
+	_, err := aharness.ListModels(context.Background(), aharness.CatalogConfig{
+		URL:      "https://models.dev/api.json",
+		StateDir: t.TempDir(),
+	}, "testprovider")
+	var configErr *aharness.ConfigError
+	if !errors.As(err, &configErr) || configErr.Field != "Catalog.UserAgent" {
+		t.Fatalf("error = %v, want ConfigError for Catalog.UserAgent", err)
 	}
 }

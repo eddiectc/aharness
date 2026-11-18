@@ -85,6 +85,7 @@ func TestToolExecutionContextAndPolicyPath(t *testing.T) {
 	ag, err := aharness.New(context.Background(), aharness.Config{
 		Workspace: workspace,
 		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
 		Model:     modelCfg,
 		Tools:     toolsCfg,
 		Authorize: func(_ context.Context, req aharness.ToolRequest) error {
