@@ -165,11 +165,12 @@ func (w *Workspace) resolveDir(rel string) (string, error) {
 	return filepath.Join(w.dir, rel), nil
 }
 
-// Contains reports whether p is the workspace root or an existing path inside
-// it. The check resolves symlinks with the same containment rule as the file
-// tools: a lexically inside path whose symlink resolves outside is not
-// contained. A missing path, a .git component, or a path outside the workspace
-// reports false.
+// Contains reports whether p is the workspace root or a path inside it. The
+// check resolves symlinks with the same containment rule as the file tools: a
+// lexically inside path whose symlink resolves outside is not contained. A
+// not-yet-existing path is contained when its nearest existing ancestor
+// resolves inside and is a directory. A .git component or a path outside the
+// workspace reports false.
 func (w *Workspace) Contains(p string) (bool, error) {
 	if p == "" {
 		return false, nil
@@ -190,10 +191,33 @@ func (w *Workspace) Contains(p string) (bool, error) {
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		// A path that does not exist yet is contained when its nearest existing
+		// ancestor resolves inside and that ancestor is a directory. A file in
+		// the middle of the path fails the directory check.
+		existing := abs
+		found := false
+		for {
+			parent := filepath.Dir(existing)
+			if parent == existing {
+				break
+			}
+			existing = parent
+			real, err = filepath.EvalSymlinks(existing)
+			if err == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if errors.Is(err, os.ErrNotExist) {
+				return false, nil
+			}
+			return false, fmt.Errorf("resolve %s: %w", p, err)
+		}
+		info, statErr := os.Stat(existing)
+		if statErr != nil || !info.IsDir() {
 			return false, nil
 		}
-		return false, fmt.Errorf("resolve %s: %w", p, err)
 	}
 	resolved, err := filepath.Rel(w.dir, real)
 	if err != nil || !filepath.IsLocal(resolved) {
