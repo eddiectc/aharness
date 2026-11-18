@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `tools.CodeDetailsTooLarge` reports a structured details payload over its
+  documented cap; delegate details no longer collapse into `internal`.
 - `aharness.Subagent*` constants name every `SubagentFinished.Status` and
   `ChildOutcome.Status` value. The fields remain `string` for compatibility
   with recorded data.

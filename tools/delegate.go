@@ -378,7 +378,7 @@ func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Re
 		return Failure(CodeInternal, sanitizeUTF8(fmt.Sprintf("encode delegate details: %v", err)))
 	}
 	if len(data) > maxDelegateDetails {
-		return Failure(CodeInternal, fmt.Sprintf("delegate details are %d bytes; the limit is %d", len(data), maxDelegateDetails))
+		return Failure(CodeDetailsTooLarge, fmt.Sprintf("delegate details are %d bytes; the limit is %d", len(data), maxDelegateDetails))
 	}
 	result.Details = data
 	return result

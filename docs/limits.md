@@ -179,7 +179,7 @@ Other event payloads:
 | `delegate` | Recorded execution mode | `concurrent` or `sequential` in `details` | `execution_reason` explains a sequential choice. A call that cannot reserve every fresh child under `DelegationConfig.MaxSubagents` runs sequentially so the rejected spawn is deterministic. |
 | `delegate` | `task` field | 16 KiB | A longer self-contained prompt is `invalid_args`; it is a delegation prompt, not a document. |
 | `delegate` | Child report | 16 KiB | Head-capped with `[truncated N bytes]`, marked once when instruction-shaped, and never rewritten. An empty report becomes `(no report)`. |
-| `delegate` | `details` | 4 KiB | Exceeding it is `internal_error`: the spawner controls the size. |
+| `delegate` | `details` | 4 KiB | Exceeding it is `details_too_large`: the spawner controls the size. |
 | `delegate` | Child turns | Inherited, not fixed | The definition's `max_turns` when present, else the parent's explicit `Config.MaxTurns`, else unlimited. A child stopped by a declared cap reports `status=max_turns`, `code=subagent_limit`, and its partial text. |
 | `delegate` | Child tokens | Parent's remaining budget | Always the parent's `Config.MaxTotalTokens` remainder; unlimited when the parent is. Child tokens count against the parent's cumulative total. |
 | `delegate` | Child stuck detection | 5 identical failures | Inherited unchanged from the normal loop. |

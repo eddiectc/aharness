@@ -47,7 +47,10 @@ const (
 	// CodeSubagentLimit reports that at least one delegated child stopped at
 	// its own budget, so its report is partial.
 	CodeSubagentLimit Code = "subagent_limit"
-	CodeInternal      Code = "internal"
+	// CodeDetailsTooLarge reports a structured details payload that exceeded
+	// its documented cap.
+	CodeDetailsTooLarge Code = "details_too_large"
+	CodeInternal        Code = "internal"
 	// CodePermissionDenied reports a host policy denial from Authorize. The
 	// tool did not run; the model sees an actionable, non-retryable result.
 	CodePermissionDenied Code = "permission_denied"

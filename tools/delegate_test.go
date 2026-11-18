@@ -295,8 +295,8 @@ func TestDelegateDetailsCap(t *testing.T) {
 	res := executeRaw(t, registry, "delegate", `{"intent":"x","tasks":[
 		{"agent":"explore","task":"1"},{"agent":"explore","task":"2"},
 		{"agent":"explore","task":"3"},{"agent":"explore","task":"4"}]}`)
-	if res.OK || res.Code != CodeInternal || !strings.Contains(res.Error, "limit is") {
-		t.Fatalf("delegate = ok=%v code=%s error=%q, want an internal details-cap failure", res.OK, res.Code, res.Error)
+	if res.OK || res.Code != CodeDetailsTooLarge || !strings.Contains(res.Error, "limit is") {
+		t.Fatalf("delegate = ok=%v code=%s error=%q, want a details-cap failure", res.OK, res.Code, res.Error)
 	}
 }
 
