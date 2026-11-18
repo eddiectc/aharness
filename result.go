@@ -36,48 +36,48 @@ func (k NoticeKind) Failure() bool { return agent.NoticeKind(k).Failure() }
 
 // Result is the authoritative outcome of one run.
 type Result struct {
-	Status          StopReason
-	Session         string
-	Err             error
-	FinalText       string
-	RunTurns        int
-	RunUsage        Usage
-	CumulativeTurns int
-	CumulativeUsage Usage
-	ContextTokens   int
-	RunCostMicroUSD int64
-	CostMicroUSD    int64
-	RunCostComplete bool
-	CostComplete    bool
+	Status          StopReason `json:"status"`
+	Session         string     `json:"session,omitempty"`
+	Err             error      `json:"-"`
+	FinalText       string     `json:"final_text,omitempty"`
+	RunTurns        int        `json:"run_turns,omitempty"`
+	RunUsage        Usage      `json:"run_usage,omitempty"`
+	CumulativeTurns int        `json:"cumulative_turns,omitempty"`
+	CumulativeUsage Usage      `json:"cumulative_usage,omitempty"`
+	ContextTokens   int        `json:"context_tokens,omitempty"`
+	RunCostMicroUSD int64      `json:"run_cost_micro_usd,omitempty"`
+	CostMicroUSD    int64      `json:"cost_micro_usd,omitempty"`
+	RunCostComplete bool       `json:"run_cost_complete,omitempty"`
+	CostComplete    bool       `json:"cost_complete,omitempty"`
 	// Reason is the terminal explanation; Duration is the run's wall-clock
 	// time. Both match RunFinished.
-	Reason   string
-	Duration time.Duration
+	Reason   string        `json:"reason,omitempty"`
+	Duration time.Duration `json:"duration,omitempty"`
 
-	SubagentTurns        int
-	SubagentUsage        Usage
-	SubagentCostMicroUSD int64
-	SubagentCostComplete bool
+	SubagentTurns        int   `json:"subagent_turns,omitempty"`
+	SubagentUsage        Usage `json:"subagent_usage,omitempty"`
+	SubagentCostMicroUSD int64 `json:"subagent_cost_micro_usd,omitempty"`
+	SubagentCostComplete bool  `json:"subagent_cost_complete,omitempty"`
 	// Children carries one row per delegated task folded before the run
 	// terminated, in delegate array order. A task canceled before its delegate
 	// result returned may be absent; SubagentFinished covers the pre-start
 	// case.
-	Children []ChildOutcome
+	Children []ChildOutcome `json:"children,omitempty"`
 }
 
 // ChildOutcome is one delegated task's folded outcome from a run.
 type ChildOutcome struct {
-	Agent         string
-	Session       string
-	CallID        string
-	Intent        string
-	Status        string
-	Turns         int
-	ContextTokens int
-	Usage         Usage
-	CostMicroUSD  int64
-	CostComplete  bool
-	Error         string
+	Agent         string `json:"agent,omitempty"`
+	Session       string `json:"session,omitempty"`
+	CallID        string `json:"call_id,omitempty"`
+	Intent        string `json:"intent,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Turns         int    `json:"turns,omitempty"`
+	ContextTokens int    `json:"context_tokens,omitempty"`
+	Usage         Usage  `json:"usage,omitempty"`
+	CostMicroUSD  int64  `json:"cost_micro_usd,omitempty"`
+	CostComplete  bool   `json:"cost_complete,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // Limits is the per-call context budget.

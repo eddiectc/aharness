@@ -36,22 +36,22 @@ const (
 
 // ToolCall is a canonical tool invocation.
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments json.RawMessage
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 	// Intent is display metadata parsed from the arguments' "intent" member on
 	// events. It is empty on model requests and is never acted on by the loop.
-	Intent string
+	Intent string `json:"intent,omitempty"`
 	// Session is the session that invoked the tool. It is set on the call
 	// passed to Tool.Run and Config.Authorize: a delegated child sees its own
 	// session ID, and the root session sees the root ID. It is empty on model
 	// request, model response, and event DTOs.
-	Session string
+	Session string `json:"session,omitempty"`
 	// Agent is the delegated agent definition name for a child tool call and
 	// empty for the root session. Like Session, it is set only on the call
 	// passed to Tool.Run and Config.Authorize, and is empty on model request,
 	// model response, and event DTOs.
-	Agent string
+	Agent string `json:"agent,omitempty"`
 }
 
 // Message is one canonical conversation message.
@@ -82,12 +82,12 @@ type Request struct {
 
 // Usage is normalized token usage for one response.
 type Usage struct {
-	InputTokens           int
-	OutputTokens          int
-	CachedInputTokens     int
-	CacheWriteInputTokens int
-	ReasoningOutputTokens int
-	Reported              bool
+	InputTokens           int  `json:"input_tokens"`
+	OutputTokens          int  `json:"output_tokens"`
+	CachedInputTokens     int  `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int  `json:"cache_write_input_tokens,omitempty"`
+	ReasoningOutputTokens int  `json:"reasoning_output_tokens,omitempty"`
+	Reported              bool `json:"reported,omitempty"`
 }
 
 // Total returns input plus output tokens.

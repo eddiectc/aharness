@@ -2,6 +2,7 @@ package aharness_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -80,5 +81,37 @@ func TestViewEventStableShape(t *testing.T) {
 	want = `{"kind":"notice","time":"1970-01-01T00:00:00Z","session":"s","text":"boom","notice_kind":"error"}`
 	if string(data) != want {
 		t.Fatalf("notice JSON = %s, want %s", data, want)
+	}
+	finished := aharness.ViewEvent(aharness.RunFinished{
+		EventMeta: meta,
+		RunID:     "run",
+		Result: aharness.Result{
+			Status:   aharness.StopInternalError,
+			Err:      errors.New("boom"),
+			RunUsage: aharness.Usage{InputTokens: 2, OutputTokens: 1},
+			Reason:   "failed",
+		},
+	})
+	data, err = json.Marshal(finished)
+	if err != nil {
+		t.Fatalf("Marshal finished: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal finished: %v", err)
+	}
+	result, ok := decoded["result"].(map[string]any)
+	if !ok || result["status"] != "internal_error" || result["reason"] != "failed" {
+		t.Fatalf("finished result = %v", decoded["result"])
+	}
+	if decoded["error"] != "boom" {
+		t.Fatalf("finished error = %v", decoded["error"])
+	}
+	if _, exists := result["Err"]; exists {
+		t.Fatalf("result leaked the Go error field: %s", data)
+	}
+	usage, ok := result["run_usage"].(map[string]any)
+	if !ok || usage["input_tokens"] != float64(2) || usage["output_tokens"] != float64(1) {
+		t.Fatalf("run_usage = %v", result["run_usage"])
 	}
 }

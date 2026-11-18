@@ -451,6 +451,9 @@ func ViewEvent(ev Event) EventView {
 		view.RunID = ev.RunID
 		result := ev.Result
 		view.Result = &result
+		if ev.Result.Err != nil {
+			view.Error = ev.Result.Err.Error()
+		}
 		view.Reason = ev.Reason
 		view.DurationMS = ev.Duration.Milliseconds()
 		return view

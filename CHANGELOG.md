@@ -117,6 +117,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
+- `EventView`'s nested `Result`, `Usage`, `ToolCall`, and `ChildOutcome` values
+  use stable snake_case JSON tags; `Result.Err` is omitted and surfaced as the
+  view's top-level `error` text. These DTOs are otherwise unchanged.
 - Documentation now carries the component field crosswalk for `Spec.Version` ↔
   `HarnessVersion`, `RunTimeout` ↔ `SessionTimeout`, and tri-state versus
   string effort, plus the root/child event split, the engine host read surface,
