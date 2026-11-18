@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `aharness.ValidEffort` delegates to `model.ValidReasoningEffort`, so a
+  facade-only settings path can validate an effort without importing the model
+  package.
 - `Pricing.WorstCase` returns a conservative ceiling at the highest positive
   rate, rounded up, and reports overflow/unavailability. `Pricing.Cost` now
   rejects the final-add overflow that previously wrapped near `MaxInt64`.

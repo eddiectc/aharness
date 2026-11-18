@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/eddiectc/aharness"
@@ -21,6 +22,19 @@ func validTool(name string) aharness.Tool {
 		Run: func(context.Context, aharness.ToolCall) (aharness.ToolResult, error) {
 			return aharness.TextResult("ok"), nil
 		},
+	}
+}
+
+func TestValidEffort(t *testing.T) {
+	for _, value := range []string{"low", "medium", "high", "x-high", "a_b"} {
+		if !aharness.ValidEffort(value) {
+			t.Errorf("ValidEffort(%q) = false", value)
+		}
+	}
+	for _, value := range []string{"", "default", "High", "high ", "-high", "high!", strings.Repeat("a", 33)} {
+		if aharness.ValidEffort(value) {
+			t.Errorf("ValidEffort(%q) = true", value)
+		}
 	}
 }
 

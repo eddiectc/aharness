@@ -320,6 +320,13 @@ func authorizeAdapter(authorize func(context.Context, ToolRequest) error) func(c
 	}
 }
 
+// ValidEffort reports whether value is a syntactically valid reasoning effort.
+// It delegates to model.ValidReasoningEffort and reserves the clear sentinel
+// "default" (and the empty string) as invalid.
+func ValidEffort(value string) bool {
+	return model.ValidReasoningEffort(value)
+}
+
 func validateEffortValue(effort *string, spec ModelSpec) error {
 	if effort == nil || *effort == "" {
 		return nil
