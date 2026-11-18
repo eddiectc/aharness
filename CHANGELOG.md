@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `Result.Reason` and `Result.Duration` (component and facade) carry the
+  terminal explanation and wall-clock time, matching `run_end` and
+  `RunFinished`.
 - `StopReason.Failure` and `StopReason.Label` (component and facade) classify
   and label terminal statuses; `NoticeKind.Failure` classifies failure-styled
   notices. Every returned `Result.Status` is a defined, non-empty value.

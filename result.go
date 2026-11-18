@@ -49,6 +49,10 @@ type Result struct {
 	CostMicroUSD    int64
 	RunCostComplete bool
 	CostComplete    bool
+	// Reason is the terminal explanation; Duration is the run's wall-clock
+	// time. Both match RunFinished.
+	Reason   string
+	Duration time.Duration
 
 	SubagentTurns        int
 	SubagentUsage        Usage
@@ -313,6 +317,8 @@ func fromInternalResult(result agent.Result, session string, err error) Result {
 		SubagentCostMicroUSD: result.SubagentCostMicroUSD,
 		SubagentCostComplete: result.SubagentCostComplete,
 		Children:             fromInternalChildren(result.Children),
+		Reason:               result.Reason,
+		Duration:             result.Duration,
 	}
 }
 

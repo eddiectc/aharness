@@ -127,6 +127,9 @@ func TestRunCompleted(t *testing.T) {
 		t.Fatalf("final = %+v", final)
 	}
 	end := decodePayload[runEndData](t, store.events[5])
+	if res.Reason != end.Reason || res.Duration.Milliseconds() != end.DurationMS {
+		t.Fatalf("result reason/duration = %q/%s, run_end = %q/%dms", res.Reason, res.Duration, end.Reason, end.DurationMS)
+	}
 	if end.Status != StopCompleted || end.RunTurns != 1 || end.Turns != 1 || end.RunUsage.Total() != 15 || end.Usage.Total() != 15 || end.Reason == "" {
 		t.Fatalf("run_end = %+v", end)
 	}

@@ -329,6 +329,10 @@ type Result struct {
 	// delegate array order. It is not a promise that a cancelled call reported
 	// every task.
 	Children []ChildOutcome
+	// Reason is the terminal explanation recorded in run_end.
+	Reason string
+	// Duration is the run's wall-clock time, matching run_end.
+	Duration time.Duration
 	Err      error
 }
 

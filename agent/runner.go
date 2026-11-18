@@ -1157,6 +1157,8 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	res.SubagentCostMicroUSD = st.subagentCost
 	res.SubagentCostComplete = st.subagentCostComplete
 	res.Children = append([]ChildOutcome(nil), st.children...)
+	res.Reason = reason
+	res.Duration = time.Since(st.start)
 	if st.finalized {
 		return *res, res.Err
 	}
@@ -1173,7 +1175,7 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 		RunUsage:             st.runUsage,
 		Turns:                st.turns,
 		Usage:                st.usage,
-		DurationMS:           time.Since(st.start).Milliseconds(),
+		DurationMS:           res.Duration.Milliseconds(),
 		RunCostMicroUSD:      st.runCost,
 		CostMicroUSD:         st.cost,
 		RunCostComplete:      st.runCostComplete,
@@ -1191,7 +1193,7 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	}
 	// A RunFinished display failure is returned to the caller but does not
 	// rewrite the already-durable terminal status.
-	if err := r.emit(RunFinished{Result: *res, Reason: reason, Duration: time.Since(st.start)}); err != nil {
+	if err := r.emit(RunFinished{Result: *res, Reason: reason, Duration: res.Duration}); err != nil {
 		res.Err = errors.Join(res.Err, err)
 	}
 	return *res, res.Err

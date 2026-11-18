@@ -179,6 +179,9 @@ func TestResponseCompletedCarriesCumulativeProgress(t *testing.T) {
 	if result.CostMicroUSD <= 0 || !result.CostComplete {
 		t.Fatalf("cost = %d complete=%v, want a priced total", result.CostMicroUSD, result.CostComplete)
 	}
+	if result.Reason == "" || result.Duration <= 0 {
+		t.Fatalf("result reason/duration = %q/%s", result.Reason, result.Duration)
+	}
 	if completed[0].CostMicroUSD >= last.CostMicroUSD {
 		t.Fatalf("cost did not grow: %d -> %d", completed[0].CostMicroUSD, last.CostMicroUSD)
 	}
