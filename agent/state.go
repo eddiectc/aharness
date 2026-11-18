@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"fmt"
 	"slices"
 	"time"
@@ -307,13 +306,9 @@ func RestoreTodo(events []session.Event) []tools.TodoItem {
 		if data.Name != "todo" || !data.OK || len(data.Details) == 0 {
 			continue
 		}
-		var details struct {
-			Items []tools.TodoItem `json:"items"`
+		if items, ok := tools.ParseTodoDetails(data.Details); ok {
+			return items
 		}
-		if err := jsonv2.Unmarshal(data.Details, &details); err != nil {
-			continue
-		}
-		return details.Items
 	}
 	return nil
 }

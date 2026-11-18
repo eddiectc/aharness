@@ -48,3 +48,52 @@ func normalizeIntent(intent string) string {
 	}
 	return strings.TrimSpace(intent[:cut])
 }
+
+// IntentLine derives a one-line display intent from a task prompt: the first
+// non-empty line, control-stripped, whitespace-collapsed, and capped on a rune
+// boundary with an ellipsis. It is the same derivation the spawner uses for
+// SubagentStarted.Intent, so a host can render a pre-start roster without
+// reimplementing it.
+func IntentLine(task string) string {
+	for line := range strings.SplitSeq(task, "\n") {
+		collapsed := strings.Join(strings.Fields(intentSafe(line)), " ")
+		if collapsed == "" {
+			continue
+		}
+		if len(collapsed) <= MaxIntentBytes {
+			return collapsed
+		}
+		cut := MaxIntentBytes
+		for cut > 0 && !utf8.RuneStart(collapsed[cut]) {
+			cut--
+		}
+		return collapsed[:cut] + "…"
+	}
+	return ""
+}
+
+// intentSafe is the display sanitization IntentLine applies. It mirrors the
+// agent's display-safe policy: valid UTF-8, control characters made visible or
+// removed instead of reaching a host terminal.
+func intentSafe(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20:
+			b.WriteRune(0x2400 + r)
+		case r == 0x7f:
+			b.WriteRune(0x2421)
+		case r >= 0x80 && r <= 0x9f:
+			b.WriteRune('\uFFFD')
+		case (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0x200e || r == 0x200f || r == 0x061c:
+			// bidi controls are dropped
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

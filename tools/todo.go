@@ -95,6 +95,20 @@ func (r *Registry) SeedTodo(items []TodoItem) {
 	r.todos.replace(valid)
 }
 
+// ParseTodoDetails decodes the structured todo result payload. A malformed or
+// foreign payload is reported as absent rather than failing replay.
+func ParseTodoDetails(raw json.RawMessage) ([]TodoItem, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var details todoDetails
+	if err := jsonv2.Unmarshal(raw, &details, jsonv2.RejectUnknownMembers(true)); err != nil {
+		return nil, false
+	}
+	return details.Items, true
+}
+
+// executeTodo validates and runs one todo call.
 func (r *Registry) executeTodo(ctx context.Context, args json.RawMessage) Result {
 	if err := ctx.Err(); err != nil {
 		return errorResult(err)

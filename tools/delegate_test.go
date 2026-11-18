@@ -337,6 +337,31 @@ func TestDelegateIsNotGrantedToAChild(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsIsStrict(t *testing.T) {
+	args, err := ParseDelegateArgs(json.RawMessage(`{"intent":"x","tasks":[{"agent":"explore","task":"t","session":"0193f0c4-0000-7000-8000-000000000000"}]}`))
+	if err != nil {
+		t.Fatalf("ParseDelegateArgs: %v", err)
+	}
+	if args.Intent != "x" || len(args.Tasks) != 1 || args.Tasks[0].Agent != "explore" || args.Tasks[0].Session == "" {
+		t.Fatalf("args = %+v", args)
+	}
+	for _, raw := range []string{
+		`{"intent":"x","tasks":[{"agent":"explore","task":"t","unknown":true}]}`,
+		`{"intent":"x","tasks":[],"unknown":true}`,
+		`not json`,
+	} {
+		if _, err := ParseDelegateArgs(json.RawMessage(raw)); err == nil {
+			t.Fatalf("ParseDelegateArgs(%s) accepted an invalid payload", raw)
+		}
+	}
+	// The tool's own validation must reject the same payload.
+	registry := NewRegistry(nil, Options{Spawning: &fakeSpawner{agents: []AgentInfo{{Name: "explore"}}}})
+	res := registry.Execute(context.Background(), "delegate", json.RawMessage(`{"intent":"x","tasks":[{"agent":"explore","task":"t","unknown":true}]}`))
+	if res.OK || res.Code != CodeInvalidArgs {
+		t.Fatalf("delegate result = ok=%v code=%s, want invalid_args", res.OK, res.Code)
+	}
+}
+
 func TestDelegateParseDetailsIgnoresForeignPayloads(t *testing.T) {
 	for _, raw := range []string{"", "not json", `{"items":[]}`, `{"tasks":null}`} {
 		if details, ok := ParseDelegateDetails([]byte(raw)); ok && len(details.Tasks) > 0 {

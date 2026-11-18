@@ -69,7 +69,7 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 		},
 		{
 			name:   "delegate",
-			args:   delegateArgs{},
+			args:   DelegateArgs{},
 			sample: `{"intent":"delegate the search","tasks":[{"agent":"explore","task":"find the projection","session":""}]}`,
 		},
 	}

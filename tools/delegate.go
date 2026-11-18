@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
 	"strings"
@@ -164,14 +165,29 @@ func ParseDelegateDetails(raw []byte) (DelegateDetails, bool) {
 	return details, true
 }
 
-// delegateArgs mirrors the delegate schema.
-type delegateArgs struct {
-	Intent string `json:"intent"`
-	Tasks  []struct {
-		Agent   string `json:"agent"`
-		Task    string `json:"task"`
-		Session string `json:"session,omitempty"`
-	} `json:"tasks"`
+// DelegateTask is one task in a delegate call's arguments.
+type DelegateTask struct {
+	Agent   string `json:"agent"`
+	Task    string `json:"task"`
+	Session string `json:"session,omitempty"`
+}
+
+// DelegateArgs is the typed argument shape for the delegate tool. It mirrors
+// the delegate schema.
+type DelegateArgs struct {
+	Intent string         `json:"intent"`
+	Tasks  []DelegateTask `json:"tasks"`
+}
+
+// ParseDelegateArgs decodes delegate arguments with the same strict validation
+// the tool applies: unknown members are rejected. A host policy can decode and
+// police agent, task, and session without declaring a private wire shape.
+func ParseDelegateArgs(raw json.RawMessage) (DelegateArgs, error) {
+	var args DelegateArgs
+	if err := decodeArgs("delegate", raw, &args); err != nil {
+		return DelegateArgs{}, err
+	}
+	return args, nil
 }
 
 // executeDelegate validates one delegate call, runs its tasks in order, and
@@ -180,8 +196,8 @@ func (r *Registry) executeDelegate(ctx context.Context, args []byte, call Call) 
 	if err := ctx.Err(); err != nil {
 		return errorResult(err)
 	}
-	var a delegateArgs
-	if err := decodeArgs("delegate", args, &a); err != nil {
+	a, err := ParseDelegateArgs(args)
+	if err != nil {
 		return Failure(CodeInvalidArgs, err.Error())
 	}
 	if strings.TrimSpace(a.Intent) == "" {
@@ -200,7 +216,7 @@ func (r *Registry) executeDelegate(ctx context.Context, args []byte, call Call) 
 
 // validateDelegateTasks rejects the whole call before any task runs: a bad
 // agent, an over-cap task, or a duplicate or non-canonical child session.
-func (r *Registry) validateDelegateTasks(a delegateArgs) ([]SubagentSpec, *Result) {
+func (r *Registry) validateDelegateTasks(a DelegateArgs) ([]SubagentSpec, *Result) {
 	if len(a.Tasks) == 0 {
 		return nil, resultPtr(invalidArgs("delegate", "tasks must contain at least one task"))
 	}

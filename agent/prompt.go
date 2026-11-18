@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/eddiectc/aharness/tools"
 )
 
 // Prompt versions. prompt-v0 and prompt-v1 are frozen for replay; prompt-v2
@@ -155,23 +156,8 @@ func CapSystemPrompt(text string) string {
 	return capText(text, maxSystemPromptBytes)
 }
 
-// subagentIntent derives the one-line roster intent from a task prompt: the
-// first non-empty line, whitespace-collapsed, sanitized, and capped with an
-// ellipsis.
+// subagentIntent derives the one-line roster intent from a task prompt. It is
+// the same derivation the tools package exports as IntentLine.
 func subagentIntent(task string) string {
-	for line := range strings.SplitSeq(task, "\n") {
-		collapsed := strings.Join(strings.Fields(displaySafe(line)), " ")
-		if collapsed == "" {
-			continue
-		}
-		if len(collapsed) <= maxReportIntentBytes {
-			return collapsed
-		}
-		cut := maxReportIntentBytes
-		for cut > 0 && !utf8.ValidString(collapsed[:cut]) {
-			cut--
-		}
-		return collapsed[:cut] + "…"
-	}
-	return ""
+	return tools.IntentLine(task)
 }

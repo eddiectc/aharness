@@ -297,6 +297,18 @@ func TestTodoSchemaNestedShape(t *testing.T) {
 	}
 }
 
+func TestParseTodoDetails(t *testing.T) {
+	items, ok := ParseTodoDetails(json.RawMessage(`{"items":[{"content":"one","status":"pending"}]}`))
+	if !ok || len(items) != 1 || items[0].Content != "one" {
+		t.Fatalf("ParseTodoDetails = %+v, %v", items, ok)
+	}
+	for _, raw := range []string{"", "not json", `{"items":[],"unknown":true}`, `[]`} {
+		if _, ok := ParseTodoDetails(json.RawMessage(raw)); ok {
+			t.Fatalf("ParseTodoDetails(%q) accepted a foreign payload", raw)
+		}
+	}
+}
+
 func TestTodoStateIsPerRegistry(t *testing.T) {
 	first, _ := newTestRegistry(t)
 	second, _ := newTestRegistry(t)

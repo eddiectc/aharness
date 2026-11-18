@@ -10,6 +10,11 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `tools.ParseDelegateArgs` (with `DelegateArgs`/`DelegateTask`),
+  `tools.ParseTodoDetails`, and `tools.IntentLine` expose the SDK's strict
+  delegate/todo wire shapes and the spawner's one-line intent derivation so a
+  host policy or pre-start roster does not mirror private structs. The
+  `delegate` tool now uses the same parser.
 - `Result.Children` carries one `ChildOutcome` per delegated task whose
   delegate details were folded before termination. A task canceled before its
   delegate result returned may be absent; that boundary is part of the
