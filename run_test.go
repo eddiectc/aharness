@@ -273,6 +273,20 @@ func TestDisplayIsSilentAfterRunReturns(t *testing.T) {
 	}
 }
 
+func TestRunStartupFailureHasStatus(t *testing.T) {
+	ag, _, _ := newTestAgent(t, nil, &scriptedModel{})
+	result, err := ag.Run(context.Background(), "  ", aharness.RunOptions{})
+	if !errors.Is(err, aharness.ErrEmptyTask) {
+		t.Fatalf("Run error = %v, want ErrEmptyTask", err)
+	}
+	if result.Status == "" || !result.Status.Failure() || result.Status.Label() == "" {
+		t.Fatalf("startup result = %+v, want a defined failure status", result)
+	}
+	if !errors.Is(result.Err, aharness.ErrEmptyTask) {
+		t.Fatalf("result err = %v, want ErrEmptyTask", result.Err)
+	}
+}
+
 func TestInterruptContinuesRun(t *testing.T) {
 	model := newInterruptibleModel()
 	ag, _, _ := newTestAgent(t, nil, model)

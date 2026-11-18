@@ -68,7 +68,7 @@ type Run struct {
 func (a *Agent) Run(ctx context.Context, task string, opts RunOptions) (Result, error) {
 	run, err := a.start(ctx, task, opts, false)
 	if err != nil {
-		return Result{Session: a.ID()}, err
+		return Result{Status: StopInternalError, Session: a.ID(), Err: err}, err
 	}
 	defer func() { _ = run.Close() }()
 	var (
@@ -92,8 +92,18 @@ func (a *Agent) Run(ctx context.Context, task string, opts RunOptions) (Result, 
 			result = res
 		}
 	}
-	if iterErr != nil && result.Status == "" {
-		return result, iterErr
+	if result.Status == "" {
+		result.Status = StopInternalError
+		if result.Err == nil {
+			if iterErr != nil {
+				result.Err = iterErr
+			} else {
+				result.Err = errors.New("aharness: run produced no result")
+			}
+		}
+	}
+	if iterErr != nil && result.Err == nil {
+		result.Err = iterErr
 	}
 	return result, result.Err
 }
