@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `aharness.Subagent*` constants name every `SubagentFinished.Status` and
+  `ChildOutcome.Status` value. The fields remain `string` for compatibility
+  with recorded data.
 - `tools.ParseDelegateArgs` (with `DelegateArgs`/`DelegateTask`),
   `tools.ParseTodoDetails`, and `tools.IntentLine` expose the SDK's strict
   delegate/todo wire shapes and the spawner's one-line intent derivation so a

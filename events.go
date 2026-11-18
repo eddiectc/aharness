@@ -85,6 +85,21 @@ type MessageRecorded struct {
 	Text   string
 }
 
+// Subagent status values reported by SubagentFinished and ChildOutcome. The
+// fields stay string-typed so a host may compare them with recorded data.
+const (
+	SubagentCompleted     = "completed"
+	SubagentMaxTurns      = "max_turns"
+	SubagentTokenLimit    = "token_limit"
+	SubagentTimeLimit     = "time_limit"
+	SubagentStuck         = "stuck"
+	SubagentInterrupted   = "interrupted"
+	SubagentProviderError = "provider_error"
+	SubagentProtocolError = "protocol_error"
+	SubagentInternalError = "internal_error"
+	SubagentFailed        = "failed"
+)
+
 // NoticeKind classifies a display notice.
 type NoticeKind string
 

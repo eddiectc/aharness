@@ -69,7 +69,7 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 		if child.CallID != "delegate-1" {
 			t.Fatalf("child CallID = %q", child.CallID)
 		}
-		if child.Status != "completed" {
+		if child.Status != aharness.SubagentCompleted {
 			t.Fatalf("child status = %q", child.Status)
 		}
 		if child.Error != "" {
@@ -148,11 +148,11 @@ func TestPreStartFailureEmitsFinishedWithError(t *testing.T) {
 	if len(finished) != 2 {
 		t.Fatalf("finished events = %d, want 2", len(finished))
 	}
-	if got := finished[0]; got.Status != "completed" || got.ChildSession == "" {
+	if got := finished[0]; got.Status != aharness.SubagentCompleted || got.ChildSession == "" {
 		t.Fatalf("started child event = %+v", got)
 	}
 	failed := finished[1]
-	if failed.Status != "failed" {
+	if failed.Status != aharness.SubagentFailed {
 		t.Fatalf("pre-start status = %q", failed.Status)
 	}
 	if failed.ChildSession != "" || failed.ChildTurns != 0 || failed.Usage.Total() != 0 {
