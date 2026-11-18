@@ -117,6 +117,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
+- `agent.Spawner.SteerChild` takes an `agent.SteeringLine` instead of a string,
+  and `engine.Spec.ExecutionGrant`/`ExecutionGrantSet` were replaced by the
+  recorded `Spec.RootGrant`. Direct component hosts must update.
 - `EventView`'s nested `Result`, `Usage`, `ToolCall`, and `ChildOutcome` values
   use stable snake_case JSON tags; `Result.Err` is omitted and surfaced as the
   view's top-level `error` text. These DTOs are otherwise unchanged.
