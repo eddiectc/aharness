@@ -183,6 +183,61 @@ func TestCatalogCostValid(t *testing.T) {
 	}
 }
 
+func TestWorstCaseIsACeiling(t *testing.T) {
+	pricing := Pricing{
+		Available: true, InputMicroUSD: 100, OutputMicroUSD: 900,
+		CacheReadMicroUSD: 50, CacheWriteMicroUSD: 200,
+	}
+	for _, total := range []int{0, 1, 1_000, 1_000_000} {
+		usages := []Usage{
+			{InputTokens: total},
+			{OutputTokens: total},
+			{InputTokens: total, CachedInputTokens: total},
+			{InputTokens: total, CacheWriteInputTokens: total},
+		}
+		worst, ok := pricing.WorstCase(int64(total))
+		if !ok {
+			t.Fatalf("WorstCase(%d) not ok", total)
+		}
+		for _, usage := range usages {
+			cost, priced := pricing.Cost(usage)
+			if !priced {
+				t.Fatalf("Cost(%+v) not priced", usage)
+			}
+			if cost > worst {
+				t.Fatalf("WorstCase(%d) = %d < Cost(%+v) = %d", total, worst, usage, cost)
+			}
+		}
+	}
+	// Round up: one token at one micro-USD per million still costs one
+	// micro-USD as a ceiling.
+	one := Pricing{Available: true, InputMicroUSD: 1}
+	if got, ok := one.WorstCase(1); !ok || got != 1 {
+		t.Fatalf("WorstCase(1) = %d, %v; want 1, true", got, ok)
+	}
+	if _, ok := (Pricing{}).WorstCase(1); ok {
+		t.Fatal("unavailable pricing returned a worst case")
+	}
+	if _, ok := pricing.WorstCase(-1); ok {
+		t.Fatal("negative tokens returned a worst case")
+	}
+	overflow := Pricing{Available: true, InputMicroUSD: math.MaxInt64}
+	if _, ok := overflow.WorstCase(2); ok {
+		t.Fatal("overflowing product returned ok")
+	}
+	rounding := Pricing{Available: true, InputMicroUSD: 1}
+	if _, ok := rounding.WorstCase(math.MaxInt64); ok {
+		t.Fatal("overflowing rounding add returned ok")
+	}
+}
+
+func TestCostRejectsFinalAddOverflow(t *testing.T) {
+	pricing := Pricing{Available: true, InputMicroUSD: 1}
+	if cost, ok := pricing.Cost(Usage{InputTokens: int(math.MaxInt64 - 1)}); ok {
+		t.Fatalf("Cost near MaxInt64 = %d, true; want overflow rejection", cost)
+	}
+}
+
 func TestParseCatalogCost(t *testing.T) {
 	data := []byte(`{
 	  "opencode-go": {

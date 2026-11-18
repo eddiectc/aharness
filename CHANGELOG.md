@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `Pricing.WorstCase` returns a conservative ceiling at the highest positive
+  rate, rounded up, and reports overflow/unavailability. `Pricing.Cost` now
+  rejects the final-add overflow that previously wrapped near `MaxInt64`.
+  Pricing remains observational, not a billing authority.
 - `tools.Name*` constants and `tools.NamesFor(version, exclude...)` expose the
   stable built-in names and version-aware name lists; `NamesWithout` stays.
 - `State.TotalUsage` (agent and facade) returns parent plus folded delegated

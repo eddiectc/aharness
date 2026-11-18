@@ -170,7 +170,32 @@ func (p Pricing) Cost(u Usage) (cost int64, ok bool) {
 		}
 		sum += tokens * part.rate
 	}
+	if sum > math.MaxInt64-pricingRoundHalfUpMicro {
+		return 0, false
+	}
 	return (sum + pricingRoundHalfUpMicro) / microUSDPerCurrencyUnit, true
+}
+
+// WorstCase returns a conservative ceiling for tokens at the highest positive
+// rate in the snapshot, rounded up to whole micro-USD. ok is false when pricing
+// is unavailable, tokens is negative, or the arithmetic would overflow. It is
+// an observational projection, never a billing guarantee.
+func (p Pricing) WorstCase(tokens int64) (microUSD int64, ok bool) {
+	if !p.Available || tokens < 0 {
+		return 0, false
+	}
+	rate := max(p.InputMicroUSD, p.OutputMicroUSD, p.CacheReadMicroUSD, p.CacheWriteMicroUSD)
+	if rate < 0 || tokens == 0 || rate == 0 {
+		return 0, rate >= 0
+	}
+	if tokens > math.MaxInt64/rate {
+		return 0, false
+	}
+	product := tokens * rate
+	if product > math.MaxInt64-(microUSDPerCurrencyUnit-1) {
+		return 0, false
+	}
+	return (product + microUSDPerCurrencyUnit - 1) / microUSDPerCurrencyUnit, true
 }
 
 // valid reports whether every provided rate is a non-negative integer.
