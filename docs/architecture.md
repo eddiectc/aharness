@@ -711,6 +711,14 @@ Behavioral rules that the field lists do not show:
   before any child tool call exists, so an argument-dependent predicate could
   not affect the choice. A tool that shares resources across concurrently
   running children must serialize internally or declare false.
+- `Version` reports the version resolved for this module in the build that
+  contains it: the dependency version when the SDK is embedded, and the main
+  module version when the SDK is the main module. It returns `"devel"` when the
+  build carries no SDK version, including a filesystem `replace` with no
+  version. The value comes from build information already embedded in the
+  binary, so it costs no I/O or network access; it is recorded as
+  `harness_version` in new sessions and sent in the `aharness/<version>`
+  `User-Agent`.
 
 **Compatibility rules.** These constrain every future change to the facade:
 
