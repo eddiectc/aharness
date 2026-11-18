@@ -124,6 +124,19 @@ func requireContextOverflow(t *testing.T, err error) {
 	}
 }
 
+func TestValidateBaseURL(t *testing.T) {
+	for _, ok := range []string{"", DefaultBaseURL, "https://example.com/v1", "http://127.0.0.1:8080/v1"} {
+		if err := ValidateBaseURL(ok); err != nil {
+			t.Fatalf("ValidateBaseURL(%q) = %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"example.com/v1", "ftp://example.com/v1", "https://", "https://example.com/v1#frag", "https:opaque"} {
+		if err := ValidateBaseURL(bad); err == nil {
+			t.Fatalf("ValidateBaseURL(%q) = nil, want error", bad)
+		}
+	}
+}
+
 func TestNewAdapterTargets(t *testing.T) {
 	chat := NewOpenAIChat("", testToken, testSessionID, testVersion, 0)
 	if got, want := chat.transport.url, DefaultBaseURL+"/chat/completions"; got != want {

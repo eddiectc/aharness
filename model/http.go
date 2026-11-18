@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,32 @@ type httpTransport struct {
 	token     string
 	sessionID string
 	userAgent string
+}
+
+// ValidateBaseURL checks an OpenAI-compatible endpoint. Empty selects
+// DefaultBaseURL. A non-empty endpoint must be absolute http(s), include a
+// host, and carry no fragment or opaque component.
+func ValidateBaseURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsed.Opaque != "" {
+		return errors.New("URL must be hierarchical")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("URL must use http or https")
+	}
+	if parsed.Hostname() == "" {
+		return errors.New("URL must include a host")
+	}
+	if parsed.Fragment != "" {
+		return errors.New("URL must not include a fragment")
+	}
+	return nil
 }
 
 // newHTTPTransport builds the request target and client for one adapter. An

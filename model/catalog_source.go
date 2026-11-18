@@ -47,36 +47,13 @@ var _ CatalogSource = (*ModelsDevSource)(nil)
 // DefaultCatalogURL; an override must use HTTPS except for loopback HTTP test
 // servers.
 func NewModelsDevSource(opts CatalogOptions) (*ModelsDevSource, error) {
-	if opts.StateDir == "" {
-		return nil, fmt.Errorf("catalog state directory is required")
+	if err := opts.Validate(); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(opts.UserAgent) == "" {
-		return nil, fmt.Errorf("catalog user agent is required")
-	}
-	rawURL := opts.URL
-	if rawURL == "" {
-		rawURL = DefaultCatalogURL
-	}
-	parsed, err := url.Parse(rawURL)
+	normalizedURL, err := normalizeCatalogURL(opts.URL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid catalog URL %q: %w", rawURL, err)
+		return nil, err
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid catalog URL %q: an absolute URL with a host is required", rawURL)
-	}
-	if parsed.User != nil {
-		return nil, fmt.Errorf("invalid catalog URL %q: user information is not allowed", rawURL)
-	}
-	switch parsed.Scheme {
-	case "https":
-	case "http":
-		if !isLoopbackCatalogHost(parsed.Hostname()) {
-			return nil, fmt.Errorf("invalid catalog URL %q: http is allowed only for loopback hosts", rawURL)
-		}
-	default:
-		return nil, fmt.Errorf("invalid catalog URL %q: scheme must be https", rawURL)
-	}
-
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -98,7 +75,7 @@ func NewModelsDevSource(opts CatalogOptions) (*ModelsDevSource, error) {
 		client = &http.Client{}
 	}
 	return &ModelsDevSource{
-		url:       parsed.String(),
+		url:       normalizedURL,
 		stateDir:  opts.StateDir,
 		client:    client,
 		userAgent: opts.UserAgent,

@@ -3,10 +3,8 @@ package aharness
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -229,20 +227,7 @@ func normalizeSpec(spec ModelSpec) (ModelSpec, error) {
 }
 
 func validateEndpoint(raw string) error {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("URL must use http or https")
-	}
-	if parsed.Hostname() == "" {
-		return errors.New("URL must include a host")
-	}
-	if parsed.Fragment != "" {
-		return errors.New("URL must not include a fragment")
-	}
-	return nil
+	return model.ValidateBaseURL(raw)
 }
 
 // OpenAIModelOptions configures a built-in Chat Completions or Responses
@@ -300,6 +285,9 @@ func (c CatalogConfig) options() (model.CatalogOptions, error) {
 	if strings.TrimSpace(c.UserAgent) == "" {
 		return model.CatalogOptions{}, &ConfigError{Field: "Catalog.UserAgent", Detail: "is required"}
 	}
+	if err := model.ValidateCatalogURL(c.URL); err != nil {
+		return model.CatalogOptions{}, &ConfigError{Field: "Catalog.URL", Detail: err.Error()}
+	}
 	return model.CatalogOptions{
 		URL:       c.URL,
 		StateDir:  c.StateDir,
@@ -308,6 +296,13 @@ func (c CatalogConfig) options() (model.CatalogOptions, error) {
 		TTL:       c.TTL,
 		Timeout:   c.Timeout,
 	}, nil
+}
+
+// Validate checks a catalog configuration without allocating a source or
+// touching the network.
+func (c CatalogConfig) Validate() error {
+	_, err := c.options()
+	return err
 }
 
 func newCatalog(cfg CatalogConfig) (*model.ModelsDevSource, error) {

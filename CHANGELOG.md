@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `model.CatalogOptions.Validate`, `model.ValidateCatalogURL`,
+  `model.ValidateBaseURL`, and `CatalogConfig.Validate` validate settings
+  without allocating a catalog source or an adapter. Constructors use the same
+  rules.
 - `model.CatalogModel.Validate`, `Catalog.Price`, and `ErrModelUnavailable`
   give a host one validation call and price provenance from the catalog value
   it already holds. `Usable` remains.

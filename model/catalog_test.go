@@ -193,6 +193,44 @@ func marshalCache(t *testing.T, cached catalogCacheFile) []byte {
 	return data
 }
 
+func TestCatalogOptionsValidateMatchesConstructor(t *testing.T) {
+	cases := []struct {
+		name string
+		opts CatalogOptions
+	}{
+		{name: "valid default URL", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1"}},
+		{name: "valid explicit URL", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1", URL: "https://example.com/catalog.json"}},
+		{name: "loopback http", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1", URL: "http://127.0.0.1:8080/catalog.json"}},
+		{name: "missing state", opts: CatalogOptions{UserAgent: "host/1"}},
+		{name: "missing user agent", opts: CatalogOptions{StateDir: t.TempDir()}},
+		{name: "relative URL", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1", URL: "/catalog.json"}},
+		{name: "http non-loopback", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1", URL: "http://example.com/catalog.json"}},
+		{name: "user info", opts: CatalogOptions{StateDir: t.TempDir(), UserAgent: "host/1", URL: "https://user:pass@example.com/catalog.json"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			validateErr := tc.opts.Validate()
+			_, sourceErr := NewModelsDevSource(tc.opts)
+			if (validateErr == nil) != (sourceErr == nil) {
+				t.Fatalf("Validate = %v, constructor = %v", validateErr, sourceErr)
+			}
+		})
+	}
+}
+
+func TestValidateCatalogURL(t *testing.T) {
+	for _, ok := range []string{"", DefaultCatalogURL, "https://example.com/api.json", "http://localhost:8080/api.json"} {
+		if err := ValidateCatalogURL(ok); err != nil {
+			t.Fatalf("ValidateCatalogURL(%q) = %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"relative/path", "ftp://example.com/api.json", "http://example.com/api.json", "https://user@example.com/api.json", "https://"} {
+		if err := ValidateCatalogURL(bad); err == nil {
+			t.Fatalf("ValidateCatalogURL(%q) = nil, want error", bad)
+		}
+	}
+}
+
 func TestCatalogModelValidate(t *testing.T) {
 	valid := CatalogModel{
 		ID: "m", Provider: testProvider, Dialect: DialectChat, BaseURL: testBaseURL,

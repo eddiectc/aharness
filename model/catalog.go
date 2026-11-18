@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -318,6 +320,51 @@ type CatalogOptions struct {
 	Timeout time.Duration
 	// MaxBytes caps the response body. Zero selects MaxCatalogBytes.
 	MaxBytes int64
+}
+
+// Validate checks the options without allocating a source or touching the
+// network. NewModelsDevSource applies the same rules.
+func (o CatalogOptions) Validate() error {
+	if o.StateDir == "" {
+		return errors.New("catalog state directory is required")
+	}
+	if strings.TrimSpace(o.UserAgent) == "" {
+		return errors.New("catalog user agent is required")
+	}
+	return ValidateCatalogURL(o.URL)
+}
+
+// ValidateCatalogURL checks a catalog endpoint. Empty selects the default.
+// HTTPS is required except for a loopback HTTP test server.
+func ValidateCatalogURL(raw string) error {
+	_, err := normalizeCatalogURL(raw)
+	return err
+}
+
+func normalizeCatalogURL(raw string) (string, error) {
+	if raw == "" {
+		raw = DefaultCatalogURL
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid catalog URL %q: %w", raw, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid catalog URL %q: an absolute URL with a host is required", raw)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("invalid catalog URL %q: user information is not allowed", raw)
+	}
+	switch parsed.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackCatalogHost(parsed.Hostname()) {
+			return "", fmt.Errorf("invalid catalog URL %q: http is allowed only for loopback hosts", raw)
+		}
+	default:
+		return "", fmt.Errorf("invalid catalog URL %q: scheme must be https", raw)
+	}
+	return parsed.String(), nil
 }
 
 // CatalogCachePath returns the normalized cache path for provider under the
