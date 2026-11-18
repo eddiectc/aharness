@@ -112,6 +112,31 @@ func writeSessionFile(t *testing.T, stateDir, content string) string {
 	return path
 }
 
+func TestCreateNewGeneratesCanonicalID(t *testing.T) {
+	stateDir := t.TempDir()
+	store, err := CreateNew(stateDir)
+	if err != nil {
+		t.Fatalf("CreateNew: %v", err)
+	}
+	id := store.ID()
+	canonical, err := CanonicalID(id)
+	if err != nil || canonical != id {
+		t.Fatalf("CreateNew ID = %q (canonical %q, %v)", id, canonical, err)
+	}
+	if want := SessionPath(stateDir, id); store.Path() != want {
+		t.Fatalf("Path = %q, want %q", store.Path(), want)
+	}
+	if _, err := os.Stat(store.Path()); err != nil {
+		t.Fatalf("stat log: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := Create(stateDir, ""); !errors.Is(err, ErrInvalidID) {
+		t.Fatalf("Create with an empty ID = %v, want ErrInvalidID", err)
+	}
+}
+
 func TestCreateCreatesDirectoryAndFile(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	st, err := Create(stateDir, testSession)

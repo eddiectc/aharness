@@ -47,6 +47,11 @@ func Create(stateDir, sessionID string) (*Store, error) {
 	return &Store{id: id, path: path, file: file}, nil
 }
 
+// CreateNew creates a new session log with a generated UUIDv7 identifier.
+func CreateNew(stateDir string) (*Store, error) {
+	return Create(stateDir, NewID())
+}
+
 // Open opens an existing session log for resume. It takes an exclusive
 // non-blocking lock, verifies the file mode, validates the log, truncates only
 // a torn final line (recording session_repair), terminates a valid final line

@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `session.CreateNew` creates a log with a generated canonical UUIDv7 ID;
+  `Create` still takes a caller ID for forks and tests.
 - `agent.AgentOverride.Clone` returns an independent copy; a reflection test
   covers every pointer field so a future field cannot be silently dropped.
 - `agent.NewLimits` derives the safety margin, input budget, and compaction
