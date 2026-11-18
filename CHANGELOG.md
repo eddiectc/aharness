@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `StopReason.Failure` and `StopReason.Label` (component and facade) classify
+  and label terminal statuses; `NoticeKind.Failure` classifies failure-styled
+  notices. Every returned `Result.Status` is a defined, non-empty value.
 - `ResponseCompleted` carries cumulative turns, usage, context occupancy,
   estimated cost, and cost completeness including the response itself, so a
   host progress view needs no separate accounting. `Turn` keeps its existing

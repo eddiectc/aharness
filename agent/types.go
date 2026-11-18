@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -218,6 +219,48 @@ const (
 	StopInterrupted   StopReason = "interrupted"
 	StopInternalError StopReason = "internal_error"
 )
+
+// Failure reports whether the status is an unexpected or fatal outcome rather
+// than completion, a budget stop, or a host interrupt.
+func (s StopReason) Failure() bool {
+	switch s {
+	case StopCompleted, StopMaxTurns, StopTokenLimit, StopTimeLimit, StopInterrupted:
+		return false
+	default:
+		return true
+	}
+}
+
+// Label returns a short human-readable status for a host status line.
+func (s StopReason) Label() string {
+	switch s {
+	case StopCompleted:
+		return "completed"
+	case StopMaxTurns:
+		return "max turns reached"
+	case StopTokenLimit:
+		return "token limit reached"
+	case StopTimeLimit:
+		return "time limit reached"
+	case StopProviderError:
+		return "provider error"
+	case StopProtocolError:
+		return "protocol error"
+	case StopStuck:
+		return "stuck"
+	case StopInterrupted:
+		return "interrupted"
+	case StopInternalError:
+		return "internal error"
+	default:
+		return fmt.Sprintf("unknown status %q", string(s))
+	}
+}
+
+// Failure reports whether a notice should use failure styling. Only
+// NoticeError is a failure; limits, retries, and interrupts are ordinary
+// display outcomes.
+func (k NoticeKind) Failure() bool { return k == NoticeError }
 
 // ExitCode maps a terminal status to the CLI exit code.
 func (s StopReason) ExitCode() int {

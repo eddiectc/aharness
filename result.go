@@ -24,6 +24,16 @@ const (
 	StopInternalError StopReason = "internal_error"
 )
 
+// Failure reports whether the status is an unexpected or fatal outcome rather
+// than completion, a budget stop, or a host interrupt.
+func (s StopReason) Failure() bool { return agent.StopReason(s).Failure() }
+
+// Label returns a short human-readable status.
+func (s StopReason) Label() string { return agent.StopReason(s).Label() }
+
+// Failure reports whether a notice should use failure styling.
+func (k NoticeKind) Failure() bool { return agent.NoticeKind(k).Failure() }
+
 // Result is the authoritative outcome of one run.
 type Result struct {
 	Status          StopReason
