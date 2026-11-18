@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -21,6 +22,7 @@ func baseSpec(t *testing.T, mode Mode) Spec {
 		Workspace:      t.TempDir(),
 		StateDir:       t.TempDir(),
 		Mode:           mode,
+		UserAgent:      "test-host/1.0",
 		Provider:       "test",
 		Dialect:        "custom",
 		Model:          "engine-model",
@@ -68,6 +70,38 @@ func TestOpenNewPreservesEmptyAndNilGrants(t *testing.T) {
 	}
 }
 
+func TestOpenRequiresUserAgentAndFillsToolOptions(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		spec := baseSpec(t, ModeNew)
+		spec.UserAgent = value
+		_, err := Open(context.Background(), spec)
+		var configErr *ConfigError
+		if !errors.As(err, &configErr) || configErr.Field != "UserAgent" {
+			t.Fatalf("Open with UserAgent %q: err = %v, want ConfigError for UserAgent", value, err)
+		}
+	}
+
+	spec := baseSpec(t, ModeNew)
+	spec.UserAgent = "host/1.0"
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	if got := host.Spec().ToolOptions.UserAgent; got != "host/1.0" {
+		t.Fatalf("ToolOptions.UserAgent = %q, want the host identity", got)
+	}
+
+	spec = baseSpec(t, ModeNew)
+	spec.UserAgent = "host/1.0"
+	spec.ToolOptions.UserAgent = "other/2.0"
+	_, err = Open(context.Background(), spec)
+	var configErr *ConfigError
+	if !errors.As(err, &configErr) || configErr.Field != "ToolOptions.UserAgent" {
+		t.Fatalf("mismatched ToolOptions.UserAgent: err = %v, want ConfigError", err)
+	}
+}
+
 func TestResumeInheritsModelAndLimits(t *testing.T) {
 	spec := baseSpec(t, ModeNew)
 	host, err := Open(context.Background(), spec)
@@ -84,6 +118,7 @@ func TestResumeInheritsModelAndLimits(t *testing.T) {
 		StateDir:  stateDir,
 		Mode:      ModeResume,
 		SessionID: sessionID,
+		UserAgent: "test-host/1.0",
 		NewCompleter: func(model.Dialect, string, string) model.Completer {
 			return engineModel{}
 		},

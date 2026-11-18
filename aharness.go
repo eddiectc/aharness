@@ -174,6 +174,7 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 		StateDir:        cfg.StateDir,
 		Mode:            mode,
 		SessionID:       sessionID,
+		UserAgent:       cfg.UserAgent,
 		Provider:        modelCfg.Spec.Provider,
 		Dialect:         string(modelCfg.Spec.Dialect),
 		BaseURL:         modelCfg.Spec.BaseURL,

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,11 @@ type Spec struct {
 	StateDir  string
 	Mode      Mode
 	SessionID string // resume/fork source
+
+	// UserAgent identifies the host on outbound tool requests, for example
+	// "acode/1.2.0". It is required. The model completer closure captures the
+	// same identity independently; the engine cannot inspect its headers.
+	UserAgent string
 
 	Provider string
 	Dialect  string
@@ -153,6 +159,15 @@ func Open(ctx context.Context, spec Spec) (*Host, error) {
 	}
 	if spec.StateDir == "" {
 		return nil, configError("StateDir", "is required")
+	}
+	if strings.TrimSpace(spec.UserAgent) == "" {
+		return nil, configError("UserAgent", "is required")
+	}
+	switch {
+	case spec.ToolOptions.UserAgent == "":
+		spec.ToolOptions.UserAgent = spec.UserAgent
+	case spec.ToolOptions.UserAgent != spec.UserAgent:
+		return nil, configError("ToolOptions.UserAgent", "must match UserAgent")
 	}
 	if spec.MaxSubagents < -1 {
 		return nil, configError("MaxSubagents", "must be -1 or greater")

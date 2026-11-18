@@ -8,6 +8,19 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- `engine.Spec.UserAgent` is now required host identity. When
+  `Spec.ToolOptions.UserAgent` is empty the engine fills it from the spec; a
+  differing value is a `ConfigError` naming `ToolOptions.UserAgent`.
+
+### Changed
+
+- Direct `engine` hosts must now set `Spec.UserAgent`; `engine.Open` rejects an
+  empty identity with a `ConfigError`. The model completer closure still
+  captures the same identity independently because the engine cannot inspect
+  its outbound headers.
+
 ## [v0.1.0] - 2026-11-18
 
 ### Changed
