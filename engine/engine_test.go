@@ -125,10 +125,16 @@ func TestCleanupWorkRemovesAndBuildRunnerRecreates(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(workDir, "tmp")); err != nil {
 		t.Fatalf("tmp dir missing: %v", err)
 	}
-	// A child command may leave a read-only directory behind.
+	// A child command may leave a read-only directory with contents behind.
 	readOnly := filepath.Join(workDir, "locked")
-	if err := os.Mkdir(readOnly, 0o500); err != nil {
+	if err := os.MkdirAll(filepath.Join(readOnly, "nested"), 0o700); err != nil {
 		t.Fatalf("mkdir read-only: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(readOnly, "nested", "file"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write read-only file: %v", err)
+	}
+	if err := os.Chmod(readOnly, 0o500); err != nil {
+		t.Fatalf("chmod read-only: %v", err)
 	}
 	if err := host.CleanupWork(); err != nil {
 		t.Fatalf("CleanupWork: %v", err)
