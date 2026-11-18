@@ -41,7 +41,10 @@ var (
 	ErrCatalogUnavailable = errors.New("model catalog unavailable")
 	// ErrCatalogInvalid marks malformed or schema-invalid catalog data.
 	ErrCatalogInvalid = errors.New("model catalog invalid")
-	// ErrCatalogCache marks a cache persistence failure.
+	// ErrCatalogCache marks a cache persistence failure. ModelsDevSource
+	// reports a failed cache write as a Catalog.Warnings entry instead of
+	// returning this error; it remains for other CatalogSource
+	// implementations that classify persistence failures.
 	ErrCatalogCache = errors.New("model catalog cache")
 	// ErrModelNotFound marks a model ID that is absent from the catalog.
 	ErrModelNotFound = errors.New("model not found in catalog")

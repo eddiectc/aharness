@@ -117,27 +117,68 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
-- `agent.Spawner.SteerChild` takes an `agent.SteeringLine` instead of a string,
-  and `engine.Spec.ExecutionGrant`/`ExecutionGrantSet` were replaced by the
-  recorded `Spec.RootGrant`. Direct component hosts must update.
-- `EventView`'s nested `Result`, `Usage`, `ToolCall`, and `ChildOutcome` values
-  use stable snake_case JSON tags; `Result.Err` is omitted and surfaced as the
-  view's top-level `error` text. These DTOs are otherwise unchanged.
+These changes need action from hosts that use the component packages
+directly; the root facade absorbs most of them. Every item marked
+**Migration:** is breaking for a pre-1.0 component host.
+
+- `engine.Spec.UserAgent` is now required. `engine.Open` rejects an empty or
+  whitespace-only identity with a `ConfigError`, fills
+  `Spec.ToolOptions.UserAgent` when it is empty, and rejects a differing
+  value.
+  **Migration:** set `Spec.UserAgent` to the same product identity your model
+  completer closure sends, for example `"acode/1.2.0"`. Either leave
+  `Spec.ToolOptions.UserAgent` empty and let the engine fill it, or set it to
+  the identical value. Facade hosts already pass the required
+  `Config.UserAgent` and need no change.
+- `engine.Spec.ExecutionGrant` and `ExecutionGrantSet` were removed in favor of
+  the recorded `Spec.RootGrant`.
+  **Migration:** replace `ExecutionGrant`/`ExecutionGrantSet` with
+  `Spec.RootGrant`. There is no Set flag: `nil` keeps the session grant, and a
+  non-nil value (including an empty slice) narrows the root and is recorded as
+  `session_start.root_tools`. Facade hosts use `ToolsConfig.RootGrant`. The
+  restriction is now recorded and inherited, unlike the process-only execution
+  grant: resume inherits the recorded grant, and to change it use `Fork`
+  rather than an explicit mismatching resume.
+- `agent.Config.Steering` is `<-chan agent.SteeringLine`, and
+  `engine.BuildRunner`/`BuildRunnerWithSpawner` take that channel.
+  `agent.Spawner.SteerChild` takes a `SteeringLine`, and `Run.Steer`/
+  `Run.SteerChild` return `(uint64, error)`.
+  **Migration:** send `agent.SteeringLine` values on the steering channel
+  instead of strings, pass a `SteeringLine` to `Spawner.SteerChild`, and
+  replace `err := run.Steer(text)` or `err := run.SteerChild(id, text)` with
+  `_, err := ...`. Keep the returned ID when you want to match the
+  `MessageRecorded.ID` or `SubagentMessageRecorded.ID` acknowledgement. A bare
+  call statement still compiles. Facade callers get the ID for free.
+- `agent.RunOptions.ResumedFromSeq` is derived from the log unless
+  `ResumedFromSeqSet` is true.
+  **Migration:** component hosts that pass an explicit `ResumedFromSeq` must
+  also set `ResumedFromSeqSet: true`; otherwise the supplied value is ignored
+  and the runner records zero before the first run or the previous last
+  sequence after it. `Run`/`Start` facade callers need no change.
+- `ModelsDevSource.Refresh` no longer returns `ErrCatalogCache` when only the
+  cache write failed. It returns the fetched catalog with a `Warnings` entry
+  and a nil error; fetch and decode failures remain errors.
+  **Migration:** treat a nil error as "the catalog is usable" and surface
+  `catalog.Warnings` to the operator instead of treating the call as failed.
+  `ErrCatalogCache` is no longer produced by `Refresh`; it remains for other
+  `CatalogSource` implementations that classify persistence failures, so keep
+  an `errors.Is` branch only if you also use one.
+- `Result`, `Usage`, `ToolCall`, and `ChildOutcome` now carry stable
+  snake_case JSON tags, and `Result.Err` is `json:"-"`.
+  **Migration:** if you marshal these structs yourself, update the JSON keys
+  (`Status` -> `status`, `InputTokens` -> `input_tokens`, and so on) and stop
+  expecting an `Err` member; use `Result.Err` in process. Prefer
+  `aharness.ViewEvent` for any wire format, since its shape is the supported
+  one and it carries the error text in `Error`. The Go field names are
+  unchanged.
+- The facade `Run` now returns `Status: StopInternalError` with the cause when
+  a run cannot start, instead of an empty status.
+  **Migration:** delete any host-side normalization of an empty
+  `Result.Status`; every returned result now has a defined status.
 - Documentation now carries the component field crosswalk for `Spec.Version` ↔
   `HarnessVersion`, `RunTimeout` ↔ `SessionTimeout`, and tri-state versus
   string effort, plus the root/child event split, the engine host read surface,
   and the new recorded `root_tools` field.
-- `ModelsDevSource.Refresh` now returns a usable catalog with a warning, and a
-  nil error, when only cache persistence failed. Fetch and decode failures
-  remain errors; this matches `Load`'s existing cache-write warning.
-- `agent.Config.Steering` is now `<-chan agent.SteeringLine`, and
-  `engine.BuildRunner*` takes the same channel. `Run.Steer` and
-  `Run.SteerChild` return `(uint64, error)`. A bare call statement still
-  compiles; callers that assigned the single error must update.
-- Direct `engine` hosts must now set `Spec.UserAgent`; `engine.Open` rejects an
-  empty identity with a `ConfigError`. The model completer closure still
-  captures the same identity independently because the engine cannot inspect
-  its outbound headers.
 
 ## [v0.1.0] - 2026-11-18
 
