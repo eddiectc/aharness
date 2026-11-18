@@ -85,16 +85,14 @@ type Config struct {
 
 // Agent is one durable session and the loop that advances it.
 type Agent struct {
-	mu         sync.Mutex
-	host       *engine.Host
-	cfg        Config
-	setup      *toolSetup
-	model      *ModelConfig
-	closed     bool
-	closeDone  chan struct{}
-	active     *Run
-	newSession bool
-	started    bool
+	mu        sync.Mutex
+	host      *engine.Host
+	cfg       Config
+	setup     *toolSetup
+	model     *ModelConfig
+	closed    bool
+	closeDone chan struct{}
+	active    *Run
 }
 
 // New creates a new session. Workspace, StateDir, and Model are required.
@@ -261,12 +259,11 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 		}
 	}
 	a := &Agent{
-		host:       host,
-		cfg:        cfg,
-		setup:      setup,
-		model:      &effective,
-		closeDone:  make(chan struct{}),
-		newSession: mode == engine.ModeNew,
+		host:      host,
+		cfg:       cfg,
+		setup:     setup,
+		model:     &effective,
+		closeDone: make(chan struct{}),
 	}
 	return a, nil
 }

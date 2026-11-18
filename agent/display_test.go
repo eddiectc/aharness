@@ -135,6 +135,7 @@ func TestDisplayRunStartedCarriesModelAndResumeSeq(t *testing.T) {
 	startTestSession(t, runner)
 	opts := defaultRunOptions()
 	opts.ResumedFromSeq = 42
+	opts.ResumedFromSeqSet = true
 	if _, err := runner.Run(context.Background(), opts); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

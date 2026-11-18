@@ -35,20 +35,19 @@ type RunOptions struct {
 
 // Run is one in-flight or terminal run over an Agent's session.
 type Run struct {
-	agent       *Agent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	stopSends   chan struct{}
-	stopOnce    sync.Once
-	events      chan Event
-	done        chan struct{}
-	steering    chan string
-	controller  *runController
-	spawner     *agent.Spawner
-	sessionID   string
-	task        string
-	resumedFrom uint64
-	startedAt   time.Time
+	agent      *Agent
+	ctx        context.Context
+	cancel     context.CancelFunc
+	stopSends  chan struct{}
+	stopOnce   sync.Once
+	events     chan Event
+	done       chan struct{}
+	steering   chan string
+	controller *runController
+	spawner    *agent.Spawner
+	sessionID  string
+	task       string
+	startedAt  time.Time
 
 	mu              sync.Mutex
 	result          Result
@@ -140,24 +139,18 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 	runCtx, cancel := context.WithCancel(ctx)
 	controller := &runController{}
 	steering := make(chan string, 16)
-	resumedFrom := a.host.Store().LastSeq()
-	if a.newSession && !a.started {
-		resumedFrom = 0
-	}
-	a.started = true
 	run := &Run{
-		agent:       a,
-		ctx:         runCtx,
-		cancel:      cancel,
-		stopSends:   make(chan struct{}),
-		events:      make(chan Event),
-		done:        make(chan struct{}),
-		steering:    steering,
-		controller:  controller,
-		sessionID:   a.ID(),
-		task:        task,
-		resumedFrom: resumedFrom,
-		startedAt:   time.Now(),
+		agent:      a,
+		ctx:        runCtx,
+		cancel:     cancel,
+		stopSends:  make(chan struct{}),
+		events:     make(chan Event),
+		done:       make(chan struct{}),
+		steering:   steering,
+		controller: controller,
+		sessionID:  a.ID(),
+		task:       task,
+		startedAt:  time.Now(),
 	}
 	display := func(ev agent.DisplayEvent) error {
 		pub, ok := eventFromInternal(ev, run.sessionID, time.Now())
@@ -220,7 +213,7 @@ func (r *Run) execute(runner *agent.Runner) {
 				result = agent.Result{Status: agent.StopInternalError, Err: err}
 			}
 		}()
-		result, err = runner.Run(r.ctx, agent.RunOptions{Task: r.task, TaskSet: true, ResumedFromSeq: r.resumedFrom})
+		result, err = runner.Run(r.ctx, agent.RunOptions{Task: r.task, TaskSet: true})
 	}()
 	public := fromInternalResult(result, r.sessionID, publicError(err))
 	r.mu.Lock()

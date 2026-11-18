@@ -153,11 +153,16 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		defer cancel()
 	}
 
-	state, err := Inspect(r.store.Events())
+	events := r.store.Events()
+	state, err := Inspect(events)
 	if err != nil {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
+	}
+	resumedFromSeq := opts.ResumedFromSeq
+	if !opts.ResumedFromSeqSet {
+		resumedFromSeq = deriveResumedFromSeq(events)
 	}
 	st.turns = state.Turns
 	st.usage = state.Usage
@@ -187,7 +192,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		return res, err
 	}
 
-	if err := r.recordRunStart(opts.ResumedFromSeq); err != nil {
+	if err := r.recordRunStart(resumedFromSeq); err != nil {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
@@ -199,7 +204,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	}
 	if err := r.emit(RunStarted{
 		Turn:           st.turns,
-		ResumedFromSeq: opts.ResumedFromSeq,
+		ResumedFromSeq: resumedFromSeq,
 		Model:          r.cfg.Model,
 		Dialect:        r.cfg.Dialect,
 		ThinkingEffort: r.cfg.ThinkingEffort,
@@ -289,6 +294,18 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 			return res, err
 		}
 	}
+}
+
+// deriveResumedFromSeq returns zero before the first recorded run and the last
+// durable sequence after one. A fork copies its parent's run_start events, so
+// the copied log's last sequence is the parent's boundary.
+func deriveResumedFromSeq(events []session.Event) uint64 {
+	for _, ev := range events {
+		if ev.Type == session.TypeRunStart {
+			return events[len(events)-1].Seq
+		}
+	}
+	return 0
 }
 
 // repairPending pairs unpaired tool calls with a canceled result before a new

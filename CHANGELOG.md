@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `agent.RunOptions.ResumedFromSeqSet` lets the runner derive the resume
+  boundary: zero before the first recorded run, otherwise the last durable
+  sequence; an explicit value still wins. The facade no longer computes it.
 - `RunOptions.OnEvent` receives every display event consumed by the blocking
   `Run`, in order, without changing the result. `Start` ignores it; a blocking
   consumer should use `Start`.

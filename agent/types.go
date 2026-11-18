@@ -188,8 +188,11 @@ type RunOptions struct {
 	TaskSet  bool
 	TaskFrom string
 	// ResumedFromSeq is the last durable sequence number before this run.
-	// It is zero for a fresh session.
-	ResumedFromSeq uint64
+	// It is zero for a fresh session. Leave ResumedFromSeqSet false to derive
+	// it from the log: zero when the session has no recorded run yet, otherwise
+	// the last durable sequence number.
+	ResumedFromSeq    uint64
+	ResumedFromSeqSet bool
 }
 
 // StopReason is a typed terminal status.

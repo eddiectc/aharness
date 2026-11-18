@@ -14,6 +14,45 @@ import (
 	"github.com/eddiectc/aharness/tools"
 )
 
+func TestResumedFromSeqDerivedOncePerRun(t *testing.T) {
+	cfg := testConfig()
+	comp := &fakeCompleter{steps: []scriptStep{
+		{resp: model.Response{Text: "one", FinishReason: model.FinishStop}},
+		{resp: model.Response{Text: "two", FinishReason: model.FinishStop}},
+		{resp: model.Response{Text: "three", FinishReason: model.FinishStop}},
+	}}
+	store := &fakeStore{}
+	runner := newRunner(cfg, comp, &fakeToolset{}, store)
+	startTestSession(t, runner)
+	if _, err := runner.Run(t.Context(), defaultRunOptions()); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	first := decodePayload[runStartData](t, eventsByType(store, session.TypeRunStart)[0])
+	if first.ResumedFromSeq != 0 {
+		t.Fatalf("fresh ResumedFromSeq = %d, want 0", first.ResumedFromSeq)
+	}
+	previousLast := store.events[len(store.events)-1].Seq
+	if _, err := runner.Run(t.Context(), defaultRunOptions()); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	runs := eventsByType(store, session.TypeRunStart)
+	second := decodePayload[runStartData](t, runs[1])
+	if second.ResumedFromSeq != previousLast {
+		t.Fatalf("second ResumedFromSeq = %d, want prior last %d", second.ResumedFromSeq, previousLast)
+	}
+	opts := defaultRunOptions()
+	opts.ResumedFromSeq = 42
+	opts.ResumedFromSeqSet = true
+	if _, err := runner.Run(t.Context(), opts); err != nil {
+		t.Fatalf("third Run: %v", err)
+	}
+	runs = eventsByType(store, session.TypeRunStart)
+	third := decodePayload[runStartData](t, runs[2])
+	if third.ResumedFromSeq != 42 {
+		t.Fatalf("explicit ResumedFromSeq = %d, want 42", third.ResumedFromSeq)
+	}
+}
+
 func TestRunCompleted(t *testing.T) {
 	cfg := testConfig()
 	comp := &fakeCompleter{steps: []scriptStep{{
