@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/engine"
-	"github.com/eddiectc/aharness/internal/model"
-	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/engine"
+	"github.com/eddiectc/aharness/model"
+	"github.com/eddiectc/aharness/tools"
 )
 
 // Config is the construction input for New, Resume, and Fork. The library has

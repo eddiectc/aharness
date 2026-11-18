@@ -3,7 +3,7 @@
 - **Date:** 2026-11-10; implemented 2026-11-11.
 - **Status:** implemented as of 2026-11-11. The shipped contract is in
   [architecture.md](../architecture.md), [limits.md](../limits.md),
-  [tui.md](../tui.md), and [testing-strategy.md](../testing-strategy.md); this
+  [tui.md](https://github.com/eddiectc/acode/blob/main/docs/tui.md), and [testing-strategy.md](../testing-strategy.md); this
   document records the plan, decisions, and deviations (§11).
 - **Source:** [v1 build plan](v1-build.md), the shipped provider/model registry,
   and the opencode-go catalog.

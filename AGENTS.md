@@ -1,11 +1,15 @@
 # Agent instructions
 
+This repository is the **aharness SDK**, not the coding agent application. The
+first-party coding agent is [acode](https://github.com/eddiectc/acode); it
+depends on this module and owns the CLI, TUI, configuration, and presentation
+layers. Do not add those layers here.
+
 The Go coding standard is [docs/coding-standard.md](docs/coding-standard.md).
 Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
 are defined there, and it wins over other docs on Go practice. System
-structure, tool behavior, the public library contract, and CLI/config contracts
-live in [docs/architecture.md](docs/architecture.md); the flag/env/config-file
-layers are in [docs/configuration.md](docs/configuration.md); the testing
+structure, tool behavior, the public two-level API, and the SDK runtime
+contracts live in [docs/architecture.md](docs/architecture.md); the testing
 strategy lives in [docs/testing-strategy.md](docs/testing-strategy.md); caps and
 numbers live in [docs/limits.md](docs/limits.md). Every change verifies against
 the project-wide [docs/definition-of-done.md](docs/definition-of-done.md). The
@@ -18,16 +22,21 @@ Non-negotiables:
   exceptions MUST satisfy the justification requirements in the coding standard
   §3. Do not add a framework, UUID library, JSON Schema validator, or retry
   library without that justification.
-- Start with the five-package layout in `docs/architecture.md` §3.1. Do not
-  create `pkg/`, `util`, `common`, or one-package-per-type.
-- The public library is the coding agent's SDK, not a general ADK. Keep the
-  boundary recorded in
+- The SDK is the root facade plus the `agent`, `engine`, `model`, `tools`, and
+  `session` component packages. Do not create `pkg/`, `util`, `common`, or
+  one-package-per-type. Do not add a CLI, TUI, config file, environment parser,
+  signal handler, `os.Exit`, or terminal code; those belong to acode.
+- Keep the recorded boundary in
   [architecture.md §3.2.1](docs/architecture.md#321-public-library-facade):
   no provider matrix, graph/workflow orchestration, memory/RAG, session-store
   seam, background or nested delegation, in-run parallel tool execution,
   structured-output/report DTOs, prompt templating, or public TUI package. A
   change that alters a recorded contract — session schema, prompt, tool grant,
   projection, or concurrency model — is a different product, not an extension.
+- Keep the two API levels honest: the root facade copies DTOs at the boundary;
+  component packages are public for first-party hosts and advanced integrations.
+  Do not leak root-package types into component packages or make a component
+  import the root.
 - Route workspace paths through `os.Root` and `filepath.IsLocal`; reject `.git`
   components and symlink components for edits.
 - Wrap errors with `%w`; branch with `errors.Is`/`errors.As`; never match error
@@ -40,7 +49,7 @@ Non-negotiables:
   `time.Sleep`-based waiting.
 - Before finishing, run `make dod` and fix failures. It runs the standard's
   §8 gates (`goimports`, `go vet`, `golangci-lint`, `go test -race -count=1`,
-  `go build`, `govulncheck`) plus `docs-check`.
+  `go build`, and `govulncheck`) plus `docs-check`.
 
 When in doubt, prefer the smaller stdlib solution. If other docs conflict, the
 coding standard wins on Go practice; note the conflict in the change.

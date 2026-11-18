@@ -5,7 +5,7 @@
   credentials in this environment. Mock-provider, integration, fuzz, and gate
   checks pass. **Deviation:** the v1 "no config file" decision was later
   reversed. Aharness now supports an optional JSON config file below flags and
-  environment; see [configuration.md](../configuration.md) and the deviation
+  environment; see [configuration.md](https://github.com/eddiectc/acode/blob/main/docs/configuration.md) and the deviation
   noted in §1.2. **Deviation:** the assumption that Responses needs no
   reasoning-item continuation no longer holds. Both adapters now retain
   provider-native continuation material in memory for tool rounds; see
@@ -57,7 +57,7 @@ evaluation platform.
 - The canonical model, deterministic compaction, and the projection constants.
 - One process, one loop, one writer; no daemon, UI, or plugin system. (A later
   deviation added an optional JSON config file: see
-  [configuration.md](../configuration.md).)
+  [configuration.md](https://github.com/eddiectc/acode/blob/main/docs/configuration.md).)
 - No built-in isolation or approval. External isolation remains the operator's
   responsibility.
 

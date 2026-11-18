@@ -3,7 +3,7 @@
 - **Date:** 2026-11-11
 - **Status:** implemented 2026-11-11. This document is the decision and
   verification record; the shipped behavior is documented in
-  [architecture.md](../architecture.md), [tui.md](../tui.md),
+  [architecture.md](../architecture.md), [tui.md](https://github.com/eddiectc/acode/blob/main/docs/tui.md),
   [testing-strategy.md](../testing-strategy.md), [limits.md](../limits.md), and
   the README. The real-provider smoke in §1.4 and §4.3 was **not** run because
   provider credentials are unavailable; it remains an explicit release
@@ -549,7 +549,7 @@ When implemented, update:
 ## 9. Implementation status and verification
 
 **Status:** implemented 2026-11-11. The shipped behavior is documented in
-[architecture.md](../architecture.md) §2.2 and §7–§9, [tui.md](../tui.md),
+[architecture.md](../architecture.md) §2.2 and §7–§9, [tui.md](https://github.com/eddiectc/acode/blob/main/docs/tui.md),
 [testing-strategy.md](../testing-strategy.md), [limits.md](../limits.md), and the
 [README](../../README.md).
 
@@ -563,7 +563,7 @@ Deviations and clarifications against the contract above:
 | Clear sentinel | `default` is converted to the empty value immediately after the syntax check, so it never reaches catalog validation, an adapter request, or the session log. |
 | TUI and `-ui-json` | `F2`, the details row, model-picker effort metadata, the model-switch clearing notice, the `f2` key, and the optional `thinking_effort` fields follow §3.6. The header line additionally shows `effort <value>` (or `effort default`) for the next run, so the effective value stays visible without opening the details overlay. No new event type; protocol version stays 1. |
 | Live catalog | Values remain catalog-driven. On 2026-11-11 the catalog advertised different lists per model (for example `low,high,max` for `deepseek-v4.1-flash` and other sets including `none`), so the shipped docs do not hardcode a list. Catalog drift changes `-list-models` and picker output without a harness release; the mechanism does not depend on any observed entry. |
-| Thinking display | Added after this plan shipped, and it supersedes the §1.3 exclusion of reasoning text display. The adapters now map provider thinking into the display-only `model.Response.Reasoning` field and the TUI renders a separate `thinking` block. Thinking is still never logged or projected; both adapters now keep a bounded in-memory continuation and replay the provider's native material within a tool round. Durable reasoning remains out of scope. See [tui.md § Thinking](../tui.md#thinking) and [architecture.md §2.2/§2.4](../architecture.md#22-canonical-model-and-dialect-adapters). |
+| Thinking display | Added after this plan shipped, and it supersedes the §1.3 exclusion of reasoning text display. The adapters now map provider thinking into the display-only `model.Response.Reasoning` field and the TUI renders a separate `thinking` block. Thinking is still never logged or projected; both adapters now keep a bounded in-memory continuation and replay the provider's native material within a tool round. Durable reasoning remains out of scope. See [tui.md § Thinking](https://github.com/eddiectc/acode/blob/main/docs/tui.md#thinking) and [architecture.md §2.2/§2.4](../architecture.md#22-canonical-model-and-dialect-adapters). |
 
 Verification:
 

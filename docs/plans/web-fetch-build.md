@@ -14,7 +14,7 @@
 - **Architecture:** [architecture.md](../architecture.md) §3.1 (packages), §3.2
   (contracts), §4 (loop), §5 (tools), §9 (CLI/config), and §10 (limits).
 - **Limits:** [limits.md](../limits.md) §5.
-- **Configuration:** [configuration.md](../configuration.md).
+- **Configuration:** [configuration.md](https://github.com/eddiectc/acode/blob/main/docs/configuration.md).
 - **Testing:** [testing-strategy.md](../testing-strategy.md) plus §5 here.
 - **Definition of done:** [project definition of done](../definition-of-done.md);
   feature criteria in §1.4.

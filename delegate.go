@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/model"
 )
 
 // AgentDefinition is one runnable delegated agent.

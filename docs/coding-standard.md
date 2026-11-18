@@ -1,13 +1,13 @@
 # Go coding standard
 
-- **Date:** 2026-11-09
+- **Date:** 2026-11-18
 - **Status:** normative for all Go code in this repository
-- **Toolchain:** Go 1.27.3; stdlib-first, with the approved TUI exception
+- **Toolchain:** Go 1.27.3; stdlib-first, with the approved extractor exception
 - **Related:** [system architecture](architecture.md), [bare-minimum harness research](research/agent-harness-minimum.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 This document defines how the Go code is written. It does not define
-architecture, tool behavior, protocols, or CLI/config contracts; those live in
+architecture, tool behavior, protocols, or SDK runtime contracts; those live in
 [`architecture.md`](architecture.md). If the documents conflict on structure or
 runtime contracts, the architecture document wins; on Go practice, this
 document wins.
@@ -20,40 +20,40 @@ only with a recorded reason; **MAY** = optional.
 - Use Go **1.27.3**. Keep `go 1.27.3` in `go.mod`; do not lower it. Go 1.27's
   `go test` runs the `stdversion` vet check by default, so the `go` line must
   admit every standard-library symbol used.
-- The module is `github.com/eddiectc/aharness`. The root package is the public
-  library facade; `internal/*` stays internal and `cmd/aharness` is the CLI
-  consumer. A breaking public API change gets a new major module path.
+- The module is `github.com/eddiectc/aharness`. The root package is the
+  high-level facade, and `agent`, `engine`, `model`, `tools`, and `session` are
+  public component packages for hosts. A breaking public API change gets a new
+  major module path. Do not add `internal/`, `cmd/`, a CLI, or a TUI here; the
+  first-party coding agent lives in the separate acode module.
 - Runtime dependencies: **stdlib by default**. The standard library is the
   default answer; a new runtime dependency MUST be justified in review against
-  a stdlib alternative. The approved exception is the TUI stack in §3: Bubble
-  Tea v2, Bubbles v2, Lip Gloss v2, Glamour v2, ntcharts v2, and `x/vt` (plus
-  their direct support packages for color profiles, cell types, ANSI helpers,
-  and terminal detection). No dependency may be added outside that recorded
-  decision without a new review.
+  a stdlib alternative. The approved extractor exception is in §3. The TUI
+  stack is an acode dependency, not an SDK dependency. No dependency may be
+  added outside the recorded decisions without a new review.
 - Development tools are not runtime dependencies: `goimports`/`gofmt`, `go vet`,
   `golangci-lint`, `govulncheck`. Pin them in CI; do not commit a `tool`
   directive unless the team explicitly chooses that tradeoff.
 - Commit `go.mod` and, when a dependency exists, `go.sum`. Run `go mod tidy`
-  and `go mod verify`. No `replace` directives in committed code; no vendoring
-  for this small binary.
+  and `go mod verify`. No `replace` directives in committed code; no vendoring.
 - Run `go fix ./...` before review for modernizers, and `go doc -ex` when
   writing examples.
-- Build release binaries with `-trimpath`; do not strip symbols by default.
-  Tests with `-race` require cgo; the release build MAY use `CGO_ENABLED=0`.
+- Build with `-trimpath`; do not strip symbols by default. Tests with `-race`
+  require cgo.
 
 ## 2. Packages and layout
 
-The five-package layout and dependency direction are defined in
-[`architecture.md` §3.1](architecture.md); that document is normative for this
-repository's package structure. The rules below apply to every package.
+The root facade plus the five component packages, and their dependency
+direction, are defined in [`architecture.md` §3.1](architecture.md); that
+document is normative for this repository's package structure. The rules below
+apply to every package.
 
-- `internal/` for all non-exported packages. `cmd/` only for `package main`
-  commands. There is no `pkg/`, `api/`, `configs/`, or similar cargo-cult
-  directory.
-- `cmd/aharness` contains wiring and I/O only. No loop, tool, or provider logic
-  in `main`.
-- Respect the documented dependency direction. A leaf package MUST NOT import
-  an orchestrator or `cmd`.
+- No `internal/`, `cmd/`, `pkg/`, `api/`, `configs/`, or similar cargo-cult
+  directory. Every package is either the root facade or a documented component
+  package.
+- The root facade contains public DTOs and composition over the component
+  packages; it contains no loop, tool, or provider implementation.
+- Respect the documented dependency direction. A component package MUST NOT
+  import the root facade or an application.
 - Do not create a package for one small function. Split when a package has a
   second consumer, independent tests, or a clear responsibility boundary.
 - Package names are lowercase, short, and descriptive: no `util`, `common`,
@@ -72,20 +72,10 @@ repository's package structure. The rules below apply to every package.
   a JSON Schema validator, a UUID library, a retry/backoff library,
   SQLite/ORM, a dependency-injection framework, or a generic worker-pool
   library.
-- The TUI exception is closed and scoped. Approved modules:
-  `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`,
-  `charm.land/lipgloss/v2`, `charm.land/glamour/v2`,
-  `github.com/NimbleMarkets/ntcharts/v2`, and `github.com/charmbracelet/x/vt`.
-  The TUI also directly imports their support packages
-  (`colorprofile`, `ultraviolet`, `x/ansi`) and `golang.org/x/term`. These are
-  the only approved application-framework modules: the standard library has no
-  maintained full-screen TUI, markdown renderer, or chart package to build on,
-  and the shipped caps and protocol are in [tui.md](tui.md). Do not add a second
-  application framework, a theme system, or another markdown/chart library.
-  Binary impact is measured and recorded: a `-trimpath` build grew from
-  11,671,823 bytes at the last stdlib-only v1 revision to 26,127,685 bytes
-  with the full TUI stack (+13.8 MiB, +124%), and `go list -m all` has 53
-  modules. Re-measure on dependency changes and record the result.
+- The TUI stack is not an SDK dependency. Bubble Tea v2, Bubbles v2, Lip Gloss
+  v2, Glamour v2, ntcharts v2, `x/vt`, their direct support packages, and
+  `golang.org/x/term` belong to the acode repository. The SDK must stay
+  headless; a TUI import here is a dependency-gate failure.
 - `github.com/markusmobius/go-trafilatura/v2` v2.2.6 is the approved
   main-content extractor for `web_fetch`. It is Apache-2.0, native Go, and
   CGO-free; v2.2.6 is the current release of a maintained port with published
@@ -273,8 +263,7 @@ goimports -l .          # or gofmt -l . if goimports is unavailable
 go vet ./...
 golangci-lint run
 go test -race -count=1 ./...
-mkdir -p bin
-go build -trimpath -o bin/aharness ./cmd/aharness
+go build -trimpath ./...
 govulncheck ./...
 ```
 

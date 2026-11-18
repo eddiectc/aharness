@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/model"
-	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/model"
+	"github.com/eddiectc/aharness/tools"
 )
 
 // Role is a canonical message role.

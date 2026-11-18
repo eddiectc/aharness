@@ -1,7 +1,7 @@
-// Package aharness is the embeddable form of the aharness coding agent. It is
-// a headless, in-process library over the existing model/tool loop and durable
-// JSONL session log; it is not a second harness, a subprocess wrapper, or a
-// general agent development kit.
+// Package aharness is a headless Go SDK for a single-workspace coding agent.
+// It runs the model/tool loop over a durable JSONL session log; it is not a
+// subprocess wrapper or a general agent development kit. The first-party
+// coding agent, acode, is a separate module built on this SDK.
 //
 // # Lifecycle
 //

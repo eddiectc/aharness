@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/engine"
-	"github.com/eddiectc/aharness/internal/model"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/engine"
+	"github.com/eddiectc/aharness/model"
 )
 
 // RunOptions carries per-run overrides that do not rewrite the session.

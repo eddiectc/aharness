@@ -1,12 +1,12 @@
 # aharness definition of done
 
-- **Date:** 2026-11-11
+- **Date:** 2026-11-18
 - **Status:** normative for every task, fix, feature, refactor, and
   documentation change
 - **Applies to:** every change in this repository, and every dated record in
   [docs/plans](plans/) and [docs/research](research/)
 - **Related:** [Go coding standard](coding-standard.md),
-  [system architecture](architecture.md),
+  [SDK architecture](architecture.md),
   [testing strategy](testing-strategy.md), [limits](limits.md), and the
   [documentation map](README.md)
 
@@ -15,12 +15,11 @@ skip an item: state why it does not apply.
 
 Precedence: the [coding standard](coding-standard.md) wins on Go practice; the
 current reference documents ([architecture](architecture.md),
-[limits](limits.md), [tui](tui.md), [commands](commands.md),
-[testing strategy](testing-strategy.md)) win on structure and runtime
-contracts. A dated plan or research document records intent and evidence; where
-one disagrees with the current reference, the reference wins. Plans and research
-are frozen: later behavior changes update the current reference, never the dated
-record.
+[limits](limits.md), [testing strategy](testing-strategy.md)) win on structure
+and runtime contracts. A dated plan or research document records intent and
+evidence; where one disagrees with the current reference, the reference wins.
+Plans and research are frozen: later behavior changes update the current
+reference, never the dated record.
 
 ## 1. Behavior and scope
 
@@ -32,38 +31,38 @@ record.
       missing prerequisite exactly.
 - [ ] **Clean cutover.** Every caller is migrated; obsolete code, aliases,
       re-exports, and compatibility shims are removed.
-- [ ] **Regression discipline.** A bug fix starts from a failing test or a
-      clear user report; add a regression test only when no existing test
-      covers the path.
-- [ ] **Edge behavior.** Invalid input, empty results, cancellation, timeouts,
-      partial failure, and concurrent access produce typed, documented
-      outcomes.
-- [ ] **Errors and pairing.** Errors wrap with `%w` and are classified with
-      `errors.Is`/`errors.As`; every tool call has exactly one result.
-- [ ] **Coding-SDK boundary.** A public-library change passes the compatibility
+- [ ] **SDK boundary.** The change stays inside the root facade and the five
+      component packages. It adds no CLI, TUI, environment, config file, signal
+      handler, terminal I/O, or `os.Exit`; those belong to acode.
+- [ ] **Recorded contracts.** A public-library change passes the compatibility
       rules in
-      [architecture §3.2.1](architecture.md#321-public-library-facade):
-      if it alters the session schema, prompt, tool grant, projection, or
-      concurrency model, it is a different product rather than an extension.
-      No new provider matrix, graph/workflow orchestration, memory/RAG,
-      pluggable session store, background or nested delegation,
-      structured-output DTOs, prompt templating, or public TUI package.
+      [architecture §3.2.1](architecture.md#321-public-library-facade). A
+      change that alters the session schema, prompt, tool grant, projection, or
+      concurrency model is a different product, not an extension. No new
+      provider matrix, graph/workflow orchestration, memory/RAG, pluggable
+      session store, background or nested delegation, structured-output DTOs,
+      prompt templating, or public TUI package.
 - [ ] **Public API compatibility.** Adding a field or event is backward
       compatible; adding a method to `Model` or `Tool` is not. Renaming or
       removing an exported identifier requires a major module version, and the
       session schema version stays independent of the module version.
+- [ ] **Two API levels.** The root facade copies DTOs at the boundary and does
+      not expose component types as aliases. A component package does not import
+      the root facade.
+- [ ] **Errors and pairing.** Errors wrap with `%w` and are classified with
+      `errors.Is`/`errors.As`; every tool call has exactly one result.
 
 ## 2. Verification
 
-- [ ] **Narrowest check.** The test, command, or actual UI/CLI surface that
+- [ ] **Narrowest check.** The test, command, or public API surface that
       exercises the change was run and passed once. Do not claim a check that
       was not run.
 - [ ] **Automated DoD checks.** `make dod` passes. It runs the
       [coding standard](coding-standard.md) §8 gates (`goimports`, `go vet`,
-      `golangci-lint`, `go test -race -count=1 ./...`, `go build -trimpath`,
-      and `govulncheck ./...`) plus `docs-check`.
-- [ ] **Fuzzing.** Touched trust boundaries have fuzz coverage,
-      or the existing fuzz targets still pass.
+      `golangci-lint`, `go test -race -count=1 ./...`, `go build -trimpath
+      ./...`, and `govulncheck ./...`) plus `docs-check`.
+- [ ] **Fuzzing.** Touched trust boundaries have fuzz coverage, or the existing
+      fuzz targets still pass.
 - [ ] **Provider behavior.** Wire-format, streaming, or model-control changes
       pass the fake-provider tests and a real-provider smoke. If credentials
       are unavailable, record the exact pending check and do not describe it as
@@ -72,21 +71,19 @@ record.
 ## 3. Contracts and documentation
 
 - [ ] **Current reference updated in the same change.** Use the single source
-      of truth for each topic:
-      [architecture](architecture.md) for structure, protocols, and CLI;
-      [limits](limits.md) for caps and numbers;
-      [tui](tui.md) and [commands](commands.md) for the shipped surface;
-      [testing strategy](testing-strategy.md) for test layers.
+      of truth for each topic: [architecture](architecture.md) for structure,
+      protocols, and the public facade; [limits](limits.md) for caps and
+      numbers; [testing strategy](testing-strategy.md) for test layers.
 - [ ] **No stale authority.** A plan does not claim to be normative for
       behavior that ships; it records intent, milestones, deviations, and
       verification.
 - [ ] **Frozen records.** A dated plan or research document is not rewritten for
       later behavior; the current reference carries the shipped truth.
-- [ ] **User-facing surface.** A user-visible change updates the README
-      feature description, examples, or CLI contract as applicable.
-- [ ] **New interfaces.** New flags, environment variables, exit codes, events,
-      and protocol fields are documented in the current reference and the
-      README where users see them.
+- [ ] **User-facing surface.** A public API change updates the README feature
+      description and examples.
+- [ ] **New interfaces.** New exported types, fields, methods, errors, and
+      events are documented in the current reference and the README where
+      embedders see them.
 - [ ] **Honest docs.** Documented behavior matches exercised behavior; pending
       checks and environment limits are named, not implied.
 
@@ -118,5 +115,3 @@ record.
       dependency change.
 - [ ] **Placement.** New documents follow the placement rules in the
       [documentation map](README.md).
-- [ ] **Handoff.** The change description states what changed, what was
-      verified, and any gate, smoke, or prerequisite still pending.

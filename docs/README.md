@@ -1,8 +1,10 @@
 # aharness documentation map
 
 This directory separates current reference from dated plans and research. The
-root [README](../README.md) is the user-facing entry point; it describes shipped
-features and does not index plans or research.
+root [README](../README.md) is the SDK entry point; it describes the shipped
+surface and does not index plans or research. The first-party coding agent,
+[acode](https://github.com/eddiectc/acode), keeps its CLI, TUI, commands, and
+configuration docs in its own repository.
 
 ## Where a document belongs
 
@@ -23,9 +25,8 @@ rewriting its conclusions.
 
 - [coding-standard.md](coding-standard.md) wins on Go practice.
 - The current reference documents win on structure, runtime contracts, numeric
-  limits, and shipped surface: [architecture.md](architecture.md),
-  [limits.md](limits.md), [tui.md](tui.md), [commands.md](commands.md), and
-  [testing-strategy.md](testing-strategy.md).
+  limits, and shipped SDK surface: [architecture.md](architecture.md),
+  [limits.md](limits.md), and [testing-strategy.md](testing-strategy.md).
 - A dated plan or research document records intent and evidence; it never
   overrides the current reference. Where they disagree, the reference wins.
   Plans and research are frozen: later behavior changes update the reference,
@@ -39,27 +40,22 @@ rewriting its conclusions.
 
 | Document | Defines |
 |---|---|
-| [architecture.md](architecture.md) | System structure, packages, loop and tool contracts, the public library facade, CLI, and configuration |
-| [configuration.md](configuration.md) | Flag > environment > config file > default precedence, the JSON config file, environment variables, and configurable vs fixed limits |
+| [architecture.md](architecture.md) | SDK structure, component packages, loop and tool contracts, session log, and the public facade |
 | [coding-standard.md](coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
-| [commands.md](commands.md) | Shipped slash commands, autocomplete, arguments, and `-ui-json` mapping |
 | [definition-of-done.md](definition-of-done.md) | Normative completion checklist for every change |
-| [limits.md](limits.md) | The single source for caps, limits, and timeouts |
+| [limits.md](limits.md) | The single source for SDK caps, limits, and timeouts |
 | [testing-strategy.md](testing-strategy.md) | Unit, integration, fuzz, and manual smoke layers |
-| [tui.md](tui.md) | Shipped TUI modes, keys, protocol, caps, and verification status |
 
 ### Build plans
 
 | Document | Status |
 |---|---|
 | [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
-| [plans/go-library-build.md](plans/go-library-build.md) | Implemented M0–M6 and M8 docs; TUI adoption (M7) deferred; real-provider library smoke pending |
+| [plans/go-library-build.md](plans/go-library-build.md) | Implemented M0–M6 and M8 docs; real-provider library smoke pending |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
-| [plans/transcript-folding-build.md](plans/transcript-folding-build.md) | Implemented 2026-11-14; real-provider fold smoke pending |
-| [plans/tui-build.md](plans/tui-build.md) | Implemented 2026-11-10 |
 | [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |
 | [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |
 | [plans/web-fetch-build.md](plans/web-fetch-build.md) | Implemented 2026-11-13; public-page and Crawl4AI smoke passed |

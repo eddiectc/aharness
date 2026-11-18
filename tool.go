@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/model"
-	"github.com/eddiectc/aharness/internal/tools"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/model"
+	"github.com/eddiectc/aharness/tools"
 )
 
 // ToolName is a stable tool identifier.

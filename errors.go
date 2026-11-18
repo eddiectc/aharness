@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/engine"
-	"github.com/eddiectc/aharness/internal/model"
-	"github.com/eddiectc/aharness/internal/session"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/engine"
+	"github.com/eddiectc/aharness/model"
+	"github.com/eddiectc/aharness/session"
 )
 
 // SchemaVersion is the session log schema version this package reads and

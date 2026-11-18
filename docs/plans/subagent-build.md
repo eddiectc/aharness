@@ -11,7 +11,7 @@
   (contracts), §3.3 (display/history), §4 (loop), §5 (tools), §6 (projection),
   §7 (session log), §9 (CLI/config).
 - **Limits:** [limits.md](../limits.md) §4 and §7.
-- **Configuration:** [configuration.md](../configuration.md).
+- **Configuration:** [configuration.md](https://github.com/eddiectc/acode/blob/main/docs/configuration.md).
 - **Testing:** [testing-strategy.md](../testing-strategy.md) plus §5 here.
 - **Definition of done:** [project definition of done](../definition-of-done.md);
   feature criteria in §1.4.
@@ -536,7 +536,7 @@ resumable and inspectable.
 
 Budget rationale. A child has no turn cap of its own by default. Run budgets
 are unlimited unless set ([README](../../README.md#what-aharness-includes),
-[configuration §4](../configuration.md#4-which-limits-are-worth-configuring)),
+[configuration §4](https://github.com/eddiectc/acode/blob/main/docs/configuration.md#4-which-limits-are-worth-configuring)),
 and a fixed child cap would contradict that rule while adding a constant an
 operator cannot see or tune. Two bounds remain, and they are not symmetric with
 the parent for a reason:

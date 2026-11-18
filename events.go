@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/eddiectc/aharness/internal/agent"
+	"github.com/eddiectc/aharness/agent"
 )
 
 // Event is one observation from a run. The interface is sealed; consumers

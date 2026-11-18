@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/eddiectc/aharness/internal/agent"
-	"github.com/eddiectc/aharness/internal/engine"
+	"github.com/eddiectc/aharness/agent"
+	"github.com/eddiectc/aharness/engine"
 )
 
 // StopReason is the typed terminal status of one run.

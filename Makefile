@@ -2,21 +2,14 @@ GO ?= go
 GOIMPORTS ?= goimports
 GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
-BIN := bin/aharness
-INSTALL_DIR ?= $(HOME)/.local/bin
 PKGS := ./...
 
-.PHONY: all build install test vet clean docs-check fmt-check lint vuln dod
+.PHONY: all build test vet clean docs-check fmt-check lint vuln dod
 
 all: build test
 
 build:
-	mkdir -p bin
-	$(GO) build -trimpath -o $(BIN) ./cmd/aharness
-
-install: build
-	mkdir -p $(INSTALL_DIR)
-	install -m 0755 $(BIN) $(INSTALL_DIR)/aharness
+	$(GO) build ./...
 
 test:
 	$(GO) test -race -count=1 $(PKGS)
@@ -50,7 +43,7 @@ vuln:
 dod: docs-check fmt-check vet lint test build vuln
 	@echo "Automated definition-of-done checks passed."
 	@echo "Manual checks still apply: requested behavior, clean cutover, edge"
-	@echo "cases, real-provider smokes, and the actual UI/CLI surface."
+	@echo "cases, real-provider smokes, and the public API surface."
 	@echo "See docs/definition-of-done.md."
 
 docs-check:
