@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `aharness.EventView` and `ViewEvent` project every event to a flat,
+  JSON-tagged struct with a stable `kind` discriminator, so a host can forward
+  events over SSE or a structured log without a type switch. Tests cover every
+  concrete event and the stable JSON shape.
 - `aharness.ValidEffort` delegates to `model.ValidReasoningEffort`, so a
   facade-only settings path can validate an effort without importing the model
   package.
