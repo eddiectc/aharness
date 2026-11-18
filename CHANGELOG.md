@@ -8,6 +8,17 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-11-18
+
+This is the host-surface expansion planned after `v0.1.0`. It adds required
+engine identity, root-only tool grants, host read APIs, per-child outcomes,
+steering identities, catalog validation and pricing helpers, and a
+serialisable event view. The module is still pre-1.0, so this minor release
+contains breaking changes for direct component-package hosts and for
+`Run.Steer`/`Run.SteerChild`; every item under **Changed** or **Removed** with a
+**Migration** note states what to change. The session schema remains `2`,
+existing logs need no migration, and there are no new dependencies.
+
 ### Added
 
 - `aharness.EventView` and `ViewEvent` project every event to a flat,
@@ -18,9 +29,8 @@ changes are called out under **Changed** and **Removed**.
   facade-only settings path can validate an effort without importing the model
   package.
 - `Pricing.WorstCase` returns a conservative ceiling at the highest positive
-  rate, rounded up, and reports overflow/unavailability. `Pricing.Cost` now
-  rejects the final-add overflow that previously wrapped near `MaxInt64`.
-  Pricing remains observational, not a billing authority.
+  rate, rounded up, and reports overflow/unavailability. Pricing remains
+  observational, not a billing authority.
 - `tools.Name*` constants and `tools.NamesFor(version, exclude...)` expose the
   stable built-in names and version-aware name lists; `NamesWithout` stays.
 - `State.TotalUsage` (agent and facade) returns parent plus folded delegated
@@ -117,9 +127,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
-These changes need action from hosts that use the component packages
-directly; the root facade absorbs most of them. Every item marked
-**Migration:** is breaking for a pre-1.0 component host.
+These changes need action from hosts that use the component packages directly
+or that call `Run.Steer`/`Run.SteerChild`. Every item marked **Migration:** is
+a breaking change in this pre-1.0 minor; the note states the replacement.
 
 - `engine.Spec.UserAgent` is now required. `engine.Open` rejects an empty or
   whitespace-only identity with a `ConfigError`, fills
@@ -130,15 +140,6 @@ directly; the root facade absorbs most of them. Every item marked
   `Spec.ToolOptions.UserAgent` empty and let the engine fill it, or set it to
   the identical value. Facade hosts already pass the required
   `Config.UserAgent` and need no change.
-- `engine.Spec.ExecutionGrant` and `ExecutionGrantSet` were removed in favor of
-  the recorded `Spec.RootGrant`.
-  **Migration:** replace `ExecutionGrant`/`ExecutionGrantSet` with
-  `Spec.RootGrant`. There is no Set flag: `nil` keeps the session grant, and a
-  non-nil value (including an empty slice) narrows the root and is recorded as
-  `session_start.root_tools`. Facade hosts use `ToolsConfig.RootGrant`. The
-  restriction is now recorded and inherited, unlike the process-only execution
-  grant: resume inherits the recorded grant, and to change it use `Fork`
-  rather than an explicit mismatching resume.
 - `agent.Config.Steering` is `<-chan agent.SteeringLine`, and
   `engine.BuildRunner`/`BuildRunnerWithSpawner` take that channel.
   `agent.Spawner.SteerChild` takes a `SteeringLine`, and `Run.Steer`/
@@ -179,6 +180,24 @@ directly; the root facade absorbs most of them. Every item marked
   `HarnessVersion`, `RunTimeout` ↔ `SessionTimeout`, and tri-state versus
   string effort, plus the root/child event split, the engine host read surface,
   and the new recorded `root_tools` field.
+
+### Removed
+
+- `engine.Spec.ExecutionGrant` and `ExecutionGrantSet` were removed in favor of
+  the recorded `Spec.RootGrant`.
+  **Migration:** replace `ExecutionGrant`/`ExecutionGrantSet` with
+  `Spec.RootGrant`. There is no Set flag: `nil` keeps the session grant, and a
+  non-nil value (including an empty slice) narrows the root and is recorded as
+  `session_start.root_tools`. Facade hosts use `ToolsConfig.RootGrant`. The
+  restriction is now recorded and inherited, unlike the process-only execution
+  grant: resume inherits the recorded grant, and to change it use `Fork`
+  rather than an explicit mismatching resume.
+
+### Fixed
+
+- `Pricing.Cost` now rejects the final rounded add that could wrap near
+  `MaxInt64` and still report `ok=true`. A cost near the overflow boundary is
+  reported as unavailable instead of a negative or wrapped estimate.
 
 ## [v0.1.0] - 2026-11-18
 
@@ -241,5 +260,6 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[v0.2.0]: https://github.com/eddiectc/aharness/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/eddiectc/aharness/compare/v0.0.1...v0.1.0
 [v0.0.1]: https://github.com/eddiectc/aharness/releases/tag/v0.0.1

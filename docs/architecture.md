@@ -769,9 +769,13 @@ Behavioral rules that the field lists do not show:
   caller-implemented interfaces. A new capability is a new optional interface or
   a `Config` field. `StreamHandler` is a struct, so an added callback field is
   additive.
-- Renaming or removing an exported identifier requires a major module version.
-  `SchemaVersion` is independent of the module version and stays 2 across
-  library minor versions.
+- Renaming or removing an exported identifier, or changing an exported method
+  signature, is breaking. Before `v1.0.0`, a minor release may contain such a
+  change, including on the root facade; it is listed under **Changed** or
+  **Removed** in `CHANGELOG.md` with a migration step, and a patch release
+  never breaks the surface. From `v1.0.0`, such a change requires a major
+  module version. `SchemaVersion` is independent of the module version and
+  stays 2 across library minor versions.
 - A session that records `custom_tools` cannot be resumed without matching
   `Tools.Extra`; it fails with `ErrToolMismatch` rather than replaying a
   different contract. A recorded toolset version the binary does not support is

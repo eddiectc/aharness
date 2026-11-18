@@ -37,7 +37,7 @@ This module requires Go 1.27.3 or later. Add it to an existing module; it ships
 no binary and needs no separate installation:
 
 ```sh
-go get github.com/eddiectc/aharness@v0.0.1
+go get github.com/eddiectc/aharness@v0.2.0
 ```
 
 Release history is in [CHANGELOG.md](CHANGELOG.md).

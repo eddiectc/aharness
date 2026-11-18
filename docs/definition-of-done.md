@@ -43,9 +43,12 @@ reference, never the dated record.
       session store, background or nested delegation, structured-output DTOs,
       prompt templating, or public TUI package.
 - [ ] **Public API compatibility.** Adding a field or event is backward
-      compatible; adding a method to `Model` or `Tool` is not. Renaming or
-      removing an exported identifier requires a major module version, and the
-      session schema version stays independent of the module version.
+      compatible; adding a method to `Model` or `Tool` is not. Before `v1.0.0`,
+      a minor release may rename or remove an exported identifier or change an
+      exported method signature; the change is listed under **Changed** or
+      **Removed** in `CHANGELOG.md` with a migration step. From `v1.0.0` such a
+      change requires a major module version. The session schema version stays
+      independent of the module version.
 - [ ] **Two API levels.** The root facade copies DTOs at the boundary and does
       not expose component types as aliases. A component package does not import
       the root facade.
