@@ -38,6 +38,85 @@ func (m *interruptibleModel) Complete(ctx context.Context, _ aharness.Request) (
 	return aharness.Response{Text: "after interrupt", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true}}, nil
 }
 
+func TestRunOnEventMatchesStartOrder(t *testing.T) {
+	tool := aharness.Tool{
+		Name:        "lookup",
+		Description: "Look up a record.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string"}},"required":["intent"],"additionalProperties":false}`),
+		Run: func(context.Context, aharness.ToolCall) (aharness.ToolResult, error) {
+			return aharness.TextResult("record"), nil
+		},
+	}
+	responses := func() []aharness.Response {
+		return []aharness.Response{
+			{
+				ToolCalls:    []aharness.ToolCall{{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"intent":"look it up"}`)}},
+				FinishReason: aharness.FinishToolCalls,
+				Usage:        aharness.Usage{InputTokens: 2, OutputTokens: 1, Reported: true},
+			},
+			{Text: "done", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 3, OutputTokens: 2, Reported: true}},
+		}
+	}
+	newAgent := func() *aharness.Agent {
+		ag, err := aharness.New(context.Background(), aharness.Config{
+			Workspace: t.TempDir(),
+			StateDir:  t.TempDir(),
+			UserAgent: "aharness-test/1.0",
+			Model:     testModel(&scriptedModel{responses: responses()}),
+			Tools:     &aharness.ToolsConfig{Extra: []aharness.Tool{tool}},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		t.Cleanup(func() { _ = ag.Close() })
+		return ag
+	}
+
+	startAgent := newAgent()
+	run, err := startAgent.Start(context.Background(), "work", aharness.RunOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	var startResult aharness.Result
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("event error: %v", err)
+		}
+		if ev, ok := ev.(aharness.RunFinished); ok {
+			startResult = ev.Result
+		}
+	}
+
+	runAgent := newAgent()
+	var hookKinds []string
+	var hookResult aharness.Result
+	result, err := runAgent.Run(context.Background(), "work", aharness.RunOptions{
+		OnEvent: func(ev aharness.Event) {
+			hookKinds = append(hookKinds, fmt.Sprintf("%T", ev))
+			if ev, ok := ev.(aharness.RunFinished); ok {
+				hookResult = ev.Result
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Join(hookKinds, ",") != "aharness.RunStarted,aharness.MessageRecorded,aharness.ResponseCompleted,aharness.ToolStarted,aharness.ToolCompleted,aharness.ResponseCompleted,aharness.RunFinished" {
+		t.Fatalf("OnEvent kinds = %v", hookKinds)
+	}
+	if hookKinds[len(hookKinds)-1] != "aharness.RunFinished" {
+		t.Fatalf("last OnEvent = %s", hookKinds[len(hookKinds)-1])
+	}
+	if hookResult.Status != startResult.Status || hookResult.RunTurns != startResult.RunTurns ||
+		hookResult.RunUsage != startResult.RunUsage || hookResult.FinalText != startResult.FinalText {
+		t.Fatalf("hook result = %+v, start result = %+v", hookResult, startResult)
+	}
+	if result.Status != startResult.Status || result.RunTurns != startResult.RunTurns ||
+		result.RunUsage != startResult.RunUsage || result.FinalText != startResult.FinalText {
+		t.Fatalf("Run result = %+v, start result = %+v", result, startResult)
+	}
+}
+
 func TestInterruptContinuesRun(t *testing.T) {
 	model := newInterruptibleModel()
 	ag, _, _ := newTestAgent(t, nil, model)

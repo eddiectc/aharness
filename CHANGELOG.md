@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `RunOptions.OnEvent` receives every display event consumed by the blocking
+  `Run`, in order, without changing the result. `Start` ignores it; a blocking
+  consumer should use `Start`.
 - `tools.CodeDetailsTooLarge` reports a structured details payload over its
   documented cap; delegate details no longer collapse into `internal`.
 - `aharness.Subagent*` constants name every `SubagentFinished.Status` and

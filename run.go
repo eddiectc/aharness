@@ -27,6 +27,10 @@ type RunOptions struct {
 	MaxTotalTokens int
 	// Timeout overrides Config.RunTimeout for this run.
 	Timeout time.Duration
+	// OnEvent receives every display event that the blocking Run consumes, in
+	// order. It is ignored by Start, must not block, and cannot change the run.
+	// A blocking consumer should use Start.
+	OnEvent func(Event)
 }
 
 // Run is one in-flight or terminal run over an Agent's session.
@@ -75,6 +79,9 @@ func (a *Agent) Run(ctx context.Context, task string, opts RunOptions) (Result, 
 		if err != nil {
 			iterErr = err
 			continue
+		}
+		if opts.OnEvent != nil {
+			opts.OnEvent(ev)
 		}
 		if finished, ok := ev.(RunFinished); ok {
 			result = finished.Result
