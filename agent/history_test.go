@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,45 @@ func TestHistoryMultipleRunsAndToolPairing(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("history missing %q\n%s", want, joined)
 		}
+	}
+}
+
+func TestHistoryNoticeKinds(t *testing.T) {
+	events := []session.Event{
+		histEvent(t, 1, session.TypeSessionStart, 0, sessionStartData{
+			Workspace: "/w", PromptVersion: PromptVersion, ToolsetVersion: tools.Version,
+			ParentSession: "parent", ParentSeq: 3,
+		}),
+		histEvent(t, 2, session.TypeUserMessage, 0, userMessageData{Text: "hint", Source: sourceInterruptHint}),
+		histEvent(t, 3, session.TypeInterrupt, 0, interruptData{Operation: operationModel, Reason: "stop", PartialText: "part"}),
+		histEvent(t, 4, session.TypeError, 0, errorData{Class: errorClassHTTP, Message: "boom", PartialText: "part"}),
+		histEvent(t, 5, session.TypeLimit, 0, limitData{Kind: limitMaxTurns, Configured: 1, Observed: 1}),
+		histEvent(t, 6, session.TypeCompaction, 0, compactionData{BeforeTokens: 10, AfterTokens: 5, Policy: policyCompaction}),
+		histEvent(t, 7, session.TypeSessionRepair, 0, session.RepairData{DiscardedBytes: 4, Reason: "torn"}),
+		histEvent(t, 8, session.TypeModelRetry, 0, modelRetryData{Attempt: 1, Class: retryClassHTTP}),
+	}
+	items, err := History(events)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	var kinds []NoticeKind
+	for _, item := range items {
+		if item.Kind == HistoryNotice {
+			kinds = append(kinds, item.NoticeKind)
+		}
+	}
+	want := []NoticeKind{
+		NoticeWarning,
+		NoticeInterrupt,
+		NoticeInterrupt, NoticeInterrupt,
+		NoticeError, NoticeError,
+		NoticeLimit,
+		NoticeCompaction,
+		NoticeRepair,
+		NoticeRetry,
+	}
+	if !slices.Equal(kinds, want) {
+		t.Fatalf("notice kinds = %v, want %v", kinds, want)
 	}
 }
 

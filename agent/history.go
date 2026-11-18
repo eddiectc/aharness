@@ -54,14 +54,16 @@ type HistoryItem struct {
 	// Details is the structured tool result payload recorded in the log. The
 	// host decodes a delegate result from it to render the recorded per-task
 	// table after a resume.
-	Details  json.RawMessage
-	Status   StopReason
-	Reason   string
-	Model    string
-	Dialect  string
-	Duration time.Duration
-	Turns    int
-	Usage    model.Usage
+	Details json.RawMessage
+	// NoticeKind classifies a HistoryNotice item; empty for other kinds.
+	NoticeKind NoticeKind
+	Status     StopReason
+	Reason     string
+	Model      string
+	Dialect    string
+	Duration   time.Duration
+	Turns      int
+	Usage      model.Usage
 }
 
 // History reconstructs a capped, display-only transcript from v2 events. It
@@ -95,8 +97,9 @@ func (b *historyBuilder) add(ev session.Event) error {
 		}
 		if data.ParentSession != "" {
 			b.append(HistoryItem{
-				Kind: HistoryNotice,
-				Text: fmt.Sprintf("forked from session %s at seq %d", data.ParentSession, data.ParentSeq),
+				Kind:       HistoryNotice,
+				NoticeKind: NoticeWarning,
+				Text:       fmt.Sprintf("forked from session %s at seq %d", data.ParentSession, data.ParentSeq),
 			})
 		}
 	case session.TypeRunStart:
@@ -133,8 +136,10 @@ func (b *historyBuilder) add(ev session.Event) error {
 		}
 		text := capText(cleanText(data.Text), maxHistoryItemBytes)
 		switch data.Source {
-		case sourceInterruptHint, sourceContinuationHint, sourceStuckHint:
-			b.append(HistoryItem{Kind: HistoryNotice, Run: b.run, Turn: ev.Turn, Text: text, Source: data.Source})
+		case sourceInterruptHint:
+			b.append(HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeInterrupt, Run: b.run, Turn: ev.Turn, Text: text, Source: data.Source})
+		case sourceContinuationHint, sourceStuckHint:
+			b.append(HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeWarning, Run: b.run, Turn: ev.Turn, Text: text, Source: data.Source})
 		default:
 			b.append(HistoryItem{Kind: HistoryUser, Run: b.run, Turn: ev.Turn, Source: data.Source, Text: text})
 		}
@@ -193,9 +198,9 @@ func (b *historyBuilder) add(ev session.Event) error {
 		if data.Reason != "" {
 			text += ": " + data.Reason
 		}
-		b.append(HistoryItem{Kind: HistoryNotice, Run: b.run, Turn: ev.Turn, Text: capText(cleanText(text), maxErrorEventBytes)})
+		b.append(HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeInterrupt, Run: b.run, Turn: ev.Turn, Text: capText(cleanText(text), maxErrorEventBytes)})
 		if data.PartialText != "" {
-			b.appendPartial(ev.Turn, "interrupted", data.PartialText)
+			b.appendPartial(ev.Turn, NoticeInterrupt, "interrupted", data.PartialText)
 		}
 	case session.TypeError:
 		var data errorData
@@ -203,9 +208,9 @@ func (b *historyBuilder) add(ev session.Event) error {
 			return err
 		}
 		text := fmt.Sprintf("%s error: %s", data.Class, data.Message)
-		b.append(HistoryItem{Kind: HistoryNotice, Run: b.run, Turn: ev.Turn, Text: capText(cleanText(text), maxErrorEventBytes)})
+		b.append(HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeError, Run: b.run, Turn: ev.Turn, Text: capText(cleanText(text), maxErrorEventBytes)})
 		if data.PartialText != "" {
-			b.appendPartial(ev.Turn, "failed", data.PartialText)
+			b.appendPartial(ev.Turn, NoticeError, "failed", data.PartialText)
 		}
 	case session.TypeLimit:
 		var data limitData
@@ -213,10 +218,11 @@ func (b *historyBuilder) add(ev session.Event) error {
 			return err
 		}
 		b.append(HistoryItem{
-			Kind: HistoryNotice,
-			Run:  b.run,
-			Turn: ev.Turn,
-			Text: capText(fmt.Sprintf("limit %s: configured %d, observed %d", data.Kind, data.Configured, data.Observed), maxErrorEventBytes),
+			Kind:       HistoryNotice,
+			NoticeKind: NoticeLimit,
+			Run:        b.run,
+			Turn:       ev.Turn,
+			Text:       capText(fmt.Sprintf("limit %s: configured %d, observed %d", data.Kind, data.Configured, data.Observed), maxErrorEventBytes),
 		})
 	case session.TypeCompaction:
 		var data compactionData
@@ -224,9 +230,10 @@ func (b *historyBuilder) add(ev session.Event) error {
 			return err
 		}
 		b.append(HistoryItem{
-			Kind: HistoryNotice,
-			Run:  b.run,
-			Turn: ev.Turn,
+			Kind:       HistoryNotice,
+			NoticeKind: NoticeCompaction,
+			Run:        b.run,
+			Turn:       ev.Turn,
 			Text: capText(fmt.Sprintf("context compacted (%s): %d -> %d tokens, %d tool results elided",
 				data.Policy, data.BeforeTokens, data.AfterTokens, data.ElidedResults), maxErrorEventBytes),
 		})
@@ -236,10 +243,11 @@ func (b *historyBuilder) add(ev session.Event) error {
 			return err
 		}
 		b.append(HistoryItem{
-			Kind: HistoryNotice,
-			Run:  b.run,
-			Turn: ev.Turn,
-			Text: capText(fmt.Sprintf("session log repaired: discarded %d bytes (%s)", data.DiscardedBytes, data.Reason), maxErrorEventBytes),
+			Kind:       HistoryNotice,
+			NoticeKind: NoticeRepair,
+			Run:        b.run,
+			Turn:       ev.Turn,
+			Text:       capText(fmt.Sprintf("session log repaired: discarded %d bytes (%s)", data.DiscardedBytes, data.Reason), maxErrorEventBytes),
 		})
 	case session.TypeModelRetry:
 		var data modelRetryData
@@ -253,7 +261,7 @@ func (b *historyBuilder) add(ev session.Event) error {
 		if data.DelayMS > 0 {
 			text += fmt.Sprintf(" after %dms", data.DelayMS)
 		}
-		b.append(HistoryItem{Kind: HistoryNotice, Run: b.run, Turn: ev.Turn, Text: text})
+		b.append(HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeRetry, Run: b.run, Turn: ev.Turn, Text: text})
 	case session.TypeFinal, session.TypeModelRequest:
 		// final text duplicates the last model_response; requests are debug
 		// payloads and are not part of the display transcript.
@@ -261,13 +269,14 @@ func (b *historyBuilder) add(ev session.Event) error {
 	return nil
 }
 
-func (b *historyBuilder) appendPartial(turn int, state, text string) {
+func (b *historyBuilder) appendPartial(turn int, kind NoticeKind, state, text string) {
 	capped := capText(cleanText(text), maxHistoryItemBytes)
 	b.append(HistoryItem{
-		Kind: HistoryNotice,
-		Run:  b.run,
-		Turn: turn,
-		Text: fmt.Sprintf("partial assistant text (%s, %d bytes):\n%s", state, len(text), capped),
+		Kind:       HistoryNotice,
+		NoticeKind: kind,
+		Run:        b.run,
+		Turn:       turn,
+		Text:       fmt.Sprintf("partial assistant text (%s, %d bytes):\n%s", state, len(text), capped),
 	})
 }
 
@@ -354,6 +363,6 @@ func (b *historyBuilder) finish() []HistoryItem {
 		return b.items
 	}
 	items := make([]HistoryItem, 0, len(b.items)+1)
-	items = append(items, HistoryItem{Kind: HistoryNotice, Text: "older history omitted by the display cap"})
+	items = append(items, HistoryItem{Kind: HistoryNotice, NoticeKind: NoticeWarning, Text: "older history omitted by the display cap"})
 	return append(items, b.items...)
 }

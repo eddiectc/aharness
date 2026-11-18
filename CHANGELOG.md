@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `agent.HistoryItem.NoticeKind` preserves retry, compaction, limit,
+  interrupt, repair, warning, and error affinity when a transcript is replayed.
 - `model.ErrAuth` (aliased as `aharness.ErrAuth`) and
   `HTTPError.Unauthorized` classify 401/403 responses, including through a
   `ProviderError`; 429 and 5xx retry behavior is unchanged.
