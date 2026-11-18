@@ -171,6 +171,48 @@ func TestEveryCurrentToolDeclaresAnIntent(t *testing.T) {
 	}
 }
 
+func TestNamesForVersionAndExclusions(t *testing.T) {
+	for _, version := range []string{"toolset-v0", "toolset-v1", Version} {
+		got, err := NamesFor(version)
+		if err != nil {
+			t.Fatalf("NamesFor(%q): %v", version, err)
+		}
+		schemas, err := SchemasFor(version)
+		if err != nil {
+			t.Fatalf("SchemasFor(%q): %v", version, err)
+		}
+		want := make([]string, len(schemas))
+		for i, schema := range schemas {
+			want[i] = schema.Name
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("NamesFor(%q) = %v, want %v", version, got, want)
+		}
+	}
+	got, err := NamesFor(Version, NameDelegate, NameTodo)
+	if err != nil {
+		t.Fatalf("NamesFor exclusions: %v", err)
+	}
+	for _, name := range got {
+		if name == NameDelegate || name == NameTodo {
+			t.Fatalf("exclusion kept %q in %v", name, got)
+		}
+	}
+	if _, err := NamesFor("toolset-future"); err == nil {
+		t.Fatal("NamesFor accepted an unknown version")
+	}
+	without, err := NamesFor(Version, NameDelegate)
+	if err != nil {
+		t.Fatalf("NamesFor: %v", err)
+	}
+	if !slices.Equal(NamesWithout(NameDelegate), without) {
+		t.Fatalf("NamesWithout = %v, NamesFor = %v", NamesWithout(NameDelegate), without)
+	}
+	if NameReadFile == "" || NameDelegate != "delegate" || NameRunCommand != "run_command" {
+		t.Fatal("stable tool-name constants changed")
+	}
+}
+
 func TestSchemasForToolsetVersions(t *testing.T) {
 	if Version != "toolset-v2" {
 		t.Fatalf("Version = %q, want toolset-v2", Version)

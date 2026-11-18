@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `tools.Name*` constants and `tools.NamesFor(version, exclude...)` expose the
+  stable built-in names and version-aware name lists; `NamesWithout` stays.
 - `State.TotalUsage` (agent and facade) returns parent plus folded delegated
   child usage. The facade `State` also exposes the folded subagent totals.
 - `session.CreateNew` creates a log with a generated canonical UUIDv7 ID;

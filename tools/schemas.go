@@ -249,6 +249,19 @@ var v2Schemas = append(append([]model.ToolSchema(nil), v1Schemas...), schema("de
   "additionalProperties": false
 }`))
 
+// Stable tool names. They match the schemas of every recorded toolset version
+// that defines the tool.
+const (
+	NameReadFile   = "read_file"
+	NameEditFile   = "edit_file"
+	NameSearch     = "search"
+	NameRunCommand = "run_command"
+	NameWebSearch  = "web_search"
+	NameWebFetch   = "web_fetch"
+	NameTodo       = "todo"
+	NameDelegate   = "delegate"
+)
+
 // Schemas returns a copy of the current (toolset-v2) tool declarations.
 func Schemas() []model.ToolSchema {
 	return append([]model.ToolSchema(nil), v2Schemas...)
@@ -265,21 +278,34 @@ func Names() []string {
 
 // NamesWithout returns the current tool names except the excluded ones.
 func NamesWithout(excluded ...string) []string {
-	names := Names()
-	kept := make([]string, 0, len(names))
-	for _, name := range names {
+	names, err := NamesFor(Version, excluded...)
+	if err != nil {
+		return nil
+	}
+	return names
+}
+
+// NamesFor returns the tool names declared by version except the excluded
+// ones, in declaration order. An unknown version is an error.
+func NamesFor(version string, exclude ...string) ([]string, error) {
+	schemas, err := SchemasFor(version)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(schemas))
+	for _, schema := range schemas {
 		skip := false
-		for _, drop := range excluded {
-			if name == drop {
+		for _, name := range exclude {
+			if schema.Name == name {
 				skip = true
 				break
 			}
 		}
 		if !skip {
-			kept = append(kept, name)
+			out = append(out, schema.Name)
 		}
 	}
-	return kept
+	return out, nil
 }
 
 // SchemasFor returns a copy of the tool declarations for a recorded toolset
