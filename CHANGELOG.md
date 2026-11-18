@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `tools.Workspace.Contains` and `Workspace.LocalDisplayPath` apply the
+  workspace containment, symlink, and `.git` policy without a second path
+  implementation in the host.
 - `engine.ListSummaries` (with `ListOptions`/`Summary`) lists sessions newest
   first with workspace, limit, head-read, and child filters. `agent.Summarize`
   now reports `CreatedAt`; `UpdatedAt` comes from file mtime and is advisory.

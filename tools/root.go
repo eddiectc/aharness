@@ -165,6 +165,73 @@ func (w *Workspace) resolveDir(rel string) (string, error) {
 	return filepath.Join(w.dir, rel), nil
 }
 
+// Contains reports whether p is the workspace root or an existing path inside
+// it. The check resolves symlinks with the same containment rule as the file
+// tools: a lexically inside path whose symlink resolves outside is not
+// contained. A missing path, a .git component, or a path outside the workspace
+// reports false.
+func (w *Workspace) Contains(p string) (bool, error) {
+	if p == "" {
+		return false, nil
+	}
+	abs := p
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(w.dir, abs)
+	}
+	abs = filepath.Clean(abs)
+	rel, err := filepath.Rel(w.dir, abs)
+	if err != nil || !filepath.IsLocal(rel) {
+		return false, nil
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == ".git" {
+			return false, nil
+		}
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("resolve %s: %w", p, err)
+	}
+	resolved, err := filepath.Rel(w.dir, real)
+	if err != nil || !filepath.IsLocal(resolved) {
+		return false, nil
+	}
+	return true, nil
+}
+
+// LocalDisplayPath reports whether p is a workspace-relative path the display
+// layer may read, and returns its normalized relative form. It applies the
+// display read policy: local, no .git component, no symlink component, and an
+// existing entry. A relative input is resolved against the workspace.
+func (w *Workspace) LocalDisplayPath(p string) (string, bool) {
+	if p == "" {
+		return "", false
+	}
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(w.dir, p)
+		if err != nil {
+			return "", false
+		}
+		p = rel
+	}
+	p = filepath.Clean(p)
+	if !filepath.IsLocal(p) {
+		return "", false
+	}
+	for _, part := range strings.Split(p, string(filepath.Separator)) {
+		if part == ".git" {
+			return "", false
+		}
+	}
+	if _, err := w.lstatComponents(p); err != nil {
+		return "", false
+	}
+	return p, true
+}
+
 // DisplayEntry is one sanitized directory entry exposed to a host file
 // picker.
 type DisplayEntry struct {

@@ -211,6 +211,116 @@ func TestWorkspaceListDisplayDirEmpty(t *testing.T) {
 	}
 }
 
+func TestWorkspaceContainsAndLocalDisplayPath(t *testing.T) {
+	ws, dir := newTestWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	file := filepath.Join(dir, "sub", "file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	outside := t.TempDir()
+	escape := filepath.Join(dir, "escape")
+	if err := os.Symlink(outside, escape); err != nil {
+		t.Fatalf("symlink escape: %v", err)
+	}
+	insideLink := filepath.Join(dir, "inside-link")
+	if err := os.Symlink(file, insideLink); err != nil {
+		t.Fatalf("symlink inside: %v", err)
+	}
+	gitFile := filepath.Join(dir, ".git", "config")
+	if err := os.WriteFile(gitFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	contains := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"root", ".", true},
+		{"root absolute", dir, true},
+		{"inside", filepath.Join("sub", "file.txt"), true},
+		{"inside absolute", file, true},
+		{"directory", "sub", true},
+		{"outside", filepath.Join(dir, ".."), false},
+		{"outside absolute", "/etc/passwd", false},
+		{"missing", filepath.Join(dir, "missing"), false},
+		{"symlink inside", insideLink, true},
+		{"symlink escape", escape, false},
+		{"git", gitFile, false},
+	}
+	for _, tc := range contains {
+		t.Run("contains/"+tc.name, func(t *testing.T) {
+			got, err := ws.Contains(tc.path)
+			if err != nil {
+				t.Fatalf("Contains(%q): %v", tc.path, err)
+			}
+			if got != tc.want {
+				t.Fatalf("Contains(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+
+	display := []struct {
+		name string
+		path string
+		want string
+		ok   bool
+	}{
+		{"root", ".", ".", true},
+		{"root absolute", dir, ".", true},
+		{"inside", "sub/file.txt", "sub/file.txt", true},
+		{"inside absolute", file, "sub/file.txt", true},
+		{"outside", "../x", "", false},
+		{"outside absolute", "/etc/passwd", "", false},
+		{"missing", "missing", "", false},
+		{"symlink", insideLink, "", false},
+		{"symlink escape", escape, "", false},
+		{"git", ".git/config", "", false},
+		{"empty", "", "", false},
+	}
+	for _, tc := range display {
+		t.Run("display/"+tc.name, func(t *testing.T) {
+			got, ok := ws.LocalDisplayPath(tc.path)
+			if got != tc.want || ok != tc.ok {
+				t.Fatalf("LocalDisplayPath(%q) = %q, %v; want %q, %v", tc.path, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func FuzzWorkspaceContains(f *testing.F) {
+	for _, seed := range []string{"", ".", "a", "..", "../x", "/etc/passwd", ".git/config", "sub/../a"} {
+		f.Add(seed)
+	}
+	ws, err := OpenWorkspace(f.TempDir())
+	if err != nil {
+		f.Fatalf("OpenWorkspace: %v", err)
+	}
+	f.Cleanup(func() { _ = ws.Close() })
+	f.Fuzz(func(t *testing.T, p string) {
+		inside, err := ws.Contains(p)
+		if err != nil {
+			return
+		}
+		if !inside {
+			return
+		}
+		rel, relErr := filepath.Rel(ws.Dir(), p)
+		if relErr == nil && filepath.IsAbs(p) && !filepath.IsLocal(rel) {
+			t.Fatalf("Contains(%q) accepted a path outside the workspace", p)
+		}
+		if _, ok := ws.LocalDisplayPath(p); ok && !filepath.IsLocal(p) && filepath.IsAbs(p) {
+			t.Fatalf("LocalDisplayPath(%q) accepted a non-local path", p)
+		}
+	})
+}
+
 func TestCloseThenUseFails(t *testing.T) {
 	ws, _ := newTestWorkspace(t)
 	mustWriteFile(t, ws.Dir(), "f.txt", []byte("x"))
