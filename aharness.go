@@ -28,6 +28,10 @@ type Config struct {
 	// Model is the model implementation and identity. Required for New. On
 	// Resume/Fork a zero Spec inherits the recorded identity.
 	Model *ModelConfig
+	// AgentName labels the root agent definition. It is recorded in
+	// session_start.agent and passed to tool policy and tool calls. Empty keeps
+	// the root unnamed; Resume/Fork inherit it unless set.
+	AgentName string
 	// UserAgent identifies the host on outbound tool requests, for example
 	// "acode/1.2.0". Required.
 	UserAgent string
@@ -179,6 +183,7 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 		Dialect:         string(modelCfg.Spec.Dialect),
 		BaseURL:         modelCfg.Spec.BaseURL,
 		Model:           modelCfg.Spec.ID,
+		Agent:           cfg.AgentName,
 		ThinkingEffort:  cfg.ThinkingEffort,
 		Agents:          promptAgents(cfg.Tools),
 		CustomTools:     setup.custom,

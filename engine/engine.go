@@ -420,6 +420,9 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	resolved := spec
 	resolved.PromptVersion = state.PromptVersion
 	resolved.ToolsetVersion = state.ToolsetVersion
+	if spec.Agent == "" {
+		resolved.Agent = state.Agent
+	}
 	explicitModel := spec.Model != ""
 	if !explicitModel {
 		resolved.Model = state.Model

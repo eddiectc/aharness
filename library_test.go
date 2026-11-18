@@ -80,6 +80,70 @@ func newTestAgent(t *testing.T, tools *aharness.ToolsConfig, model aharness.Mode
 	return ag, workspace, stateDir
 }
 
+func TestAgentNameIsRecordedVisibleAndInherited(t *testing.T) {
+	called := 0
+	var policyAgent string
+	workspace, stateDir := t.TempDir(), t.TempDir()
+	model := &scriptedModel{responses: []aharness.Response{
+		{
+			ToolCalls:    []aharness.ToolCall{{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"id":"1"}`)}},
+			FinishReason: aharness.FinishToolCalls,
+			Usage:        aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+		},
+		{Text: "done", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true}},
+	}}
+	ag, err := aharness.New(context.Background(), aharness.Config{
+		Workspace: workspace,
+		StateDir:  stateDir,
+		AgentName: "root-analyst",
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(model),
+		Tools:     customTools(t, &called),
+		Authorize: func(_ context.Context, req aharness.ToolRequest) error {
+			policyAgent = req.Agent
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = ag.Close() }()
+	state, err := ag.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.AgentName != "root-analyst" {
+		t.Fatalf("State.AgentName = %q", state.AgentName)
+	}
+	if _, err := ag.Run(context.Background(), "look it up", aharness.RunOptions{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if policyAgent != "root-analyst" {
+		t.Fatalf("policy Agent = %q, want root-analyst", policyAgent)
+	}
+	sessionID := ag.ID()
+	if err := ag.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	resumed, err := aharness.Resume(context.Background(), aharness.Config{
+		StateDir:  stateDir,
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(&scriptedModel{}),
+		Tools:     customTools(t, &called),
+	}, sessionID)
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	defer func() { _ = resumed.Close() }()
+	resumedState, err := resumed.State()
+	if err != nil {
+		t.Fatalf("resumed State: %v", err)
+	}
+	if resumedState.AgentName != "root-analyst" {
+		t.Fatalf("resumed AgentName = %q, want inherited root-analyst", resumedState.AgentName)
+	}
+}
+
 func TestRunCustomToolAndState(t *testing.T) {
 	called := 0
 	model := &scriptedModel{responses: []aharness.Response{

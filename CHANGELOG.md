@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `Config.AgentName` names the root agent. It is recorded in
+  `session_start.agent`, passed to tool policy and tool calls, inherited by
+  `Resume` and `Fork` when omitted, and exposed as `State.AgentName`.
 - `engine.Spec.UserAgent` is now required host identity. When
   `Spec.ToolOptions.UserAgent` is empty the engine fills it from the spec; a
   differing value is a `ConfigError` naming `ToolOptions.UserAgent`.

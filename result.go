@@ -83,6 +83,7 @@ type State struct {
 	Workspace        string
 	StateDir         string
 	Model            ModelSpec
+	AgentName        string
 	SystemPrompt     string
 	Tools            []ToolName
 	CustomTools      []ToolSchema
@@ -160,6 +161,7 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 			Pricing:         fromInternalPricing(state.Pricing),
 		},
 		SystemPrompt:   state.SystemPrompt,
+		AgentName:      state.Agent,
 		Limits:         fromInternalLimits(state.Limits),
 		Turns:          state.Turns,
 		Usage:          fromInternalUsage(state.Usage),
