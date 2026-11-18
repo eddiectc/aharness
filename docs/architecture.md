@@ -911,11 +911,13 @@ TUI, `-ui-json` protocol, sanitizer, and image handling.
 11. On termination of an initialized run, emit exactly one `final` event with
     the terminal status and the last assistant text emitted in this run, if any,
     then append `run_end` with the run and cumulative turns/usage, the folded
-    subagent turns/usage/cost, and the run duration. Sync and close the log, then remove
-    `<state>/work/<session-id>` best-effort; a cleanup failure is reported to the
-    host and does not change the terminal status. If the log write itself
-    fails, still attempt cleanup and return `internal_error` without claiming
-    durability.
+    subagent turns/usage/cost, and the run duration, and sync the log. The
+    engine owns the parent work directory, not the runner: it is reset before
+    the next `BuildRunner` and removed by `Host.Close` or
+    `Host.CleanupWork`. A delegated child removes its own work directory when
+    the child run ends. If the log write itself fails, return `internal_error`
+    without claiming durability; the next `BuildRunner` still resets the work
+    directory.
 
 The loop never batches multiple assistant turns, never skips a tool call, and
 never sends a tool result without a preceding call. Multiple tool calls execute
@@ -1116,10 +1118,12 @@ name; the boundary is external isolation. `TMPDIR` points at a harness-owned
 directory under the state dir, `<state>/work/<session-id>/tmp`, created with mode
 0700 when the session starts, because the host `/tmp` may be mounted `noexec`,
 size-limited, or cleaned while a long session runs.
-It is session scratch, not durable storage: the runner removes
-`<state>/work/<session-id>` after the session log is synced and closed, on every
-terminal path including signal and internal error. Cleanup is best-effort; if
-removal fails, the run reports the leftover path to the host and leaves it for
+It is session scratch, not durable storage: the engine resets
+`<state>/work/<session-id>` before each run and removes it at `Host.Close` or
+`Host.CleanupWork`; a delegated child removes its own work directory when the
+child run ends. `Host.WorkDir` exposes the path and `Host.CleanupWork` is the
+idle-only explicit cleanup. Removal is best-effort; if
+removal fails, the host reports the leftover path and leaves it for
 inspection, and because a child may leave directories without owner write
 permission, cleanup restores owner access before retrying once. The workspace is
 the intended place for durable task artifacts; child `TMPDIR` is ephemeral. An
@@ -1254,8 +1258,9 @@ it on every turn. Compaction never mutates the log.
   are UUIDv7 and are validated before a path is built. `run_command` gets a
   harness-owned `TMPDIR` at `<state>/work/<session-id>/tmp`, created with mode
   0700 at the start of every run; `HOME` is inherited. The whole
-  `<state>/work/<session-id>` subtree is removed at run start and best-effort at
-  run end; `sessions/` is the only durable record.
+  `<state>/work/<session-id>` subtree is reset at the next `BuildRunner` and
+  removed by `Host.Close` (or `Host.CleanupWork`); a delegated child removes its
+  own subtree when the child run ends. `sessions/` is the only durable record.
 - **Creation:** create the state directory with mode 0700 and the session file
   with `O_CREATE|O_RDWR|O_APPEND|O_EXCL`, mode 0600, then take an exclusive
   non-blocking `flock`. If the state directory is not writable, start-up fails

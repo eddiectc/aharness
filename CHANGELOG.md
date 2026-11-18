@@ -10,6 +10,11 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `engine.Host.WorkDir` and `engine.Host.CleanupWork` expose and remove the
+  per-session work directory. Cleanup is idle-only; the next `BuildRunner`
+  recreates it. Architecture now states the implemented contract: the engine
+  resets the parent work tree before a run and removes it on `Close`, while
+  delegated children remove their own on child end.
 - `ToolsConfig.RootGrant` narrows the tools offered and dispatched to the
   root session without changing `session_start.tools` or a child definition's
   grant. The effective root grant is recorded as the optional

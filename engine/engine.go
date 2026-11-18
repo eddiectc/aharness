@@ -793,6 +793,20 @@ func (h *Host) Workspace() string { return h.workspace.Dir() }
 // StateDir returns the durable state root.
 func (h *Host) StateDir() string { return h.spec.StateDir }
 
+// WorkDir returns the per-session work directory. It is created before each
+// run by BuildRunner and removed by Close.
+func (h *Host) WorkDir() string { return h.workDir }
+
+// CleanupWork removes the per-session work directory and its TMPDIR. Call it
+// only when no run is active; the next BuildRunner recreates the directory.
+// It is idempotent and safe after Close.
+func (h *Host) CleanupWork() error {
+	if err := removeTree(h.workDir); err != nil {
+		return fmt.Errorf("cleanup work directory: %w", err)
+	}
+	return nil
+}
+
 // Store exposes the session store to the engine's own runner wiring. The
 // facade never exposes it.
 func (h *Host) Store() *session.Store { return h.store }

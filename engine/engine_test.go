@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/eddiectc/aharness/agent"
@@ -99,6 +100,46 @@ func TestOpenRequiresUserAgentAndFillsToolOptions(t *testing.T) {
 	var configErr *ConfigError
 	if !errors.As(err, &configErr) || configErr.Field != "ToolOptions.UserAgent" {
 		t.Fatalf("mismatched ToolOptions.UserAgent: err = %v, want ConfigError", err)
+	}
+}
+
+func TestCleanupWorkRemovesAndBuildRunnerRecreates(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	if _, err := host.BuildRunner(RunSpec{}, nil, nil, nil); err != nil {
+		t.Fatalf("BuildRunner: %v", err)
+	}
+	workDir := host.WorkDir()
+	expected := filepath.Join(host.StateDir(), "work", host.ID())
+	if workDir != expected {
+		t.Fatalf("WorkDir = %q, want %q", workDir, expected)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "tmp")); err != nil {
+		t.Fatalf("tmp dir missing: %v", err)
+	}
+	// A child command may leave a read-only directory behind.
+	readOnly := filepath.Join(workDir, "locked")
+	if err := os.Mkdir(readOnly, 0o500); err != nil {
+		t.Fatalf("mkdir read-only: %v", err)
+	}
+	if err := host.CleanupWork(); err != nil {
+		t.Fatalf("CleanupWork: %v", err)
+	}
+	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
+		t.Fatalf("work dir still exists: %v", err)
+	}
+	if _, err := host.BuildRunner(RunSpec{}, nil, nil, nil); err != nil {
+		t.Fatalf("BuildRunner after cleanup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "tmp")); err != nil {
+		t.Fatalf("tmp dir was not recreated: %v", err)
+	}
+	if err := host.CleanupWork(); err != nil {
+		t.Fatalf("second CleanupWork: %v", err)
 	}
 }
 
