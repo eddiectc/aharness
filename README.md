@@ -114,14 +114,22 @@ change. `InspectSession` reads a session without taking its exclusive lock.
 `Status` is the typed stop reason (`completed`, `max_turns`, `token_limit`,
 `time_limit`, `provider_error`, `protocol_error`, `stuck`, `interrupted`, or
 `internal_error`); `Err` is its diagnostic cause and is also the error `Run`
-returns, so `errors.Is` and `errors.As` work.
+returns, so `errors.Is` and `errors.As` work. `Status.Failure` and
+`Status.Label` replace per-host status tables; `Result.Reason` and
+`Result.Duration` match the terminal `run_end`. `RunOptions.OnEvent` observes
+the same events without switching to `Start`, and `Result.Children` carries one
+outcome per delegated task.
 
 `Agent.Start` returns a `*Run` whose `Events()` iterator streams text and
 reasoning deltas, tool start and completion, notices, recorded messages,
 delegated-child progress, and the terminal `RunFinished`. `Interrupt` stops the
 in-flight model or tool operation and lets the run continue; `Cancel` ends the
-run; `Steer` and `SteerChild` enqueue input at turn boundaries. Events are
-display-only observations, and the session log is the durable record.
+run; `Steer` and `SteerChild` enqueue input at turn boundaries and return a
+run-unique ID acknowledged on `MessageRecorded` or `SubagentMessageRecorded`.
+Events are display-only observations, and the session log is the durable
+record. `ViewEvent` projects any event to a flat JSON shape with a `kind`
+discriminator for an SSE endpoint or structured log. The display callback is
+never invoked after the run returns, and `RunFinished` is terminal.
 
 `OpenAIModel` builds a Chat Completions or Responses adapter for an explicit
 OpenAI-compatible endpoint. `DiscoverModel` and `ListModels` resolve models and
@@ -130,7 +138,9 @@ any implementation of the `Model` interface; implement the optional
 `StreamingModel` interface to emit deltas. `Config.UserAgent`,
 `OpenAIModelOptions.UserAgent`, and `CatalogConfig.UserAgent` are required: the
 SDK sends the caller's identity on every outbound request and never substitutes
-its own.
+its own. A direct `engine` host must set `engine.Spec.UserAgent`; `engine.Open`
+rejects an empty identity, and a `ResolveModel` closure must use the same
+identity because the engine cannot inspect its adapter's headers.
 
 `Config.MaxTurns` and `MaxTotalTokens` bound the agent's cumulative turn and
 token usage, while `RunTimeout` and `ModelTimeout` bound one run and one model
@@ -158,6 +168,9 @@ in [limits.md](docs/limits.md) and
 `ToolsConfig.Disable` removes a builtin tool and `ToolsConfig.Extra` registers
 caller tools. Caller tools are recorded in `session_start.custom_tools`; a
 resume must supply the same schemas and `ConcurrencySafe` declarations.
+`ToolsConfig.RootGrant` narrows what the root is offered and may call without
+changing the session grant, so a narrow orchestrator can delegate to broader
+analysts; children are still intersected with the session grant.
 `Config.Authorize` runs before every tool execution, including delegated
 children. Returning `&aharness.Deny{}` (or another non-cancellation error)
 produces a model-visible `permission_denied` result.
@@ -260,7 +273,7 @@ in [architecture.md §3](docs/architecture.md#3-packages-and-contracts):
 | Package | Use it for |
 |---|---|
 | `github.com/eddiectc/aharness/agent` | The runner, display events, history reconstruction, state inspection, prompt/agent definitions, and the subagent spawner. |
-| `github.com/eddiectc/aharness/engine` | New/resume/fork composition, workspace and work-directory setup, session metadata, and lock-free inspection/listing. |
+| `github.com/eddiectc/aharness/engine` | New/resume/fork composition, workspace and work-directory setup (`WorkDir`, `CleanupWork`), session metadata (`History`, `Todo`, `LastSeq`), head-read `ListSummaries`, and lock-free inspection/listing. |
 | `github.com/eddiectc/aharness/model` | Canonical model types, Chat Completions and Responses adapters, streaming, and models.dev catalog discovery. |
 | `github.com/eddiectc/aharness/tools` | The builtin registry, workspace containment, the seven workspace/web tools, and the `delegate` seam. |
 | `github.com/eddiectc/aharness/session` | The v2 JSONL event log, locking, torn-line repair, replay, and fork copy. |

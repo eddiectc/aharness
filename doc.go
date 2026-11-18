@@ -33,7 +33,8 @@
 // The display callback is never invoked after the run returns. RunFinished is
 // the terminal event and is emitted once; if the final append or sync fails,
 // the event iterator closes with the result instead. RunOptions.OnEvent follows
-// the same ordering for the blocking Run.
+// the same ordering for the blocking Run. ViewEvent projects any event to a
+// flat JSON shape with a stable kind discriminator.
 //
 // Transport retries happen only before the first assistant-text delta.
 // ModelStarted.Attempt greater than one therefore marks a retry with no

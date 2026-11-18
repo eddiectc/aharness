@@ -117,6 +117,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
+- Documentation now carries the component field crosswalk for `Spec.Version` ↔
+  `HarnessVersion`, `RunTimeout` ↔ `SessionTimeout`, and tri-state versus
+  string effort, plus the root/child event split, the engine host read surface,
+  and the new recorded `root_tools` field.
 - `ModelsDevSource.Refresh` now returns a usable catalog with a warning, and a
   nil error, when only cache persistence failed. Fetch and decode failures
   remain errors; this matches `Load`'s existing cache-write warning.

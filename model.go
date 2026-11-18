@@ -270,12 +270,20 @@ func OpenAIModel(opts OpenAIModelOptions) (*ModelConfig, error) {
 
 // CatalogConfig configures models.dev discovery.
 type CatalogConfig struct {
-	URL        string
-	StateDir   string
+	// URL is the catalog endpoint. Empty selects model.DefaultCatalogURL.
+	URL string
+	// StateDir is the persistent cache root. Required when discovery runs.
+	StateDir string
+	// HTTPClient overrides the bounded default client.
 	HTTPClient *http.Client
-	TTL        time.Duration
-	Timeout    time.Duration
-	UserAgent  string
+	// TTL is the cache freshness window. Zero selects model.CatalogTTL.
+	TTL time.Duration
+	// Timeout bounds one catalog request. Zero selects the model default.
+	Timeout time.Duration
+	// UserAgent identifies the host on catalog requests. It is required only
+	// when DiscoverModel or ListModels is called; constructing a Config with a
+	// zero CatalogConfig never validates it.
+	UserAgent string
 }
 
 func (c CatalogConfig) options() (model.CatalogOptions, error) {

@@ -77,7 +77,11 @@ type Spec struct {
 	ThinkingEffort *string
 	Agents         []agent.AgentInfo
 	Definitions    []agent.AgentDefinition
-	ResolveModel   func(modelID, effort string) (agent.ModelResolution, error)
+	// ResolveModel resolves a delegated child's model. The closure captures the
+	// host's model configuration and must use the same host identity that the
+	// engine enforces for outbound tool requests; the engine cannot inspect the
+	// headers a caller's adapter sends.
+	ResolveModel func(modelID, effort string) (agent.ModelResolution, error)
 
 	NewCompleter      func(dialect model.Dialect, baseURL, sessionID string) model.Completer
 	NewChildCompleter func(def agent.AgentDefinition, resolution agent.ModelResolution, sessionID string) model.Completer
