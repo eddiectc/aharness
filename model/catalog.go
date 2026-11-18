@@ -313,9 +313,9 @@ func (c Catalog) Usable() []CatalogModel {
 
 // CatalogSource loads normalized provider catalogs. Load honors the cache TTL
 // and conditional refresh; Revalidate bypasses the TTL but keeps stale-cache
-// fallback; Refresh is an unconditional fetch with no fallback. Refresh may
-// return a non-zero Catalog alongside ErrCatalogCache when the fetch succeeded
-// but persistence failed, so an in-memory consumer can use the result.
+// fallback; Refresh is an unconditional fetch with no fallback. A successful
+// fetch whose cache write fails is returned with a warning and a nil error, so
+// an in-memory consumer can use it.
 type CatalogSource interface {
 	Load(ctx context.Context, provider string) (Catalog, error)
 	Revalidate(ctx context.Context, provider string) (Catalog, error)

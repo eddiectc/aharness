@@ -117,6 +117,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
+- `ModelsDevSource.Refresh` now returns a usable catalog with a warning, and a
+  nil error, when only cache persistence failed. Fetch and decode failures
+  remain errors; this matches `Load`'s existing cache-write warning.
 - `agent.Config.Steering` is now `<-chan agent.SteeringLine`, and
   `engine.BuildRunner*` takes the same channel. `Run.Steer` and
   `Run.SteerChild` return `(uint64, error)`. A bare call statement still

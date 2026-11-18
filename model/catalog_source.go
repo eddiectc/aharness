@@ -110,9 +110,10 @@ func (s *ModelsDevSource) Revalidate(ctx context.Context, provider string) (Cata
 	return s.refreshCached(ctx, provider, cached, ok)
 }
 
-// Refresh performs an unconditional fetch, replaces the cache on success, and
-// never falls back to stale data. A cache write failure returns the fetched
-// catalog with ErrCatalogCache so an in-memory consumer can still use it.
+// Refresh performs an unconditional fetch and replaces the cache on success.
+// It never falls back to stale data. A cache write failure returns the fetched
+// catalog with a warning and a nil error; only a fetch or decode failure is a
+// Refresh error.
 func (s *ModelsDevSource) Refresh(ctx context.Context, provider string) (Catalog, error) {
 	if err := s.validateProvider(provider); err != nil {
 		return Catalog{}, err
@@ -129,7 +130,7 @@ func (s *ModelsDevSource) Refresh(ctx context.Context, provider string) (Catalog
 		return Catalog{}, err
 	}
 	if err := s.writeCache(catalog); err != nil {
-		return catalog, fmt.Errorf("%w: refresh catalog %s: %w", ErrCatalogCache, s.url, err)
+		catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("catalog cache write failed: %v", err))
 	}
 	return catalog, nil
 }

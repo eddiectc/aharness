@@ -1433,17 +1433,18 @@ func TestCatalogSourceRefreshCacheWriteFailure(t *testing.T) {
 	source := newCatalogSource(t, catalogOptions(server.URL, stateDir, newFakeClock()))
 
 	catalog, err := source.Refresh(t.Context(), testProvider)
-	if !errors.Is(err, ErrCatalogCache) {
-		t.Fatalf("Refresh error = %v, want %v", err, ErrCatalogCache)
+	if err != nil {
+		t.Fatalf("Refresh: %v, want a usable catalog with a warning", err)
 	}
 	if len(catalog.Models) != 18 {
 		t.Errorf("Refreshed catalog models = %d, want 18 for in-memory use", len(catalog.Models))
 	}
-	if !strings.Contains(err.Error(), server.URL) {
-		t.Errorf("error = %q, want source URL", err)
+	if len(catalog.Warnings) == 0 {
+		t.Fatal("cache write failure did not produce a warning")
 	}
-	if !strings.Contains(err.Error(), CatalogCachePath(stateDir, testProvider)) {
-		t.Errorf("error = %q, want cache path", err)
+	warning := strings.Join(catalog.Warnings, "\n")
+	if !strings.Contains(warning, CatalogCachePath(stateDir, testProvider)) {
+		t.Errorf("warning = %q, want cache path", warning)
 	}
 	if _, statErr := os.Stat(CatalogCachePath(stateDir, testProvider)); statErr == nil {
 		t.Error("cache file exists after write failure")
