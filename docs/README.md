@@ -45,6 +45,7 @@ rewriting its conclusions.
 | [definition-of-done.md](definition-of-done.md) | Normative completion checklist for every change |
 | [limits.md](limits.md) | The single source for SDK caps, limits, and timeouts |
 | [testing-strategy.md](testing-strategy.md) | Unit, integration, fuzz, and manual smoke layers |
+| [../CHANGELOG.md](../CHANGELOG.md) | Released versions and the public-surface changes in each |
 
 ### Build plans
 

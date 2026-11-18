@@ -33,6 +33,15 @@ working-directory, TTY, or signal layer, and imports no CLI or TUI code. The
 recorded contracts, including the public facade surface, are in
 [architecture.md](docs/architecture.md#321-public-library-facade).
 
+This module requires Go 1.27.3 or later. Add it to an existing module; it ships
+no binary and needs no separate installation:
+
+```sh
+go get github.com/eddiectc/aharness@v0.0.1
+```
+
+Release history is in [CHANGELOG.md](CHANGELOG.md).
+
 ### Quick start
 
 ```go
@@ -273,3 +282,7 @@ Follow [AGENTS.md](AGENTS.md), the [coding standard](docs/coding-standard.md),
 and the [definition of done](docs/definition-of-done.md). `make dod` runs
 `docs-check`, formatting, `go vet`, `golangci-lint`, `go test -race`,
 `go build ./...`, and `govulncheck`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
