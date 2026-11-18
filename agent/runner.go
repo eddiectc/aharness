@@ -696,15 +696,34 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 		res.Err = err
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the model response")
 	}
+	cumulativeUsage := st.usage
+	cumulativeUsage.InputTokens += comp.resp.Usage.InputTokens
+	cumulativeUsage.OutputTokens += comp.resp.Usage.OutputTokens
+	contextTokens := st.contextTokens
+	if total := comp.resp.Usage.Total(); total > 0 {
+		contextTokens = total
+	}
+	cumulativeCost := st.cost
+	costComplete := st.costComplete
+	if priced {
+		cumulativeCost += cost
+	} else {
+		costComplete = false
+	}
 	if err := r.emit(ResponseCompleted{
-		Turn:         turn,
-		Text:         cleanText(comp.resp.Text),
-		Reasoning:    cleanText(comp.resp.Reasoning),
-		ToolCalls:    comp.resp.ToolCalls,
-		FinishReason: comp.resp.FinishReason,
-		Usage:        comp.resp.Usage,
-		Latency:      comp.latency,
-		Streamed:     comp.streamed,
+		Turn:            turn,
+		Text:            cleanText(comp.resp.Text),
+		Reasoning:       cleanText(comp.resp.Reasoning),
+		ToolCalls:       comp.resp.ToolCalls,
+		FinishReason:    comp.resp.FinishReason,
+		Usage:           comp.resp.Usage,
+		Latency:         comp.latency,
+		Streamed:        comp.streamed,
+		CumulativeTurns: st.turns + 1,
+		CumulativeUsage: cumulativeUsage,
+		ContextTokens:   contextTokens,
+		CostMicroUSD:    cumulativeCost,
+		CostComplete:    costComplete,
 	}); err != nil {
 		return r.failDisplay(res, st, err, "failed to display the model response")
 	}

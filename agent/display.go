@@ -65,6 +65,15 @@ type ResponseCompleted struct {
 	Usage        model.Usage
 	Latency      time.Duration
 	Streamed     bool
+	// Cumulative fields include this response and everything earlier in the
+	// session, so a host progress view needs no separate accounting. They are
+	// the same values the terminal Result reports unless a later turn changes
+	// them.
+	CumulativeTurns int
+	CumulativeUsage model.Usage
+	ContextTokens   int
+	CostMicroUSD    int64
+	CostComplete    bool
 }
 
 // ToolStarted is emitted immediately before a tool call executes, after the

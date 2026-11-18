@@ -117,6 +117,73 @@ func TestRunOnEventMatchesStartOrder(t *testing.T) {
 	}
 }
 
+func TestResponseCompletedCarriesCumulativeProgress(t *testing.T) {
+	model := &scriptedModel{responses: []aharness.Response{
+		{
+			ToolCalls:    []aharness.ToolCall{{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{"intent":"look"}`)}},
+			FinishReason: aharness.FinishToolCalls,
+			Usage:        aharness.Usage{InputTokens: 10, OutputTokens: 5, Reported: true},
+		},
+		{Text: "done", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 3, OutputTokens: 2, Reported: true}},
+	}}
+	ag, err := aharness.New(context.Background(), aharness.Config{
+		Workspace: t.TempDir(),
+		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
+		Model: aharness.CustomModel(aharness.ModelSpec{
+			ID: "m", Dialect: aharness.DialectCustom, ContextWindow: 10_000,
+			Pricing: aharness.Pricing{Available: true, InputMicroUSD: 1_000_000, OutputMicroUSD: 1_000_000},
+		}, model),
+		Tools: &aharness.ToolsConfig{Extra: []aharness.Tool{{
+			Name: "lookup", Description: "Look up.", InputSchema: json.RawMessage(`{"type":"object"}`),
+			Run: func(context.Context, aharness.ToolCall) (aharness.ToolResult, error) {
+				return aharness.TextResult("ok"), nil
+			},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = ag.Close() }()
+	run, err := ag.Start(context.Background(), "work", aharness.RunOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	var completed []aharness.ResponseCompleted
+	var result aharness.Result
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("event error: %v", err)
+		}
+		switch ev := ev.(type) {
+		case aharness.ResponseCompleted:
+			completed = append(completed, ev)
+		case aharness.RunFinished:
+			result = ev.Result
+		}
+	}
+	if len(completed) != 2 {
+		t.Fatalf("ResponseCompleted events = %d, want 2", len(completed))
+	}
+	if completed[0].CumulativeTurns != 1 || completed[1].CumulativeTurns != 2 {
+		t.Fatalf("cumulative turns = %d, %d", completed[0].CumulativeTurns, completed[1].CumulativeTurns)
+	}
+	last := completed[1]
+	if last.CumulativeTurns != result.CumulativeTurns ||
+		last.CumulativeUsage != result.CumulativeUsage ||
+		last.ContextTokens != result.ContextTokens ||
+		last.CostMicroUSD != result.CostMicroUSD ||
+		last.CostComplete != result.CostComplete {
+		t.Fatalf("last progress = %+v, result = %+v", last, result)
+	}
+	if result.CostMicroUSD <= 0 || !result.CostComplete {
+		t.Fatalf("cost = %d complete=%v, want a priced total", result.CostMicroUSD, result.CostComplete)
+	}
+	if completed[0].CostMicroUSD >= last.CostMicroUSD {
+		t.Fatalf("cost did not grow: %d -> %d", completed[0].CostMicroUSD, last.CostMicroUSD)
+	}
+}
+
 func TestInterruptContinuesRun(t *testing.T) {
 	model := newInterruptibleModel()
 	ag, _, _ := newTestAgent(t, nil, model)

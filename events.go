@@ -51,6 +51,13 @@ type ResponseCompleted struct {
 	Usage        Usage
 	Latency      time.Duration
 	Streamed     bool
+	// Cumulative fields include this response and every earlier turn in the
+	// session, not a final total promise.
+	CumulativeTurns int
+	CumulativeUsage Usage
+	ContextTokens   int
+	CostMicroUSD    int64
+	CostComplete    bool
 }
 
 // ToolStarted is emitted immediately before one tool call executes.
@@ -221,15 +228,20 @@ func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Ev
 		return ReasoningDelta{EventMeta: meta, Text: ev.Text}, true
 	case agent.ResponseCompleted:
 		return ResponseCompleted{
-			EventMeta:    meta,
-			Turn:         ev.Turn,
-			Text:         ev.Text,
-			Reasoning:    ev.Reasoning,
-			ToolCalls:    fromInternalToolCalls(ev.ToolCalls),
-			FinishReason: FinishReason(ev.FinishReason),
-			Usage:        fromInternalUsage(ev.Usage),
-			Latency:      ev.Latency,
-			Streamed:     ev.Streamed,
+			EventMeta:       meta,
+			Turn:            ev.Turn,
+			Text:            ev.Text,
+			Reasoning:       ev.Reasoning,
+			ToolCalls:       fromInternalToolCalls(ev.ToolCalls),
+			FinishReason:    FinishReason(ev.FinishReason),
+			Usage:           fromInternalUsage(ev.Usage),
+			Latency:         ev.Latency,
+			Streamed:        ev.Streamed,
+			CumulativeTurns: ev.CumulativeTurns,
+			CumulativeUsage: fromInternalUsage(ev.CumulativeUsage),
+			ContextTokens:   ev.ContextTokens,
+			CostMicroUSD:    ev.CostMicroUSD,
+			CostComplete:    ev.CostComplete,
 		}, true
 	case agent.ToolStarted:
 		return ToolStarted{EventMeta: meta, Turn: ev.Turn, Call: fromInternalToolCall(ev.Call)}, true

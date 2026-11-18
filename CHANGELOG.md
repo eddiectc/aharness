@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `ResponseCompleted` carries cumulative turns, usage, context occupancy,
+  estimated cost, and cost completeness including the response itself, so a
+  host progress view needs no separate accounting. `Turn` keeps its existing
+  cumulative meaning.
 - `agent.HistoryItem.NoticeKind` preserves retry, compaction, limit,
   interrupt, repair, warning, and error affinity when a transcript is replayed.
 - `model.ErrAuth` (aliased as `aharness.ErrAuth`) and
