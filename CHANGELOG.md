@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `model.CatalogModel.Validate`, `Catalog.Price`, and `ErrModelUnavailable`
+  give a host one validation call and price provenance from the catalog value
+  it already holds. `Usable` remains.
 - `tools.Workspace.Contains` and `Workspace.LocalDisplayPath` apply the
   workspace containment, symlink, and `.git` policy without a second path
   implementation in the host.

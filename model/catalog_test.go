@@ -193,6 +193,67 @@ func marshalCache(t *testing.T, cached catalogCacheFile) []byte {
 	return data
 }
 
+func TestCatalogModelValidate(t *testing.T) {
+	valid := CatalogModel{
+		ID: "m", Provider: testProvider, Dialect: DialectChat, BaseURL: testBaseURL,
+		ContextWindow: 100_000, OutputLimit: 1_000,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid model: %v", err)
+	}
+	cases := []struct {
+		name  string
+		model CatalogModel
+	}{
+		{name: "unavailable", model: func() CatalogModel { m := valid; m.Unavailable = "nope"; return m }()},
+		{name: "custom dialect", model: func() CatalogModel { m := valid; m.Dialect = Dialect("custom"); return m }()},
+		{name: "empty dialect", model: func() CatalogModel { m := valid; m.Dialect = ""; return m }()},
+		{name: "missing base URL", model: func() CatalogModel { m := valid; m.BaseURL = ""; return m }()},
+		{name: "http base URL", model: func() CatalogModel { m := valid; m.BaseURL = "http://opencode.ai/v1"; return m }()},
+		{name: "missing context", model: func() CatalogModel { m := valid; m.ContextWindow = 0; return m }()},
+		{name: "bad input limit", model: func() CatalogModel { m := valid; m.InputLimit = m.ContextWindow + 1; return m }()},
+		{name: "bad output limit", model: func() CatalogModel { m := valid; m.OutputLimit = -1; return m }()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.model.Validate()
+			if !errors.Is(err, ErrModelUnavailable) {
+				t.Fatalf("Validate = %v, want ErrModelUnavailable", err)
+			}
+		})
+	}
+}
+
+func TestCatalogPrice(t *testing.T) {
+	fetchedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	input, output := int64(150_000), int64(600_000)
+	catalog := Catalog{
+		Provider:  testProvider,
+		Source:    "fixture",
+		FetchedAt: fetchedAt,
+		Models: map[string]CatalogModel{
+			"priced": {
+				ID: "priced", Provider: testProvider,
+				Cost: &CatalogCost{InputMicroUSD: input, OutputMicroUSD: output},
+			},
+			"unpriced": {ID: "unpriced", Provider: testProvider},
+		},
+	}
+	pricing, ok := catalog.Price("priced")
+	if !ok || !pricing.Available || pricing.InputMicroUSD != input || pricing.OutputMicroUSD != output {
+		t.Fatalf("Price = %+v, %v", pricing, ok)
+	}
+	if pricing.Source != "fixture" || !pricing.FetchedAt.Equal(fetchedAt) {
+		t.Fatalf("provenance = %q %v", pricing.Source, pricing.FetchedAt)
+	}
+	if _, ok := catalog.Price("unpriced"); ok {
+		t.Fatal("unpriced model reported a price")
+	}
+	if _, ok := catalog.Price("missing"); ok {
+		t.Fatal("missing model reported a price")
+	}
+}
+
 func TestCatalogFixtureNormalization(t *testing.T) {
 	fixture := readCatalogFixture(t)
 	catalog, err := parseCatalog(fixture, testProvider, DefaultCatalogURL)

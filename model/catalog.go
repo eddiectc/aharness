@@ -207,8 +207,36 @@ func ValidReasoningEffort(value string) bool {
 	return true
 }
 
+// ErrModelUnavailable marks a catalog model that cannot be selected.
+var ErrModelUnavailable = errors.New("model is not usable")
+
 // Usable reports whether the harness can select the model.
 func (m CatalogModel) Usable() bool { return m.Unavailable == "" }
+
+// Validate reports why a model cannot be selected. An unavailable model, a
+// dialect this harness cannot drive, and a missing or invalid base URL all
+// satisfy errors.Is(err, ErrModelUnavailable).
+func (m CatalogModel) Validate() error {
+	if m.Unavailable != "" {
+		return fmt.Errorf("%w: %s", ErrModelUnavailable, m.Unavailable)
+	}
+	if m.Dialect != DialectChat && m.Dialect != DialectResponses {
+		return fmt.Errorf("%w: unsupported dialect %q", ErrModelUnavailable, m.Dialect)
+	}
+	if _, reason := discoveredBaseURL(m.BaseURL); reason != "" {
+		return fmt.Errorf("%w: %s", ErrModelUnavailable, reason)
+	}
+	if m.ContextWindow <= 0 {
+		return fmt.Errorf("%w: missing context limit", ErrModelUnavailable)
+	}
+	if m.InputLimit < 0 || m.InputLimit > m.ContextWindow {
+		return fmt.Errorf("%w: invalid input limit %d", ErrModelUnavailable, m.InputLimit)
+	}
+	if m.OutputLimit < 0 {
+		return fmt.Errorf("%w: invalid output limit %d", ErrModelUnavailable, m.OutputLimit)
+	}
+	return nil
+}
 
 // Catalog is one normalized provider catalog. Models retains unavailable
 // entries; use Usable to filter them.
@@ -230,6 +258,17 @@ func (c Catalog) Lookup(id string) (CatalogModel, error) {
 		return CatalogModel{}, fmt.Errorf("%w: %q for provider %s", ErrModelNotFound, id, c.Provider)
 	}
 	return m, nil
+}
+
+// Price returns the model's pricing snapshot with this catalog's source and
+// fetch time. ok is false when the model is absent or has no usable price.
+func (c Catalog) Price(id string) (Pricing, bool) {
+	m, ok := c.Models[id]
+	if !ok {
+		return Pricing{}, false
+	}
+	pricing := m.Pricing(c.Source, c.FetchedAt)
+	return pricing, pricing.Available
 }
 
 // Usable returns selectable models sorted by ID.
