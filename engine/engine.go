@@ -807,12 +807,31 @@ func (h *Host) CleanupWork() error {
 	return nil
 }
 
-// Store exposes the session store to the engine's own runner wiring. The
-// facade never exposes it.
+// Store exposes the session store to the engine's own runner wiring. It is
+// internal wiring: hosts should use State, Snapshot, History, Todo, and
+// LastSeq instead of reading or mutating the store.
 func (h *Host) Store() *session.Store { return h.store }
 
-// WorkspaceHandle exposes the workspace to the engine's own runner wiring.
+// WorkspaceHandle exposes the workspace to the engine's own runner wiring. It
+// is internal wiring: hosts should use Workspace and the tool registry instead.
 func (h *Host) WorkspaceHandle() *tools.Workspace { return h.workspace }
+
+// History reconstructs the durable transcript of this session.
+func (h *Host) History() ([]agent.HistoryItem, error) {
+	if h.closed {
+		return nil, configError("Agent", "is closed")
+	}
+	return agent.History(h.store.Events())
+}
+
+// Todo returns the checklist recorded by the last successful todo tool result,
+// or nil when the session has none.
+func (h *Host) Todo() []tools.TodoItem {
+	return agent.RestoreTodo(h.store.Events())
+}
+
+// LastSeq returns the last durable event sequence number.
+func (h *Host) LastSeq() uint64 { return h.store.LastSeq() }
 
 // Spec returns a copy of the resolved construction spec.
 func (h *Host) Spec() Spec { return h.spec }

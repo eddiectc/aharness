@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/eddiectc/aharness/agent"
 	"github.com/eddiectc/aharness/model"
+	"github.com/eddiectc/aharness/session"
 )
 
 type engineModel struct{}
@@ -140,6 +142,55 @@ func TestCleanupWorkRemovesAndBuildRunnerRecreates(t *testing.T) {
 	}
 	if err := host.CleanupWork(); err != nil {
 		t.Fatalf("second CleanupWork: %v", err)
+	}
+}
+
+func TestHostReadSurface(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	todoDetails := json.RawMessage(`{"items":[{"content":"one","status":"pending"}]}`)
+	events := []struct {
+		typ     session.EventType
+		role    string
+		payload any
+	}{
+		{session.TypeUserMessage, "user", map[string]string{"text": "hello", "source": "task"}},
+		{session.TypeToolResult, "tool", map[string]any{
+			"call_id": "call-1", "name": "todo", "ok": true, "code": "ok", "details": todoDetails,
+		}},
+	}
+	for _, item := range events {
+		ev, err := session.NewEvent(item.typ, 1, item.role, item.payload)
+		if err != nil {
+			t.Fatalf("NewEvent: %v", err)
+		}
+		if err := host.Store().Append(ev); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	history, err := host.History()
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if len(history) == 0 || history[0].Text != "hello" {
+		t.Fatalf("history = %+v", history)
+	}
+	todo := host.Todo()
+	if len(todo) != 1 || todo[0].Content != "one" || todo[0].Status != "pending" {
+		t.Fatalf("todo = %+v", todo)
+	}
+	if got, want := host.LastSeq(), host.Store().LastSeq(); got != want {
+		t.Fatalf("LastSeq = %d, want %d", got, want)
+	}
+	if err := host.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := host.History(); err == nil {
+		t.Fatal("History after Close succeeded")
 	}
 }
 

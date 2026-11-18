@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `engine.Host.History`, `Host.Todo`, and `Host.LastSeq` expose the durable
+  transcript, restored checklist, and resume boundary without hosts touching
+  `Store()`. `Store` and `WorkspaceHandle` are documented as engine wiring.
 - `engine.Host.WorkDir` and `engine.Host.CleanupWork` expose and remove the
   per-session work directory. Cleanup is idle-only; the next `BuildRunner`
   recreates it. Architecture now states the implemented contract: the engine
