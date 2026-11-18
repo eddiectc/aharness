@@ -386,19 +386,19 @@ func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Re
 
 // taskFailureMessage returns the error text for a task that did not complete
 // or stop at its own limit. Limit and mid-run interrupt reports carry partial
-// output, not an error, so they stay message-free.
+// output, not an error, so they stay message-free. The message is capped so a
+// long final text cannot push the details payload over its own cap.
 func taskFailureMessage(report SubagentReport) string {
 	switch report.Status {
 	case SubagentCompleted, SubagentMaxTurns, SubagentTokenLimit, SubagentTimeLimit:
 		return ""
 	case SubagentInterrupted:
-		if report.Turns == 0 {
-			return sanitizeUTF8(report.Text)
+		if report.Turns > 0 {
+			return ""
 		}
-		return ""
-	default:
-		return sanitizeUTF8(report.Text)
 	}
+	message, _ := capHeadOutput(sanitizeUTF8(report.Text), 1<<10)
+	return message
 }
 
 // markInstructionShaped prepends one marker line when a report opens with a
