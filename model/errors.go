@@ -15,6 +15,10 @@ var ErrContextOverflow = errors.New("model context overflow")
 // User-Agent.
 var ErrUserAgentRequired = errors.New("user agent is required")
 
+// ErrAuth marks a provider 401 or 403 response that requires
+// re-authentication or a different credential.
+var ErrAuth = errors.New("provider authentication failed")
+
 // HTTPError is a non-success HTTP response from a provider.
 type HTTPError struct {
 	StatusCode    int
@@ -35,6 +39,17 @@ func (e *HTTPError) Error() string {
 // failure.
 func (e *HTTPError) Retryable() bool {
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
+// Unauthorized reports whether the provider rejected the credential.
+func (e *HTTPError) Unauthorized() bool {
+	return e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden
+}
+
+// Is matches ErrAuth for unauthorized responses so a host can branch with
+// errors.Is through a wrapped provider error.
+func (e *HTTPError) Is(target error) bool {
+	return target == ErrAuth && e.Unauthorized()
 }
 
 // TransportError wraps a connection-level failure before a response arrives.

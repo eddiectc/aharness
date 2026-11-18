@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `model.ErrAuth` (aliased as `aharness.ErrAuth`) and
+  `HTTPError.Unauthorized` classify 401/403 responses, including through a
+  `ProviderError`; 429 and 5xx retry behavior is unchanged.
 - `model.CatalogOptions.Validate`, `model.ValidateCatalogURL`,
   `model.ValidateBaseURL`, and `CatalogConfig.Validate` validate settings
   without allocating a catalog source or an adapter. Constructors use the same

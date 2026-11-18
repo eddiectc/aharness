@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,6 +122,24 @@ func requireContextOverflow(t *testing.T, err error) {
 	}
 	if _, ok := errors.AsType[*HTTPError](err); !ok {
 		t.Fatalf("overflow cause = %T %v, want wrapped *HTTPError", overflow.Err, overflow.Err)
+	}
+}
+
+func TestHTTPErrorAuth(t *testing.T) {
+	for _, code := range []int{401, 403} {
+		err := &HTTPError{StatusCode: code, Status: "auth"}
+		if !err.Unauthorized() || !errors.Is(err, ErrAuth) {
+			t.Fatalf("status %d: Unauthorized=%v Is(ErrAuth)=%v", code, err.Unauthorized(), errors.Is(err, ErrAuth))
+		}
+		if !errors.Is(fmt.Errorf("wrapped: %w", err), ErrAuth) {
+			t.Fatalf("status %d: ErrAuth did not survive wrapping", code)
+		}
+	}
+	for _, code := range []int{400, 404, 429, 500} {
+		err := &HTTPError{StatusCode: code, Status: "other"}
+		if err.Unauthorized() || errors.Is(err, ErrAuth) {
+			t.Fatalf("status %d unexpectedly matched ErrAuth", code)
+		}
 	}
 }
 

@@ -28,6 +28,8 @@ var (
 	ErrToolMismatch     = errors.New("aharness: tool set does not match the session")
 	ErrSteeringFull     = errors.New("aharness: steering queue is full")
 	ErrNoSuchChild      = errors.New("aharness: no such live child session")
+	// ErrAuth marks a provider 401 or 403; it is model.ErrAuth.
+	ErrAuth = model.ErrAuth
 )
 
 // ConfigError describes an invalid Config or construction input.
