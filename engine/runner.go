@@ -13,14 +13,14 @@ import (
 // BuildRunner constructs the per-run registry, spawner, and runner. It never
 // writes session_start; calling it once per run is supported. A display nil
 // disables events; a controller nil disables interactive interruption.
-func (h *Host) BuildRunner(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan string, controller agent.Controller) (*agent.Runner, error) {
+func (h *Host) BuildRunner(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan agent.SteeringLine, controller agent.Controller) (*agent.Runner, error) {
 	runner, _, err := h.BuildRunnerWithSpawner(run, display, steering, controller)
 	return runner, err
 }
 
 // BuildRunnerWithSpawner is BuildRunner that also returns the per-run spawner
 // so a host can route SteerChild calls to live delegated children.
-func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan string, controller agent.Controller) (*agent.Runner, *agent.Spawner, error) {
+func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan agent.SteeringLine, controller agent.Controller) (*agent.Runner, *agent.Spawner, error) {
 	if h.closed {
 		return nil, nil, ErrClosed
 	}
@@ -117,7 +117,7 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 	return agent.New(cfg, completer(model.Dialect(cfg.Dialect), cfg.BaseURL, h.ID()), registry, h.store), spawner, nil
 }
 
-func (h *Host) runConfig(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan string, controller agent.Controller) (agent.Config, error) {
+func (h *Host) runConfig(run RunSpec, display func(agent.DisplayEvent) error, steering <-chan agent.SteeringLine, controller agent.Controller) (agent.Config, error) {
 	modelID := h.spec.Model
 	dialect := h.spec.Dialect
 	baseURL := h.spec.BaseURL

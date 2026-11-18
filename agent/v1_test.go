@@ -726,7 +726,7 @@ func TestRunnerToolInterruptPairsRemaining(t *testing.T) {
 }
 
 type steeringCompleter struct {
-	send     chan<- string
+	send     chan<- SteeringLine
 	requests []model.Request
 	calls    int
 }
@@ -735,15 +735,44 @@ func (c *steeringCompleter) Complete(_ context.Context, req model.Request) (mode
 	c.requests = append(c.requests, req)
 	c.calls++
 	if c.calls == 1 {
-		c.send <- "also check the README"
+		c.send <- SteeringLine{ID: 1, Text: "also check the README"}
 		return model.Response{Text: "first", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
 	}
 	return model.Response{Text: "done", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
 }
 
+func TestRunnerSteeringDuplicateTextKeepsDistinctIDs(t *testing.T) {
+	cfg := testConfig()
+	steer := make(chan SteeringLine, 2)
+	steer <- SteeringLine{ID: 7, Text: "same text"}
+	steer <- SteeringLine{ID: 8, Text: "same text"}
+	close(steer)
+	cfg.Steering = steer
+	var acks []MessageRecorded
+	cfg.Display = func(ev DisplayEvent) error {
+		if ack, ok := ev.(MessageRecorded); ok && ack.ID != 0 {
+			acks = append(acks, ack)
+		}
+		return nil
+	}
+	comp := &fakeCompleter{steps: []scriptStep{{resp: model.Response{Text: "done", FinishReason: model.FinishStop}}}}
+	if _, _, err := runTask(t, cfg, comp, &fakeToolset{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(acks) != 2 {
+		t.Fatalf("steering acks = %+v, want 2", acks)
+	}
+	if acks[0].ID != 7 || acks[1].ID != 8 || acks[0].ID == acks[1].ID {
+		t.Fatalf("steering IDs = %d, %d; want distinct 7 and 8", acks[0].ID, acks[1].ID)
+	}
+	if acks[0].Text != "same text" || acks[1].Text != "same text" {
+		t.Fatalf("steering texts = %q, %q", acks[0].Text, acks[1].Text)
+	}
+}
+
 func TestRunnerSteeringChangesNextCall(t *testing.T) {
 	cfg := testConfig()
-	steer := make(chan string, 1)
+	steer := make(chan SteeringLine, 1)
 	cfg.Steering = steer
 	comp := &steeringCompleter{send: steer}
 	store, res, err := runTask(t, cfg, comp, &fakeToolset{})

@@ -240,7 +240,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 	}
 
 	if opts.TaskSet {
-		if err := r.recordUserMessage(0, opts.Task, opts.TaskFrom); err != nil {
+		if err := r.recordUserMessage(0, opts.Task, opts.TaskFrom, 0); err != nil {
 			res.Err = err
 			return r.finishResult(&res, st, StopInternalError, "failed to record the task")
 		}
@@ -416,7 +416,7 @@ func (r *Runner) consumeSteering(st *runState) (int, error) {
 				r.steeringClosed = true
 				return count, nil
 			}
-			text := cleanText(line)
+			text := cleanText(line.Text)
 			if strings.TrimSpace(text) == "" {
 				continue
 			}
@@ -427,7 +427,7 @@ func (r *Runner) consumeSteering(st *runState) (int, error) {
 			if source == "" {
 				source = sourceSteer
 			}
-			if err := r.recordUserMessage(st.turns, text, source); err != nil {
+			if err := r.recordUserMessage(st.turns, text, source, line.ID); err != nil {
 				return count, err
 			}
 			count++
@@ -544,7 +544,7 @@ func (r *Runner) handleModelInterrupt(res *Result, st *runState, err error) (boo
 	if rerr := r.notice(st.turns, NoticeInterrupt, "interrupted the model call before it completed"); rerr != nil {
 		return r.failDisplay(res, st, rerr, "failed to display a model interrupt")
 	}
-	if rerr := r.recordUserMessage(st.turns, interruptHint, sourceInterruptHint); rerr != nil {
+	if rerr := r.recordUserMessage(st.turns, interruptHint, sourceInterruptHint, 0); rerr != nil {
 		res.Err = rerr
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the interrupt hint")
 	}
@@ -768,7 +768,7 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 				}
 				return r.finishTerminal(res, st, StopTokenLimit, "repeated output length truncation")
 			}
-			if err := r.recordUserMessage(turn, continuationHint, sourceContinuationHint); err != nil {
+			if err := r.recordUserMessage(turn, continuationHint, sourceContinuationHint, 0); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record the continuation hint")
 			}
@@ -956,7 +956,7 @@ func (r *Runner) executeTools(ctx context.Context, res *Result, st *runState, ca
 		}
 		if st.failCount == 3 {
 			hint := fmt.Sprintf("The tool %q has failed %d times with the same arguments and result code %q. Stop repeating the same call; change approach, or reply without a tool call if you are blocked.", call.Name, st.failCount, result.Code)
-			if err := r.recordUserMessage(turn, hint, sourceStuckHint); err != nil {
+			if err := r.recordUserMessage(turn, hint, sourceStuckHint, 0); err != nil {
 				res.Err = err
 				return r.finishTerminal(res, st, StopInternalError, "failed to record the stuck hint")
 			}
@@ -1197,7 +1197,7 @@ func (r *Runner) record(typ session.EventType, turn int, role string, payload an
 	return nil
 }
 
-func (r *Runner) recordUserMessage(turn int, text, source string) error {
+func (r *Runner) recordUserMessage(turn int, text, source string, id uint64) error {
 	cappedText := capText(text, maxEventTextBytes)
 	cappedSource := capText(source, maxEventTextBytes)
 	if err := r.record(session.TypeUserMessage, turn, string(model.RoleUser), userMessageData{
@@ -1209,7 +1209,7 @@ func (r *Runner) recordUserMessage(turn int, text, source string) error {
 	if err := r.sync(); err != nil {
 		return err
 	}
-	return r.emit(MessageRecorded{Turn: turn, Source: cappedSource, Text: cappedText})
+	return r.emit(MessageRecorded{Turn: turn, ID: id, Source: cappedSource, Text: cappedText})
 }
 
 func (r *Runner) recordToolResult(turn int, payload toolResultData) error {

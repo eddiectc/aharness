@@ -110,8 +110,10 @@ type Config struct {
 	// write the session log. A nil callback disables display events.
 	Display func(DisplayEvent) error
 	// Steering delivers host steering lines consumed at turn boundaries. A nil
-	// channel disables steering.
-	Steering <-chan string
+	// channel disables steering. The ID is echoed on MessageRecorded (and the
+	// facade's SubagentMessageRecorded for children) so a host can acknowledge
+	// the exact line even when text repeats.
+	Steering <-chan SteeringLine
 	// SteeringSource is the user_message source recorded for each steering
 	// line. Empty means "steer"; a delegated child uses "subagent-steer" so its
 	// log distinguishes a human line addressed to the child.
@@ -121,6 +123,13 @@ type Config struct {
 	Controller Controller
 
 	Logger *slog.Logger
+}
+
+// SteeringLine is one host steering submission. IDs are assigned by the host
+// and are unique within a run; they are echoed on MessageRecorded.
+type SteeringLine struct {
+	ID   uint64
+	Text string
 }
 
 // Controller mediates interactive interruption. BeginOperation returns a

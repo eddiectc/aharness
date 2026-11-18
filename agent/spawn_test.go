@@ -648,7 +648,7 @@ func TestSpawnerRoutesSteeringToChild(t *testing.T) {
 			return nil
 		}
 		steered = true
-		return f.spawner.SteerChild(progress.Session, "check the parser instead")
+		return f.spawner.SteerChild(progress.Session, SteeringLine{ID: 1, Text: "check the parser instead"})
 	}
 	f.completer.steps = []scriptStep{
 		{resp: model.Response{
@@ -697,7 +697,7 @@ func TestSpawnerRoutesSteeringToChild(t *testing.T) {
 	}
 	// The channel is gone once the child store closes: a late line cannot be
 	// silently queued for a run that no longer exists.
-	if err := f.spawner.SteerChild(report.Session, "too late"); !errors.Is(err, ErrSubagentNotRunning) {
+	if err := f.spawner.SteerChild(report.Session, SteeringLine{ID: 2, Text: "too late"}); !errors.Is(err, ErrSubagentNotRunning) {
 		t.Fatalf("late SteerChild = %v, want ErrSubagentNotRunning", err)
 	}
 

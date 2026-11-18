@@ -73,11 +73,13 @@ func TestDelegationFanOutAndChildSteering(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	var (
-		childID     string
-		execution   string
-		childEvents int
-		steerOnce   sync.Once
-		finished    aharness.Result
+		childID      string
+		execution    string
+		childEvents  int
+		steerOnce    sync.Once
+		childSteerID uint64
+		childAckID   uint64
+		finished     aharness.Result
 	)
 	for ev, err := range run.Events() {
 		if err != nil {
@@ -90,11 +92,17 @@ func TestDelegationFanOutAndChildSteering(t *testing.T) {
 		case aharness.SubagentProgress:
 			steerOnce.Do(func() {
 				<-toolStarted
-				if err := run.SteerChild(ev.ChildSession, "focus on the summary"); err != nil {
+				id, err := run.SteerChild(ev.ChildSession, "focus on the summary")
+				if err != nil {
 					t.Fatalf("SteerChild: %v", err)
 				}
+				childSteerID = id
 				close(toolRelease)
 			})
+		case aharness.SubagentMessageRecorded:
+			if ev.ID != 0 {
+				childAckID = ev.ID
+			}
 		case aharness.SubagentFinished:
 			childEvents++
 			if ev.Status != "completed" {
@@ -129,6 +137,9 @@ func TestDelegationFanOutAndChildSteering(t *testing.T) {
 	if childEvents < 2 {
 		t.Fatalf("child events = %d", childEvents)
 	}
+	if childSteerID == 0 || childAckID != childSteerID {
+		t.Fatalf("child steering id = %d, ack = %d", childSteerID, childAckID)
+	}
 	childState, err := aharness.InspectSession(context.Background(), stateDir, childID)
 	if err != nil {
 		t.Fatalf("InspectSession child: %v", err)
@@ -139,7 +150,7 @@ func TestDelegationFanOutAndChildSteering(t *testing.T) {
 	if childState.Turns != 2 {
 		t.Fatalf("child turns = %d, want 2 after steering", childState.Turns)
 	}
-	if err := run.SteerChild(childID, "after finish"); !errors.Is(err, aharness.ErrNoSuchChild) {
+	if _, err := run.SteerChild(childID, "after finish"); !errors.Is(err, aharness.ErrNoSuchChild) {
 		t.Fatalf("SteerChild after finish = %v, want ErrNoSuchChild", err)
 	}
 }

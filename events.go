@@ -80,9 +80,25 @@ type ToolCompleted struct {
 // MessageRecorded acknowledges a task, steering line, or hint.
 type MessageRecorded struct {
 	EventMeta
-	Turn   int
+	Turn int
+	// ID is nonzero for a steering line and zero for a task or hint.
+	ID     uint64
 	Source string
 	Text   string
+}
+
+// SubagentMessageRecorded acknowledges a task, steering line, or hint in a
+// child session. ID is nonzero for a child steering line.
+type SubagentMessageRecorded struct {
+	EventMeta
+	Turn    int
+	CallID  string
+	Index   int
+	Agent   string
+	Session string
+	ID      uint64
+	Source  string
+	Text    string
 }
 
 // Subagent status values reported by SubagentFinished and ChildOutcome. The
@@ -178,18 +194,19 @@ type RunFinished struct {
 	Duration time.Duration
 }
 
-func (RunStarted) event()        {}
-func (TextDelta) event()         {}
-func (ReasoningDelta) event()    {}
-func (ResponseCompleted) event() {}
-func (ToolStarted) event()       {}
-func (ToolCompleted) event()     {}
-func (MessageRecorded) event()   {}
-func (Notice) event()            {}
-func (SubagentStarted) event()   {}
-func (SubagentProgress) event()  {}
-func (SubagentFinished) event()  {}
-func (RunFinished) event()       {}
+func (RunStarted) event()              {}
+func (TextDelta) event()               {}
+func (ReasoningDelta) event()          {}
+func (ResponseCompleted) event()       {}
+func (ToolStarted) event()             {}
+func (ToolCompleted) event()           {}
+func (MessageRecorded) event()         {}
+func (SubagentMessageRecorded) event() {}
+func (Notice) event()                  {}
+func (SubagentStarted) event()         {}
+func (SubagentProgress) event()        {}
+func (SubagentFinished) event()        {}
+func (RunFinished) event()             {}
 
 // eventFromInternal maps one internal display event to the public contract.
 // It reports false for transport-level events that are not public.
@@ -233,7 +250,19 @@ func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Ev
 			Details:   append(json.RawMessage(nil), ev.Details...),
 		}, true
 	case agent.MessageRecorded:
-		return MessageRecorded{EventMeta: meta, Turn: ev.Turn, Source: ev.Source, Text: ev.Text}, true
+		return MessageRecorded{EventMeta: meta, Turn: ev.Turn, ID: ev.ID, Source: ev.Source, Text: ev.Text}, true
+	case agent.SubagentMessageRecorded:
+		return SubagentMessageRecorded{
+			EventMeta: meta,
+			Turn:      ev.Turn,
+			CallID:    ev.CallID,
+			Index:     ev.Index,
+			Agent:     ev.Agent,
+			Session:   ev.Session,
+			ID:        ev.ID,
+			Source:    ev.Source,
+			Text:      ev.Text,
+		}, true
 	case agent.Notice:
 		return Notice{EventMeta: meta, Turn: ev.Turn, Kind: NoticeKind(ev.Kind), Text: ev.Text}, true
 	case agent.SubagentStarted:

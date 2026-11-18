@@ -205,7 +205,7 @@ func TestSteerConsumedAtTurnBoundary(t *testing.T) {
 	}
 	go func() {
 		<-model.firstStarted
-		if err := run.Steer("one more thing"); err != nil {
+		if _, err := run.Steer("one more thing"); err != nil {
 			t.Errorf("Steer: %v", err)
 		}
 		close(model.release)
@@ -225,7 +225,7 @@ func TestSteerConsumedAtTurnBoundary(t *testing.T) {
 	if finished.RunTurns != 2 {
 		t.Fatalf("run turns = %d, want 2", finished.RunTurns)
 	}
-	if err := run.Steer("late"); !errors.Is(err, aharness.ErrClosed) {
+	if _, err := run.Steer("late"); !errors.Is(err, aharness.ErrClosed) {
 		t.Fatalf("late Steer error = %v, want ErrClosed", err)
 	}
 }

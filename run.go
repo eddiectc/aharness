@@ -42,7 +42,8 @@ type Run struct {
 	stopOnce   sync.Once
 	events     chan Event
 	done       chan struct{}
-	steering   chan string
+	steering   chan agent.SteeringLine
+	steerSeq   atomic.Uint64
 	controller *runController
 	spawner    *agent.Spawner
 	sessionID  string
@@ -138,7 +139,7 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	controller := &runController{}
-	steering := make(chan string, 16)
+	steering := make(chan agent.SteeringLine, 16)
 	run := &Run{
 		agent:      a,
 		ctx:        runCtx,
@@ -327,35 +328,39 @@ func (r *Run) Interrupt() { r.controller.Interrupt() }
 // Cancel terminates the run with StopInterrupted.
 func (r *Run) Cancel() { r.cancel() }
 
-// Steer enqueues a user message consumed at the next turn boundary. It never
-// blocks. A full queue returns ErrSteeringFull and a finished run ErrClosed.
-func (r *Run) Steer(text string) error {
+// Steer enqueues a user message consumed at the next turn boundary and returns
+// its run-unique steering ID. It never blocks. A full queue returns
+// ErrSteeringFull and a finished run ErrClosed.
+func (r *Run) Steer(text string) (uint64, error) {
 	if r.isDone() {
-		return ErrClosed
+		return 0, ErrClosed
 	}
+	line := agent.SteeringLine{ID: r.steerSeq.Add(1), Text: text}
 	select {
-	case r.steering <- text:
-		return nil
+	case r.steering <- line:
+		return line.ID, nil
 	default:
-		return ErrSteeringFull
+		return 0, ErrSteeringFull
 	}
 }
 
-// SteerChild enqueues steering for a live delegated child of this run.
-func (r *Run) SteerChild(sessionID, text string) error {
+// SteerChild enqueues steering for a live delegated child of this run and
+// returns its run-unique steering ID.
+func (r *Run) SteerChild(sessionID, text string) (uint64, error) {
 	if r.spawner == nil {
-		return ErrNoSuchChild
+		return 0, ErrNoSuchChild
 	}
-	err := r.spawner.SteerChild(sessionID, text)
+	line := agent.SteeringLine{ID: r.steerSeq.Add(1), Text: text}
+	err := r.spawner.SteerChild(sessionID, line)
 	switch {
 	case err == nil:
-		return nil
+		return line.ID, nil
 	case errors.Is(err, agent.ErrSubagentNotRunning):
-		return ErrNoSuchChild
+		return 0, ErrNoSuchChild
 	case errors.Is(err, agent.ErrSubagentSteeringFull):
-		return ErrSteeringFull
+		return 0, ErrSteeringFull
 	default:
-		return err
+		return 0, err
 	}
 }
 

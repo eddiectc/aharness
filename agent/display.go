@@ -96,7 +96,24 @@ type ToolCompleted struct {
 // MessageRecorded acknowledges a task, steering line, or hint after its
 // user_message event is durable.
 type MessageRecorded struct {
-	Turn   int
+	Turn int
+	// ID is nonzero for a steering line and zero for a task or hint.
+	ID     uint64
+	Source string
+	Text   string
+}
+
+// SubagentMessageRecorded acknowledges a task, steering line, or hint in a
+// child session. It lets a host confirm the exact child steering line, even
+// when the text repeats.
+type SubagentMessageRecorded struct {
+	Turn    int
+	CallID  string
+	Index   int
+	Agent   string
+	Session string
+	// ID is nonzero for a steering line and zero for a task or hint.
+	ID     uint64
 	Source string
 	Text   string
 }
@@ -169,19 +186,20 @@ type RunFinished struct {
 	Duration time.Duration
 }
 
-func (RunStarted) isDisplayEvent()        {}
-func (ModelStarted) isDisplayEvent()      {}
-func (TextDelta) isDisplayEvent()         {}
-func (ReasoningDelta) isDisplayEvent()    {}
-func (ResponseCompleted) isDisplayEvent() {}
-func (ToolStarted) isDisplayEvent()       {}
-func (ToolCompleted) isDisplayEvent()     {}
-func (MessageRecorded) isDisplayEvent()   {}
-func (Notice) isDisplayEvent()            {}
-func (SubagentStarted) isDisplayEvent()   {}
-func (SubagentProgress) isDisplayEvent()  {}
-func (SubagentFinished) isDisplayEvent()  {}
-func (RunFinished) isDisplayEvent()       {}
+func (RunStarted) isDisplayEvent()              {}
+func (ModelStarted) isDisplayEvent()            {}
+func (TextDelta) isDisplayEvent()               {}
+func (ReasoningDelta) isDisplayEvent()          {}
+func (ResponseCompleted) isDisplayEvent()       {}
+func (ToolStarted) isDisplayEvent()             {}
+func (ToolCompleted) isDisplayEvent()           {}
+func (MessageRecorded) isDisplayEvent()         {}
+func (SubagentMessageRecorded) isDisplayEvent() {}
+func (Notice) isDisplayEvent()                  {}
+func (SubagentStarted) isDisplayEvent()         {}
+func (SubagentProgress) isDisplayEvent()        {}
+func (SubagentFinished) isDisplayEvent()        {}
+func (RunFinished) isDisplayEvent()             {}
 
 // sanitizeDisplayEvent removes terminal control characters from text fields
 // before they reach a display consumer. The session log remains the raw
@@ -203,6 +221,13 @@ func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
 		ev.Error = displaySafe(ev.Error)
 		return ev
 	case MessageRecorded:
+		ev.Text = displaySafe(ev.Text)
+		return ev
+	case SubagentMessageRecorded:
+		ev.Agent = displaySafe(ev.Agent)
+		ev.Session = displaySafe(ev.Session)
+		ev.CallID = displaySafe(ev.CallID)
+		ev.Source = displaySafe(ev.Source)
 		ev.Text = displaySafe(ev.Text)
 		return ev
 	case Notice:

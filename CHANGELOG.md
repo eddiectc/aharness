@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `agent.SteeringLine` carries a host-assigned steering ID, returned by
+  `Run.Steer`/`Run.SteerChild` and echoed on `MessageRecorded.ID` and the new
+  `SubagentMessageRecorded` event. Duplicate text now acknowledges distinct
+  lines; child steering has an explicit ack.
 - `agent.RunOptions.ResumedFromSeqSet` lets the runner derive the resume
   boundary: zero before the first recorded run, otherwise the last durable
   sequence; an explicit value still wins. The facade no longer computes it.
@@ -55,6 +59,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Changed
 
+- `agent.Config.Steering` is now `<-chan agent.SteeringLine`, and
+  `engine.BuildRunner*` takes the same channel. `Run.Steer` and
+  `Run.SteerChild` return `(uint64, error)`. A bare call statement still
+  compiles; callers that assigned the single error must update.
 - Direct `engine` hosts must now set `Spec.UserAgent`; `engine.Open` rejects an
   empty identity with a `ConfigError`. The model completer closure still
   captures the same identity independently because the engine cannot inspect

@@ -113,7 +113,7 @@ type Spawner struct {
 	childUse  model.Usage
 	// steering routes composer lines to a running child by session ID. A child
 	// entry exists only while its run is in flight.
-	steering map[string]chan string
+	steering map[string]chan SteeringLine
 }
 
 // ErrSubagentNotRunning reports steering addressed to a child that is not in
@@ -129,7 +129,7 @@ func NewSpawner(opts SpawnerOptions) *Spawner {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Spawner{opts: opts, steering: make(map[string]chan string)}
+	return &Spawner{opts: opts, steering: make(map[string]chan SteeringLine)}
 }
 
 // Agents returns the discovered catalog the delegate tool validates against.
@@ -139,11 +139,12 @@ func (s *Spawner) Agents() []tools.AgentInfo {
 
 // SteerChild routes one composer line to a running child. It never blocks: a
 // full queue is an error, and a missing child means the run already finished.
-func (s *Spawner) SteerChild(sessionID, text string) error {
-	text = cleanText(text)
+func (s *Spawner) SteerChild(sessionID string, line SteeringLine) error {
+	text := cleanText(line.Text)
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
+	line.Text = text
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := s.steering[sessionID]
@@ -151,7 +152,7 @@ func (s *Spawner) SteerChild(sessionID, text string) error {
 		return ErrSubagentNotRunning
 	}
 	select {
-	case ch <- text:
+	case ch <- line:
 		return nil
 	default:
 		return ErrSubagentSteeringFull
@@ -197,11 +198,11 @@ func (s *Spawner) ChildHistory(sessionID string) ([]HistoryItem, error) {
 
 // registerSteering creates the channel a child consumes at its turn
 // boundaries.
-func (s *Spawner) registerSteering(sessionID string) chan string {
-	ch := make(chan string, 64)
+func (s *Spawner) registerSteering(sessionID string) chan SteeringLine {
+	ch := make(chan SteeringLine, 64)
 	s.mu.Lock()
 	if s.steering == nil {
-		s.steering = make(map[string]chan string)
+		s.steering = make(map[string]chan SteeringLine)
 	}
 	s.steering[sessionID] = ch
 	s.mu.Unlock()
@@ -1129,6 +1130,17 @@ func (d *childDisplay) display(ev DisplayEvent) error {
 	case ToolStarted:
 		d.lastTool = ev.Call.Name
 		return nil
+	case MessageRecorded:
+		return d.emit(SubagentMessageRecorded{
+			Turn:    ev.Turn,
+			CallID:  d.call.ID,
+			Index:   d.index,
+			Agent:   d.agent,
+			Session: d.session,
+			ID:      ev.ID,
+			Source:  ev.Source,
+			Text:    ev.Text,
+		})
 	}
 	return nil
 }
