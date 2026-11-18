@@ -345,25 +345,11 @@ func fromInternalChildren(children []agent.ChildOutcome) []ChildOutcome {
 	return out
 }
 
-// deriveLimits computes the per-call budget from a model spec, matching the
-// CLI's validateEffective rule.
+// deriveLimits computes the per-call budget from a model spec.
 func deriveLimits(spec ModelSpec) (Limits, error) {
-	if spec.ContextWindow <= 0 {
-		return Limits{}, &ConfigError{Field: "Model.Spec.ContextWindow", Detail: "must be positive"}
+	limits, err := agent.NewLimits(spec.ContextWindow, spec.MaxOutputTokens, spec.InputLimit)
+	if err != nil {
+		return Limits{}, &ConfigError{Field: "Model.Spec.ContextWindow", Detail: err.Error()}
 	}
-	margin := agent.SafetyMargin(spec.ContextWindow)
-	input := spec.ContextWindow - margin
-	if spec.InputLimit > 0 && spec.InputLimit < input {
-		input = spec.InputLimit
-	}
-	if input <= 0 {
-		return Limits{}, &ConfigError{Field: "Model.Spec.ContextWindow", Detail: "leaves no positive input budget after the safety margin"}
-	}
-	return Limits{
-		MaxContextTokens: spec.ContextWindow,
-		MaxOutputTokens:  spec.MaxOutputTokens,
-		SafetyMargin:     margin,
-		MaxInputTokens:   input,
-		CompactionTarget: input,
-	}, nil
+	return fromInternalLimits(limits), nil
 }

@@ -337,40 +337,27 @@ func validateEffortValue(effort *string, spec ModelSpec) error {
 }
 
 func mergeLimits(spec ModelSpec, override Limits) (Limits, error) {
-	derived, err := deriveLimits(spec)
-	if err != nil {
-		return Limits{}, err
-	}
-	context := derived.MaxContextTokens
+	context := spec.ContextWindow
 	if override.MaxContextTokens > 0 && override.MaxContextTokens < context {
 		context = override.MaxContextTokens
 	}
-	output := derived.MaxOutputTokens
+	output := spec.MaxOutputTokens
 	if override.MaxOutputTokens > 0 {
 		output = override.MaxOutputTokens
 	}
-	margin := agent.SafetyMargin(context)
-	input := context - margin
-	if spec.InputLimit > 0 && spec.InputLimit < input {
-		input = spec.InputLimit
+	inputLimit := spec.InputLimit
+	if override.MaxInputTokens > 0 && (inputLimit <= 0 || override.MaxInputTokens < inputLimit) {
+		inputLimit = override.MaxInputTokens
 	}
-	if override.MaxInputTokens > 0 && override.MaxInputTokens < input {
-		input = override.MaxInputTokens
+	internal, err := agent.NewLimits(context, output, inputLimit)
+	if err != nil {
+		return Limits{}, &ConfigError{Field: "Limits.MaxContextTokens", Detail: err.Error()}
 	}
-	if input <= 0 {
-		return Limits{}, &ConfigError{Field: "Limits.MaxContextTokens", Detail: "leaves no positive input budget"}
+	limits := fromInternalLimits(internal)
+	if override.CompactionTarget > 0 && override.CompactionTarget < limits.CompactionTarget {
+		limits.CompactionTarget = override.CompactionTarget
 	}
-	target := input
-	if override.CompactionTarget > 0 && override.CompactionTarget < target {
-		target = override.CompactionTarget
-	}
-	return Limits{
-		MaxContextTokens: context,
-		MaxOutputTokens:  output,
-		SafetyMargin:     margin,
-		MaxInputTokens:   input,
-		CompactionTarget: target,
-	}, nil
+	return limits, nil
 }
 
 // ID returns the canonical session UUID.

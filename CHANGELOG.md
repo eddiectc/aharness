@@ -10,6 +10,9 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `agent.NewLimits` derives the safety margin, input budget, and compaction
+  target, and `Limits.MaxOutputSet` distinguishes an omitted output budget from
+  an explicit one. Facade and engine derivations now share the constructor.
 - The event contract now documents root-only versus child events, the
   one-per-second `SubagentProgress` throttle, cumulative-so-far fields, the
   delegate per-task header, the display-after-return invariant, and the retry

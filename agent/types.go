@@ -31,6 +31,43 @@ func SafetyMargin(maxContextTokens int) int {
 	return margin
 }
 
+// NewLimits derives the per-call budget from a model context window, an output
+// budget, and an optional input limit. It computes the safety margin and
+// compaction target so a host never assembles them by hand. A non-positive
+// maxContext, a negative maxOutput, an invalid inputLimit, or a context that
+// leaves no input after the margin is an error.
+func NewLimits(maxContext, maxOutput, inputLimit int) (Limits, error) {
+	if maxContext <= 0 {
+		return Limits{}, errors.New("max context must be positive")
+	}
+	if maxOutput < 0 {
+		return Limits{}, errors.New("max output must not be negative")
+	}
+	if inputLimit < 0 || inputLimit > maxContext {
+		return Limits{}, errors.New("input limit must be non-negative and no larger than the context")
+	}
+	margin := SafetyMargin(maxContext)
+	input := maxContext - margin
+	if inputLimit > 0 && inputLimit < input {
+		input = inputLimit
+	}
+	if input <= 0 {
+		return Limits{}, errors.New("context leaves no positive input budget after the safety margin")
+	}
+	return Limits{
+		MaxContextTokens: maxContext,
+		MaxOutputTokens:  maxOutput,
+		SafetyMargin:     margin,
+		MaxInputTokens:   input,
+		CompactionTarget: input,
+	}, nil
+}
+
+// MaxOutputSet reports whether the output budget is configured. A zero
+// MaxOutputTokens means the field is omitted and the provider/model default
+// applies; a positive value is an explicit budget.
+func (l Limits) MaxOutputSet() bool { return l.MaxOutputTokens > 0 }
+
 // Config is the runner's immutable effective configuration for one run.
 type Config struct {
 	Provider       string

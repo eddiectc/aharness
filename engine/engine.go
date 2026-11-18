@@ -655,31 +655,29 @@ func clampLimits(limits, recorded agent.Limits) agent.Limits {
 	if recorded.MaxContextTokens > 0 && context > recorded.MaxContextTokens {
 		context = recorded.MaxContextTokens
 	}
+	if context <= 0 {
+		return limits
+	}
 	output := limits.MaxOutputTokens
 	if output <= 0 {
 		output = recorded.MaxOutputTokens
 	}
-	if context <= 0 {
+	inputLimit := limits.MaxInputTokens
+	if inputLimit <= 0 {
+		inputLimit = recorded.MaxInputTokens
+	} else if recorded.MaxInputTokens > 0 && recorded.MaxInputTokens < inputLimit {
+		inputLimit = recorded.MaxInputTokens
+	}
+	derived, err := agent.NewLimits(context, output, inputLimit)
+	if err != nil {
 		return limits
 	}
-	margin := agent.SafetyMargin(context)
-	input := context - margin
-	if limits.MaxInputTokens > 0 && limits.MaxInputTokens < input {
-		input = limits.MaxInputTokens
-	} else if recorded.MaxInputTokens > 0 && recorded.MaxInputTokens < input {
-		input = recorded.MaxInputTokens
-	}
-	target := input
+	target := derived.CompactionTarget
 	if limits.CompactionTarget > 0 && limits.CompactionTarget < target {
 		target = limits.CompactionTarget
 	}
-	return agent.Limits{
-		MaxContextTokens: context,
-		MaxOutputTokens:  output,
-		SafetyMargin:     margin,
-		MaxInputTokens:   input,
-		CompactionTarget: target,
-	}
+	derived.CompactionTarget = target
+	return derived
 }
 
 func sameGrant(one, two []string) bool {
