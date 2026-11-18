@@ -207,6 +207,37 @@ func containsTool(names []aharness.ToolName, want aharness.ToolName) bool {
 	return false
 }
 
+func TestRootGrantExplicitEmpty(t *testing.T) {
+	model := &scriptedModel{responses: []aharness.Response{{
+		Text: "done", FinishReason: aharness.FinishStop,
+		Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+	}}}
+	ag, err := aharness.New(context.Background(), aharness.Config{
+		Workspace: t.TempDir(),
+		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(model),
+		Tools:     &aharness.ToolsConfig{RootGrant: []aharness.ToolName{}},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = ag.Close() }()
+	state, err := ag.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.RootTools == nil || len(state.RootTools) != 0 {
+		t.Fatalf("State.RootTools = %#v, want a non-nil empty grant", state.RootTools)
+	}
+	if _, err := ag.Run(context.Background(), "work", aharness.RunOptions{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(model.requests) == 0 || len(model.requests[0].Tools) != 0 {
+		t.Fatalf("root request tools = %v, want none", model.requests[0].Tools)
+	}
+}
+
 func TestRootGrantValidation(t *testing.T) {
 	model := testModel(&scriptedModel{})
 	cases := []struct {
