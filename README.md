@@ -136,11 +136,13 @@ OpenAI-compatible endpoint. `DiscoverModel` and `ListModels` resolve models and
 limits from the [models.dev](https://models.dev) catalog. `CustomModel` wraps
 any implementation of the `Model` interface; implement the optional
 `StreamingModel` interface to emit deltas. `Config.UserAgent`,
-`OpenAIModelOptions.UserAgent`, and `CatalogConfig.UserAgent` are required: the
-SDK sends the caller's identity on every outbound request and never substitutes
-its own. A direct `engine` host must set `engine.Spec.UserAgent`; `engine.Open`
-rejects an empty identity, and a `ResolveModel` closure must use the same
-identity because the engine cannot inspect its adapter's headers.
+`OpenAIModelOptions.UserAgent`, and `CatalogConfig.UserAgent` are required when
+the corresponding caller runs: the SDK sends the caller's identity on every
+outbound request and never substitutes its own. A `CatalogConfig` is validated
+only when `DiscoverModel` or `ListModels` is called. A direct `engine` host must
+set `engine.Spec.UserAgent`; `engine.Open` rejects an empty identity, and a
+`ResolveModel` closure must use the same identity because the engine cannot
+inspect its adapter's headers.
 
 `Config.MaxTurns` and `MaxTotalTokens` bound the agent's cumulative turn and
 token usage, while `RunTimeout` and `ModelTimeout` bound one run and one model
