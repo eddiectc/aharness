@@ -10,6 +10,11 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- The event contract now documents root-only versus child events, the
+  one-per-second `SubagentProgress` throttle, cumulative-so-far fields, the
+  delegate per-task header, the display-after-return invariant, and the retry
+  rule that partial text is terminal. Tests assert `RunFinished` is last and no
+  display call happens after the run returns.
 - `RunStarted.RunID` and `RunFinished.RunID` carry the UUIDv7 recorded in
   `run_start`, so a host can discard stale events without numbering runs.
 - `Result.Reason` and `Result.Duration` (component and facade) carry the

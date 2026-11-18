@@ -213,6 +213,66 @@ func TestRunEventsCarryOneRunID(t *testing.T) {
 	}
 }
 
+func TestDisplayIsSilentAfterRunReturns(t *testing.T) {
+	var returned atomic.Bool
+	var calls atomic.Int64
+	var mu sync.Mutex
+	var kinds []string
+	model := &scriptedModel{responses: []aharness.Response{{
+		Text: "done", FinishReason: aharness.FinishStop,
+		Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+	}}}
+	ag, err := aharness.New(context.Background(), aharness.Config{
+		Workspace: t.TempDir(),
+		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
+		Model:     testModel(model),
+		Logger:    nil,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = ag.Close() }()
+	run, err := ag.Start(context.Background(), "work", aharness.RunOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	display := func(ev aharness.Event) {
+		calls.Add(1)
+		if returned.Load() {
+			t.Errorf("display event %T after Run returned", ev)
+		}
+		mu.Lock()
+		kinds = append(kinds, fmt.Sprintf("%T", ev))
+		mu.Unlock()
+	}
+	// Start's events are the display stream; stop after the terminal event and
+	// wait for the run to drain.
+	var last string
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("event error: %v", err)
+		}
+		display(ev)
+		last = fmt.Sprintf("%T", ev)
+	}
+	if last != "aharness.RunFinished" {
+		t.Fatalf("last event = %s", last)
+	}
+	returned.Store(true)
+	if err := run.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if calls.Load() == 0 {
+		t.Fatal("display never ran")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if kinds[len(kinds)-1] != "aharness.RunFinished" {
+		t.Fatalf("last display kind = %s", kinds[len(kinds)-1])
+	}
+}
+
 func TestInterruptContinuesRun(t *testing.T) {
 	model := newInterruptibleModel()
 	ag, _, _ := newTestAgent(t, nil, model)

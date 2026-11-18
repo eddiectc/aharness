@@ -194,7 +194,9 @@ type SubagentFinished struct {
 	Error         string
 }
 
-// RunFinished carries the terminal Result.
+// RunFinished carries the terminal Result and is the last event. The display
+// callback is never invoked after Run returns. If the final append or sync
+// failed, the iterator closes with the result instead.
 type RunFinished struct {
 	EventMeta
 	RunID    string

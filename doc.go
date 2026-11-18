@@ -18,6 +18,28 @@
 // same cause so errors.Is and errors.As work. Events are observation only: the
 // session log is the only durable truth.
 //
+// # Events
+//
+// Display events are observation only. Root activity is reported as
+// TextDelta, ReasoningDelta, ToolStarted, ToolCompleted, Notice, and
+// MessageRecorded. A delegated child is reported only as SubagentStarted,
+// SubagentProgress, SubagentFinished, and SubagentMessageRecorded; its text,
+// arguments, and tool output stay in the child transcript. SubagentProgress is
+// throttled to at most one event per second per child, so its usage and cost
+// are cumulative-so-far, not final. ResponseCompleted's cumulative fields work
+// the same way: they include the completed response but a later turn may
+// change them.
+//
+// The display callback is never invoked after the run returns. RunFinished is
+// the terminal event and is emitted once; if the final append or sync fails,
+// the event iterator closes with the result instead. RunOptions.OnEvent follows
+// the same ordering for the blocking Run.
+//
+// Transport retries happen only before the first assistant-text delta.
+// ModelStarted.Attempt greater than one therefore marks a retry with no
+// partial text to reconcile. Once partial text has been displayed, a failure is
+// terminal and the partial text is retained rather than reset.
+//
 // # Tools and policy
 //
 // Built-in tools can be disabled with ToolsConfig.Disable and caller tools are

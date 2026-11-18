@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/eddiectc/aharness/agent"
@@ -283,6 +285,43 @@ func TestListSummariesFiltersAndReadsHeads(t *testing.T) {
 	full, err := ListSummaries(context.Background(), stateDir, ListOptions{})
 	if err != nil || len(full) != 0 {
 		t.Fatalf("full summaries = %+v, %v; want the corrupt log skipped", full, err)
+	}
+}
+
+func TestDisplayStopsAtRunFinished(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	var (
+		mu       sync.Mutex
+		kinds    []string
+		returned bool
+	)
+	display := func(ev agent.DisplayEvent) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if returned {
+			t.Errorf("display event %T after Run returned", ev)
+		}
+		kinds = append(kinds, fmt.Sprintf("%T", ev))
+		return nil
+	}
+	runner, err := host.BuildRunner(RunSpec{}, display, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildRunner: %v", err)
+	}
+	if _, err := runner.Run(context.Background(), agent.RunOptions{Task: "work", TaskSet: true}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	mu.Lock()
+	returned = true
+	last := kinds[len(kinds)-1]
+	mu.Unlock()
+	if last != "agent.RunFinished" {
+		t.Fatalf("last display event = %s, want agent.RunFinished", last)
 	}
 }
 

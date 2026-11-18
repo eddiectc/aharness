@@ -37,7 +37,9 @@ type RunStarted struct {
 	ThinkingEffort string
 }
 
-// ModelStarted is emitted before each transport attempt.
+// ModelStarted is emitted before each transport attempt. Attempt greater than
+// one follows a retry, which happens only before any assistant-text delta; a
+// failure after a delta is terminal and the displayed partial text is kept.
 type ModelStarted struct {
 	Turn    int
 	Attempt int
