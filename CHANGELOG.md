@@ -10,6 +10,10 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `engine.ListSummaries` (with `ListOptions`/`Summary`) lists sessions newest
+  first with workspace, limit, head-read, and child filters. `agent.Summarize`
+  now reports `CreatedAt`; `UpdatedAt` comes from file mtime and is advisory.
+  `engine.List` remains the full-state listing.
 - `agent.SteeringLine` carries a host-assigned steering ID, returned by
   `Run.Steer`/`Run.SteerChild` and echoed on `MessageRecorded.ID` and the new
   `SubagentMessageRecorded` event. Duplicate text now acknowledges distinct

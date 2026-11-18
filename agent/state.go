@@ -243,6 +243,7 @@ type SessionSummary struct {
 	// ParentSession is non-empty for a delegated child, which the resume
 	// picker excludes.
 	ParentSession string
+	CreatedAt     time.Time
 }
 
 // Summarize decodes the session_start event and the first user message from a
@@ -255,6 +256,9 @@ func Summarize(events []session.Event) (SessionSummary, error) {
 	var summary SessionSummary
 	found := false
 	messageFound := false
+	if len(events) > 0 {
+		summary.CreatedAt = events[0].TS
+	}
 	for _, ev := range events {
 		switch ev.Type {
 		case session.TypeSessionStart:

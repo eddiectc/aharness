@@ -194,6 +194,98 @@ func TestHostReadSurface(t *testing.T) {
 	}
 }
 
+func TestListSummariesFiltersAndReadsHeads(t *testing.T) {
+	parentSpec := baseSpec(t, ModeNew)
+	parent, err := Open(context.Background(), parentSpec)
+	if err != nil {
+		t.Fatalf("Open parent: %v", err)
+	}
+	parentID := parent.ID()
+	stateDir := parent.StateDir()
+	workspace := parent.Workspace()
+	ev, err := session.NewEvent(session.TypeUserMessage, 0, "user", map[string]string{"text": "first message", "source": "task"})
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if err := parent.Store().Append(ev); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := parent.Close(); err != nil {
+		t.Fatalf("Close parent: %v", err)
+	}
+	forkSpec := baseSpec(t, ModeFork)
+	forkSpec.StateDir = stateDir
+	forkSpec.Workspace = workspace
+	forkSpec.SessionID = parentID
+	fork, err := Open(context.Background(), forkSpec)
+	if err != nil {
+		t.Fatalf("Open fork: %v", err)
+	}
+	forkID := fork.ID()
+	if err := fork.Close(); err != nil {
+		t.Fatalf("Close fork: %v", err)
+	}
+
+	roots, err := ListSummaries(context.Background(), stateDir, ListOptions{})
+	if err != nil {
+		t.Fatalf("ListSummaries roots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].ID != parentID {
+		t.Fatalf("root summaries = %+v", roots)
+	}
+	root := roots[0]
+	if root.Workspace != workspace || root.Model != "engine-model" || root.FirstMessage != "first message" || root.ParentSession != "" {
+		t.Fatalf("root summary = %+v", root)
+	}
+	if root.CreatedAt.IsZero() || root.UpdatedAt.IsZero() {
+		t.Fatalf("summary timestamps = %v / %v", root.CreatedAt, root.UpdatedAt)
+	}
+
+	all, err := ListSummaries(context.Background(), stateDir, ListOptions{IncludeChildren: true, Workspace: workspace})
+	if err != nil {
+		t.Fatalf("ListSummaries all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("all summaries = %+v", all)
+	}
+	var child *Summary
+	for i := range all {
+		if all[i].ID == forkID {
+			child = &all[i]
+		}
+	}
+	if child == nil || child.ParentSession != parentID {
+		t.Fatalf("child summary = %+v", child)
+	}
+	if got, err := ListSummaries(context.Background(), stateDir, ListOptions{Workspace: "/other/workspace"}); err != nil || len(got) != 0 {
+		t.Fatalf("workspace filter = %+v, %v", got, err)
+	}
+	if got, err := ListSummaries(context.Background(), stateDir, ListOptions{IncludeChildren: true, Limit: 1}); err != nil || len(got) != 1 {
+		t.Fatalf("limit = %+v, %v", got, err)
+	}
+
+	// A corrupt tail is outside the head read, so MaxEvents still succeeds
+	// while a full snapshot skips the log.
+	file, err := os.OpenFile(filepath.Join(stateDir, "sessions", parentID+".jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open parent log: %v", err)
+	}
+	if _, err := file.WriteString("{not-json\n{\"more\":true}\n"); err != nil {
+		t.Fatalf("write corrupt tail: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close parent log: %v", err)
+	}
+	head, err := ListSummaries(context.Background(), stateDir, ListOptions{MaxEvents: 1})
+	if err != nil || len(head) != 1 || head[0].ID != parentID {
+		t.Fatalf("head summaries = %+v, %v", head, err)
+	}
+	full, err := ListSummaries(context.Background(), stateDir, ListOptions{})
+	if err != nil || len(full) != 0 {
+		t.Fatalf("full summaries = %+v, %v; want the corrupt log skipped", full, err)
+	}
+}
+
 func TestResumeInheritsModelAndLimits(t *testing.T) {
 	spec := baseSpec(t, ModeNew)
 	host, err := Open(context.Background(), spec)
