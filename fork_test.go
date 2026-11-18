@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/eddiectc/aharness"
+	"github.com/eddiectc/aharness/session"
 )
 
 func TestForkReplaysHistoryWithToolAbsentFromNewGrant(t *testing.T) {
@@ -31,6 +32,11 @@ func TestForkReplaysHistoryWithToolAbsentFromNewGrant(t *testing.T) {
 	if err := ag.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	parentEvents, err := session.Read(session.SessionPath(stateDir, parentID))
+	if err != nil {
+		t.Fatalf("read parent log: %v", err)
+	}
+	parentLastSeq := parentEvents[len(parentEvents)-1].Seq
 
 	forkModel := &scriptedModel{responses: []aharness.Response{
 		{Text: "after fork", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true}},
@@ -56,12 +62,30 @@ func TestForkReplaysHistoryWithToolAbsentFromNewGrant(t *testing.T) {
 	if state.ContractOverride == nil || !state.ContractOverride.Tools {
 		t.Fatalf("contract override = %+v", state.ContractOverride)
 	}
-	result, err := forked.Run(context.Background(), "continue", aharness.RunOptions{})
+	run, err := forked.Start(context.Background(), "continue", aharness.RunOptions{})
 	if err != nil {
-		t.Fatalf("forked Run: %v", err)
+		t.Fatalf("forked Start: %v", err)
+	}
+	var (
+		resumedFrom uint64
+		result      aharness.Result
+	)
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("event error: %v", err)
+		}
+		switch ev := ev.(type) {
+		case aharness.RunStarted:
+			resumedFrom = ev.ResumedFromSeq
+		case aharness.RunFinished:
+			result = ev.Result
+		}
 	}
 	if result.Status != aharness.StopCompleted || result.FinalText != "after fork" {
 		t.Fatalf("forked result = %+v", result)
+	}
+	if resumedFrom != parentLastSeq {
+		t.Fatalf("forked ResumedFromSeq = %d, want parent last sequence %d", resumedFrom, parentLastSeq)
 	}
 }
 
