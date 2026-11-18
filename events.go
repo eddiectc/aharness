@@ -21,6 +21,7 @@ type EventMeta struct {
 // RunStarted is emitted after run_start is durable.
 type RunStarted struct {
 	EventMeta
+	RunID          string
 	Turn           int
 	ResumedFromSeq uint64
 	Model          string
@@ -196,6 +197,7 @@ type SubagentFinished struct {
 // RunFinished carries the terminal Result.
 type RunFinished struct {
 	EventMeta
+	RunID    string
 	Result   Result
 	Reason   string
 	Duration time.Duration
@@ -221,7 +223,7 @@ func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Ev
 	meta := EventMeta{Time: now, Session: session}
 	switch ev := ev.(type) {
 	case agent.RunStarted:
-		return RunStarted{EventMeta: meta, Turn: ev.Turn, ResumedFromSeq: ev.ResumedFromSeq, Model: ev.Model, Dialect: ev.Dialect, ThinkingEffort: ev.ThinkingEffort}, true
+		return RunStarted{EventMeta: meta, RunID: ev.RunID, Turn: ev.Turn, ResumedFromSeq: ev.ResumedFromSeq, Model: ev.Model, Dialect: ev.Dialect, ThinkingEffort: ev.ThinkingEffort}, true
 	case agent.TextDelta:
 		return TextDelta{EventMeta: meta, Text: ev.Text}, true
 	case agent.ReasoningDelta:
@@ -325,6 +327,7 @@ func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Ev
 	case agent.RunFinished:
 		return RunFinished{
 			EventMeta: meta,
+			RunID:     ev.RunID,
 			Result:    fromInternalResult(ev.Result, session, publicError(ev.Result.Err)),
 			Reason:    ev.Reason,
 			Duration:  ev.Duration,

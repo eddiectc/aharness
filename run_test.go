@@ -187,6 +187,32 @@ func TestResponseCompletedCarriesCumulativeProgress(t *testing.T) {
 	}
 }
 
+func TestRunEventsCarryOneRunID(t *testing.T) {
+	ag, _, _ := newTestAgent(t, nil, &scriptedModel{responses: []aharness.Response{{
+		Text: "done", FinishReason: aharness.FinishStop,
+		Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+	}}})
+	run, err := ag.Start(context.Background(), "work", aharness.RunOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	var startedID, finishedID string
+	for ev, err := range run.Events() {
+		if err != nil {
+			t.Fatalf("event error: %v", err)
+		}
+		switch ev := ev.(type) {
+		case aharness.RunStarted:
+			startedID = ev.RunID
+		case aharness.RunFinished:
+			finishedID = ev.RunID
+		}
+	}
+	if startedID == "" || finishedID == "" || startedID != finishedID {
+		t.Fatalf("run IDs = %q / %q, want one non-empty ID", startedID, finishedID)
+	}
+}
+
 func TestInterruptContinuesRun(t *testing.T) {
 	model := newInterruptibleModel()
 	ag, _, _ := newTestAgent(t, nil, model)

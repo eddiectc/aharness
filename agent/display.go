@@ -29,6 +29,7 @@ const (
 // RunStarted is emitted after run_start is durable and pending calls are
 // repaired. It carries the effective model and dialect recorded in the log.
 type RunStarted struct {
+	RunID          string
 	Turn           int
 	ResumedFromSeq uint64
 	Model          string
@@ -190,6 +191,7 @@ type SubagentFinished struct {
 
 // RunFinished is emitted after final and run_end are durable.
 type RunFinished struct {
+	RunID    string
 	Result   Result
 	Reason   string
 	Duration time.Duration
@@ -264,7 +266,11 @@ func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
 		ev.Status = displaySafe(ev.Status)
 		ev.Error = displaySafe(ev.Error)
 		return ev
+	case RunStarted:
+		ev.RunID = displaySafe(ev.RunID)
+		return ev
 	case RunFinished:
+		ev.RunID = displaySafe(ev.RunID)
 		ev.Reason = displaySafe(ev.Reason)
 		return ev
 	default:

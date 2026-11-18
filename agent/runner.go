@@ -115,6 +115,7 @@ func (r *Runner) StartSession(parent *ParentRef) error {
 // runState is per-Run mutable state. It never escapes the loop.
 type runState struct {
 	start            time.Time
+	runID            string
 	turns            int
 	usage            model.Usage
 	contextTokens    int
@@ -192,7 +193,8 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		return res, err
 	}
 
-	if err := r.recordRunStart(resumedFromSeq); err != nil {
+	st.runID = session.NewID()
+	if err := r.recordRunStart(st.runID, resumedFromSeq); err != nil {
 		res.Status = StopInternalError
 		res.Err = err
 		return res, err
@@ -203,6 +205,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (Result, error) {
 		return res, err
 	}
 	if err := r.emit(RunStarted{
+		RunID:          st.runID,
 		Turn:           st.turns,
 		ResumedFromSeq: resumedFromSeq,
 		Model:          r.cfg.Model,
@@ -328,9 +331,9 @@ func (r *Runner) repairPending(pending []PendingCall) ([]PendingCall, error) {
 	return pending, nil
 }
 
-func (r *Runner) recordRunStart(resumedFromSeq uint64) error {
+func (r *Runner) recordRunStart(runID string, resumedFromSeq uint64) error {
 	data := runStartData{
-		RunID:            session.NewID(),
+		RunID:            runID,
 		ResumedFromSeq:   resumedFromSeq,
 		Provider:         r.cfg.Provider,
 		Model:            r.cfg.Model,
@@ -1193,7 +1196,7 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	}
 	// A RunFinished display failure is returned to the caller but does not
 	// rewrite the already-durable terminal status.
-	if err := r.emit(RunFinished{Result: *res, Reason: reason, Duration: res.Duration}); err != nil {
+	if err := r.emit(RunFinished{RunID: st.runID, Result: *res, Reason: reason, Duration: res.Duration}); err != nil {
 		res.Err = errors.Join(res.Err, err)
 	}
 	return *res, res.Err

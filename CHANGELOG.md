@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `RunStarted.RunID` and `RunFinished.RunID` carry the UUIDv7 recorded in
+  `run_start`, so a host can discard stale events without numbering runs.
 - `Result.Reason` and `Result.Duration` (component and facade) carry the
   terminal explanation and wall-clock time, matching `run_end` and
   `RunFinished`.
