@@ -89,6 +89,15 @@ type State struct {
 	SubagentCostComplete bool
 }
 
+// TotalUsage returns the parent's own usage plus every folded delegated
+// child's usage.
+func (s State) TotalUsage() model.Usage {
+	usage := s.Usage
+	usage.InputTokens += s.SubagentUsage.InputTokens
+	usage.OutputTokens += s.SubagentUsage.OutputTokens
+	return usage
+}
+
 // Inspect reconstructs the session state used for resume, fork, and the next
 // run. Unknown event types and fields within v2 are ignored. A malformed known
 // payload is a corrupt-log error.

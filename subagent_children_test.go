@@ -89,6 +89,20 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 	if len(sessions) != 3 {
 		t.Fatalf("child sessions = %v, want 3 distinct", sessions)
 	}
+	state, err := ag.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	wantUsage := aharness.Usage{
+		InputTokens:  state.Usage.InputTokens + state.SubagentUsage.InputTokens,
+		OutputTokens: state.Usage.OutputTokens + state.SubagentUsage.OutputTokens,
+	}
+	if state.TotalUsage() != wantUsage {
+		t.Fatalf("TotalUsage = %+v from %+v + %+v", state.TotalUsage(), state.Usage, state.SubagentUsage)
+	}
+	if state.SubagentUsage.Total() == 0 {
+		t.Fatal("delegated session recorded no subagent usage")
+	}
 }
 
 func TestPreStartFailureEmitsFinishedWithError(t *testing.T) {

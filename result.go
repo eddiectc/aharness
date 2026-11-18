@@ -128,14 +128,19 @@ type State struct {
 	Turns            int
 	Usage            Usage
 	ContextTokens    int
-	CostMicroUSD     int64
-	CostComplete     bool
-	ThinkingEffort   string
-	LastRunStatus    StopReason
-	Pending          []PendingCall
-	Parent           *ParentRef
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// Subagent totals are folded from every recorded delegate result.
+	SubagentTurns        int
+	SubagentUsage        Usage
+	SubagentCostMicroUSD int64
+	SubagentCostComplete bool
+	CostMicroUSD         int64
+	CostComplete         bool
+	ThinkingEffort       string
+	LastRunStatus        StopReason
+	Pending              []PendingCall
+	Parent               *ParentRef
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // SessionInfo is the metadata a session picker or resume screen needs.
@@ -179,6 +184,15 @@ func Sessions(ctx context.Context, stateDir string) ([]SessionInfo, error) {
 	return out, nil
 }
 
+// TotalUsage returns the session's own usage plus every folded delegated
+// child's usage.
+func (s State) TotalUsage() Usage {
+	usage := s.Usage
+	usage.InputTokens += s.SubagentUsage.InputTokens
+	usage.OutputTokens += s.SubagentUsage.OutputTokens
+	return usage
+}
+
 func stateFromSnapshot(snapshot engine.Snapshot) State {
 	state := snapshot.State
 	out := State{
@@ -195,18 +209,22 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 			InputLimit:      state.Limits.MaxInputTokens,
 			Pricing:         fromInternalPricing(state.Pricing),
 		},
-		SystemPrompt:   state.SystemPrompt,
-		AgentName:      state.Agent,
-		Limits:         fromInternalLimits(state.Limits),
-		Turns:          state.Turns,
-		Usage:          fromInternalUsage(state.Usage),
-		ContextTokens:  state.ContextTokens,
-		CostMicroUSD:   state.CostMicroUSD,
-		CostComplete:   state.CostComplete,
-		ThinkingEffort: state.ThinkingEffort,
-		LastRunStatus:  StopReason(state.LastRunStatus),
-		CreatedAt:      snapshot.CreatedAt,
-		UpdatedAt:      snapshot.UpdatedAt,
+		SystemPrompt:         state.SystemPrompt,
+		AgentName:            state.Agent,
+		Limits:               fromInternalLimits(state.Limits),
+		Turns:                state.Turns,
+		Usage:                fromInternalUsage(state.Usage),
+		ContextTokens:        state.ContextTokens,
+		SubagentTurns:        state.SubagentTurns,
+		SubagentUsage:        fromInternalUsage(state.SubagentUsage),
+		SubagentCostMicroUSD: state.SubagentCostMicroUSD,
+		SubagentCostComplete: state.SubagentCostComplete,
+		CostMicroUSD:         state.CostMicroUSD,
+		CostComplete:         state.CostComplete,
+		ThinkingEffort:       state.ThinkingEffort,
+		LastRunStatus:        StopReason(state.LastRunStatus),
+		CreatedAt:            snapshot.CreatedAt,
+		UpdatedAt:            snapshot.UpdatedAt,
 	}
 	if state.Model == "" {
 		out.Model.ID = state.InitialModel

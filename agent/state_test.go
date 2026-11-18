@@ -4,9 +4,24 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/eddiectc/aharness/model"
 	"github.com/eddiectc/aharness/session"
 	"github.com/eddiectc/aharness/tools"
 )
+
+func TestStateTotalUsage(t *testing.T) {
+	state := State{
+		Usage:         model.Usage{InputTokens: 10, OutputTokens: 5},
+		SubagentUsage: model.Usage{InputTokens: 3, OutputTokens: 2},
+	}
+	total := state.TotalUsage()
+	if total.InputTokens != 13 || total.OutputTokens != 7 {
+		t.Fatalf("TotalUsage = %+v", total)
+	}
+	if state.Usage.InputTokens != 10 || state.SubagentUsage.InputTokens != 3 {
+		t.Fatal("TotalUsage mutated the state")
+	}
+}
 
 func TestSummarizeSessionHead(t *testing.T) {
 	events := []session.Event{
@@ -24,6 +39,7 @@ func TestSummarizeSessionHead(t *testing.T) {
 	}
 	want := SessionSummary{
 		Workspace: "/workspace", Provider: "opencode-go", Model: "model-a", FirstMessage: "first task",
+		CreatedAt: events[0].TS,
 	}
 	if summary != want {
 		t.Fatalf("Summarize = %+v, want %+v", summary, want)

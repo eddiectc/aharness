@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `State.TotalUsage` (agent and facade) returns parent plus folded delegated
+  child usage. The facade `State` also exposes the folded subagent totals.
 - `session.CreateNew` creates a log with a generated canonical UUIDv7 ID;
   `Create` still takes a caller ID for forks and tests.
 - `agent.AgentOverride.Clone` returns an independent copy; a reflection test
