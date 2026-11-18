@@ -1,9 +1,43 @@
 package agent
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestAgentOverrideCloneCopiesEveryField(t *testing.T) {
+	model, effort, turns, enabled := "m", "high", 3, true
+	original := AgentOverride{Model: &model, ThinkingEffort: &effort, MaxTurns: &turns, Enabled: &enabled}
+	clone := original.Clone()
+	if !reflect.DeepEqual(original, clone) {
+		t.Fatalf("Clone = %+v, want %+v", clone, original)
+	}
+	value := reflect.ValueOf(original)
+	cloned := reflect.ValueOf(clone)
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Type().Field(i)
+		if field.Type.Kind() != reflect.Pointer {
+			continue
+		}
+		if value.Field(i).IsNil() {
+			continue
+		}
+		if value.Field(i).Pointer() == cloned.Field(i).Pointer() {
+			t.Fatalf("%s shares the original pointer", field.Name)
+		}
+	}
+	*clone.Model = "changed"
+	*clone.ThinkingEffort = "low"
+	*clone.MaxTurns = 1
+	*clone.Enabled = false
+	if *original.Model != "m" || *original.ThinkingEffort != "high" || *original.MaxTurns != 3 || !*original.Enabled {
+		t.Fatalf("mutating clone changed original: %+v", original)
+	}
+	if !(AgentOverride{}).Clone().Empty() {
+		t.Fatal("empty clone is not empty")
+	}
+}
 
 func overrideStr(value string) *string { return &value }
 func overrideInt(value int) *int       { return &value }

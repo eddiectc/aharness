@@ -10,6 +10,8 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `agent.AgentOverride.Clone` returns an independent copy; a reflection test
+  covers every pointer field so a future field cannot be silently dropped.
 - `agent.NewLimits` derives the safety margin, input budget, and compaction
   target, and `Limits.MaxOutputSet` distinguishes an omitted output budget from
   an explicit one. Facade and engine derivations now share the constructor.

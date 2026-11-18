@@ -28,6 +28,29 @@ type AgentOverride struct {
 	Enabled        *bool
 }
 
+// Clone returns an independent copy of the override. Every pointer field is
+// copied, so a host can edit one field without mutating the original.
+func (o AgentOverride) Clone() AgentOverride {
+	out := o
+	if o.Model != nil {
+		value := *o.Model
+		out.Model = &value
+	}
+	if o.ThinkingEffort != nil {
+		value := *o.ThinkingEffort
+		out.ThinkingEffort = &value
+	}
+	if o.MaxTurns != nil {
+		value := *o.MaxTurns
+		out.MaxTurns = &value
+	}
+	if o.Enabled != nil {
+		value := *o.Enabled
+		out.Enabled = &value
+	}
+	return out
+}
+
 // Empty reports whether the override changes nothing.
 func (o AgentOverride) Empty() bool {
 	return o.Model == nil && o.ThinkingEffort == nil && o.MaxTurns == nil && o.Enabled == nil
