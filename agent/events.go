@@ -40,7 +40,10 @@ type sessionStartData struct {
 	// ("every tool of the recorded toolset"); an explicit empty grant is
 	// written as [] and decodes as non-nil empty ("no tools"). The field
 	// intentionally has no omitempty so the empty slice survives a round trip.
-	Tools            []string          `json:"tools,omitzero"`
+	Tools []string `json:"tools,omitzero"`
+	// RootTools is the root-only grant. Nil/omitted means the root used the
+	// session grant; an explicit empty grant is written as [].
+	RootTools        []string          `json:"root_tools,omitzero"`
 	CustomTools      []customToolData  `json:"custom_tools,omitempty"`
 	ContractOverride *ContractOverride `json:"contract_override,omitempty"`
 	ParentCallID     string            `json:"parent_call_id,omitempty"`

@@ -41,6 +41,10 @@ type State struct {
 	// Tools is the recorded tool grant; nil means every tool of the version
 	// and a non-nil empty grant means none.
 	Tools []string
+	// RootTools is the recorded root-only grant. Nil means the root used the
+	// session grant; a non-nil empty grant means the root was offered no
+	// tools. Old logs without the field reconstruct as nil.
+	RootTools []string
 	// CustomTools is the recorded caller-tool contract in declaration order.
 	CustomTools []CustomTool
 	// ContractOverride is non-nil when the session was forked with a prompt or
@@ -121,6 +125,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.SystemPrompt = data.SystemPrompt
 			state.Agent = data.Agent
 			state.Tools = cloneGrant(data.Tools)
+			state.RootTools = cloneGrant(data.RootTools)
 			state.CustomTools = customToolsFromData(data.CustomTools)
 			state.ContractOverride = data.ContractOverride
 			state.InitialModel = data.Model

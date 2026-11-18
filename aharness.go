@@ -188,6 +188,7 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 		Agents:          promptAgents(cfg.Tools),
 		CustomTools:     setup.custom,
 		Grant:           setup.grant,
+		RootGrant:       setup.rootGrant,
 		ToolOptions:     setup.options,
 		ToolPolicy:      authorizeAdapter(cfg.Authorize),
 		SystemPrompt:    cfg.SystemPrompt,

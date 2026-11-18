@@ -86,6 +86,7 @@ type State struct {
 	AgentName        string
 	SystemPrompt     string
 	Tools            []ToolName
+	RootTools        []ToolName
 	CustomTools      []ToolSchema
 	ConcurrencySafe  []ToolName
 	ContractOverride *ContractOverride
@@ -183,6 +184,12 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 		out.Tools = make([]ToolName, len(state.Tools))
 		for i, name := range state.Tools {
 			out.Tools[i] = ToolName(name)
+		}
+	}
+	if state.RootTools != nil {
+		out.RootTools = make([]ToolName, len(state.RootTools))
+		for i, name := range state.RootTools {
+			out.RootTools[i] = ToolName(name)
 		}
 	}
 	for _, tool := range state.CustomTools {

@@ -72,6 +72,7 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		SystemPrompt:     systemPromptText(cfg),
 		Agent:            cfg.Agent,
 		Tools:            cloneGrant(cfg.Tools),
+		RootTools:        cloneGrant(cfg.RootTools),
 		CustomTools:      recordedCustomTools(cfg.CustomTools),
 		ContractOverride: cfg.ContractOverride,
 	}

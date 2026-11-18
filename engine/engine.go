@@ -89,11 +89,13 @@ type Spec struct {
 	// preserves nil (all tools of the recorded version) versus empty (none).
 	Grant    []string
 	GrantSet bool
-	// ExecutionGrant narrows dispatch for this process without changing the
-	// recorded grant or projection. The CLI uses it to withhold delegate in
-	// batch mode while preserving the session contract.
-	ExecutionGrant    []string
-	ExecutionGrantSet bool
+	// RootGrant narrows what the root session is offered and may dispatch this
+	// run. Nil keeps the session grant; a non-nil empty grant offers the root
+	// no tools. It never widens authority and never changes a child's
+	// AgentDefinition.Tools. It is recorded as session_start.root_tools and
+	// inherited on resume/fork when nil. Names must be in the session grant;
+	// delegate requires Delegation.
+	RootGrant []string
 	// ToolOptions carries the workspace-independent tool configuration. Work
 	// directories are filled per run by the engine.
 	ToolOptions tools.Options
@@ -244,6 +246,7 @@ func openNew(spec Spec) (*Host, error) {
 		SystemPrompt:   prompt,
 		Agent:          spec.Agent,
 		Tools:          cloneGrant(spec.Grant),
+		RootTools:      cloneGrant(spec.RootGrant),
 		CustomTools:    cloneCustomTools(spec.CustomTools),
 		Limits:         spec.Limits,
 		ThinkingEffort: effortValue(spec.ThinkingEffort, ""),
@@ -263,6 +266,7 @@ func openNew(spec Spec) (*Host, error) {
 	spec.PromptVersion = promptVersion
 	spec.ToolsetVersion = toolsetVersion
 	spec.Grant = cloneGrant(spec.Grant)
+	spec.RootGrant = cloneGrant(spec.RootGrant)
 	spec.CustomTools = cloneCustomTools(spec.CustomTools)
 	return newHost(spec, store, ws), nil
 }
@@ -381,6 +385,7 @@ func openFork(spec Spec) (*Host, error) {
 		SystemPrompt:     prompt,
 		Agent:            resolved.Agent,
 		Tools:            cloneGrant(resolved.Grant),
+		RootTools:        cloneGrant(resolved.RootGrant),
 		CustomTools:      cloneCustomTools(resolved.CustomTools),
 		ContractOverride: override,
 		Limits:           resolved.Limits,
@@ -524,7 +529,24 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	if !fork && !spec.CustomToolsSet && len(recordedCustom) > 0 {
 		return Spec{}, "", fmt.Errorf("%w: session records %d custom tool(s) but none were supplied; supply matching Tools.Extra", agent.ErrToolMismatch, len(recordedCustom))
 	}
-	if err := validateToolsForVersion(resolved.Grant, resolved.CustomTools, resolved.ToolsetVersion, len(spec.Definitions) > 0); err != nil {
+	// Root grant: an explicit set replaces on fork and is matched on resume. A
+	// nil set inherits the recorded root grant; nil in the log means the root
+	// used the session grant.
+	if spec.RootGrant != nil {
+		if !fork {
+			recorded := state.RootTools
+			if recorded == nil {
+				recorded = state.Tools
+			}
+			if !sameGrantSet(spec.RootGrant, recorded, state.ToolsetVersion, recordedCustom) {
+				return Spec{}, "", fmt.Errorf("%w: recorded root grant %v, caller supplied %v", agent.ErrToolMismatch, state.RootTools, spec.RootGrant)
+			}
+		}
+		resolved.RootGrant = cloneGrant(spec.RootGrant)
+	} else {
+		resolved.RootGrant = cloneGrant(state.RootTools)
+	}
+	if err := validateToolsForVersion(resolved.Grant, resolved.RootGrant, resolved.CustomTools, resolved.ToolsetVersion, len(spec.Definitions) > 0); err != nil {
 		return Spec{}, "", err
 	}
 	return resolved, prompt, nil
@@ -557,17 +579,20 @@ func validateContract(spec Spec, toolsetVersion, promptVersion string) error {
 	if err := agent.ValidateCustomTools(spec.CustomTools); err != nil {
 		return configError("Tools.Extra", "%v", err)
 	}
-	return validateToolsForVersion(spec.Grant, spec.CustomTools, toolsetVersion, len(spec.Definitions) > 0)
+	if err := validateToolsForVersion(spec.Grant, spec.RootGrant, spec.CustomTools, toolsetVersion, len(spec.Definitions) > 0); err != nil {
+		return err
+	}
+	return nil
 }
 
 // validateToolsForVersion verifies that every granted name exists in the
 // recorded built-in toolset or the custom set, and that delegate follows the
 // delegation configuration.
-func validateToolsForVersion(grant []string, custom []agent.CustomTool, toolsetVersion string, delegation bool) error {
+func validateToolsForVersion(grant, root []string, custom []agent.CustomTool, toolsetVersion string, delegation bool) error {
 	if err := agent.ValidateCustomTools(custom); err != nil {
 		return configError("Tools.Extra", "%v", err)
 	}
-	if grant == nil {
+	if grant == nil && root == nil {
 		return nil
 	}
 	schemas, err := tools.SchemasFor(toolsetVersion)
@@ -587,6 +612,29 @@ func validateToolsForVersion(grant []string, custom []agent.CustomTool, toolsetV
 		}
 		if name == "delegate" && !delegation {
 			return configError("Tools", "delegate requires a DelegationConfig")
+		}
+	}
+	if root == nil {
+		return nil
+	}
+	session := known
+	if grant != nil {
+		session = make(map[string]bool, len(grant))
+		for _, name := range grant {
+			session[name] = true
+		}
+	}
+	seen := make(map[string]bool, len(root))
+	for _, name := range root {
+		if seen[name] {
+			return configError("RootGrant", "tool %q is duplicated", name)
+		}
+		seen[name] = true
+		if !session[name] {
+			return configError("RootGrant", "tool %q is not in the session grant", name)
+		}
+		if name == "delegate" && !delegation {
+			return configError("RootGrant", "delegate requires a DelegationConfig")
 		}
 	}
 	return nil

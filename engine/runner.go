@@ -33,8 +33,11 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 		return nil, nil, err
 	}
 	effectiveGrant := h.spec.Grant
-	if h.spec.ExecutionGrantSet {
-		effectiveGrant = h.spec.ExecutionGrant
+	// The registry is the root's authority. The spawner keeps reading the
+	// session grant from Config.Tools, so a narrow root never narrows a child.
+	rootGrant := h.spec.RootGrant
+	if rootGrant == nil {
+		rootGrant = effectiveGrant
 	}
 	cfg.Tools = cloneGrant(effectiveGrant)
 	catalog, err := h.agentCatalog()
@@ -102,7 +105,7 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 	if err := verifyRegisteredCustomTools(registry, h.spec.CustomTools); err != nil {
 		return nil, nil, err
 	}
-	registry.SetGrant(cloneGrant(effectiveGrant))
+	registry.SetGrant(cloneGrant(rootGrant))
 	registry.SeedTodo(agent.RestoreTodo(h.store.Events()))
 	completer := run.NewCompleter
 	if completer == nil {

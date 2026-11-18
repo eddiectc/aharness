@@ -66,6 +66,13 @@ type ToolsConfig struct {
 	// Disable omits built-in tools by name. Unknown, duplicate, or delegate
 	// names are a ConfigError.
 	Disable []ToolName
+	// RootGrant narrows the tools offered to the root session for this run.
+	// Nil keeps the session grant; a non-nil empty grant offers the root no
+	// tools. It never widens authority and never changes a child definition's
+	// Tools: child grants are still intersected with the session grant. Names
+	// must be enabled built-ins or registered custom tools, and delegate
+	// requires Delegation.
+	RootGrant []ToolName
 	// Extra registers caller tools. Names must be unique and must not collide
 	// with a built-in name.
 	Extra []Tool
@@ -123,11 +130,12 @@ type ToolRequest struct {
 
 // toolSetup is the resolved tool contract and registry factory.
 type toolSetup struct {
-	grant   []string
-	custom  []agent.CustomTool
-	options tools.Options
-	enabled map[ToolName]bool
-	factory func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error)
+	grant     []string
+	rootGrant []string
+	custom    []agent.CustomTool
+	options   tools.Options
+	enabled   map[ToolName]bool
+	factory   func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error)
 }
 
 // resolveToolSetup normalizes ToolsConfig into an explicit grant, the recorded
@@ -201,6 +209,21 @@ func resolveToolSetup(cfg *ToolsConfig, userAgent string, delegation bool) (*too
 	setup.grant = append([]string{}, selected...)
 	for _, name := range setup.grant {
 		setup.enabled[ToolName(name)] = true
+	}
+	if cfg != nil && cfg.RootGrant != nil {
+		root := make([]string, 0, len(cfg.RootGrant))
+		seen := make(map[ToolName]bool, len(cfg.RootGrant))
+		for _, name := range cfg.RootGrant {
+			if seen[name] {
+				return nil, &ConfigError{Field: "Tools.RootGrant", Value: string(name), Detail: "is duplicated"}
+			}
+			seen[name] = true
+			if !setup.enabled[name] {
+				return nil, &ConfigError{Field: "Tools.RootGrant", Value: string(name), Detail: "is not an enabled tool of this session"}
+			}
+			root = append(root, string(name))
+		}
+		setup.rootGrant = root
 	}
 	if cfg != nil && cfg.WebSearch != nil {
 		baseURL, err := tools.ParseSearXNGURL(cfg.WebSearch.BaseURL)

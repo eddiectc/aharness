@@ -10,6 +10,12 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `ToolsConfig.RootGrant` narrows the tools offered and dispatched to the
+  root session without changing `session_start.tools` or a child definition's
+  grant. The effective root grant is recorded as the optional
+  `session_start.root_tools` field (`nil` means the session grant), exposed as
+  `State.RootTools`, inherited on resume/fork when omitted, and matched when
+  supplied on resume. Children still derive authority from the session grant.
 - `Config.AgentName` names the root agent. It is recorded in
   `session_start.agent`, passed to tool policy and tool calls, inherited by
   `Resume` and `Fork` when omitted, and exposed as `State.AgentName`.

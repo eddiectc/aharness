@@ -58,6 +58,11 @@ type Config struct {
 	// recorded ToolsetVersion; a non-nil list narrows it, and a non-nil empty
 	// list means no tools.
 	Tools []string
+	// RootTools is the recorded root-only grant written to session_start. Nil
+	// means the root uses the session grant; a non-nil empty list means the
+	// root is offered no tools. It never changes Tools, which remains the
+	// authority for child intersection.
+	RootTools []string
 	// CustomTools are the caller-registered tools available to this run. They
 	// are recorded in session_start on a new session and must match the
 	// recorded set on resume.

@@ -75,8 +75,12 @@ func project(events []session.Event, limits Limits, available []CustomTool) (Pro
 			Parameters:  append(json.RawMessage(nil), tool.Schema.Parameters...),
 		})
 	}
-	if start.Tools != nil {
-		schemas, err = tools.Filter(schemas, start.Tools)
+	grant := start.Tools
+	if start.RootTools != nil {
+		grant = start.RootTools
+	}
+	if grant != nil {
+		schemas, err = tools.Filter(schemas, grant)
 		if err != nil {
 			return Projection{}, fmt.Errorf("project: recorded tool grant: %w", err)
 		}
