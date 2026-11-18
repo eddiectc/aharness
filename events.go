@@ -152,6 +152,7 @@ type SubagentFinished struct {
 	CostMicroUSD  int64
 	CostComplete  bool
 	Duration      time.Duration
+	Error         string
 }
 
 // RunFinished carries the terminal Result.
@@ -263,6 +264,7 @@ func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Ev
 			CostMicroUSD:  ev.CostMicroUSD,
 			CostComplete:  ev.CostComplete,
 			Duration:      ev.Duration,
+			Error:         ev.Error,
 		}, true
 	case agent.RunFinished:
 		return RunFinished{

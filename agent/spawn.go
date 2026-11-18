@@ -239,6 +239,7 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 		for i, spec := range specs {
 			if ctx.Err() != nil {
 				reports[i] = notStartedReport(spec)
+				s.finishedWithoutStart(call, i, spec, reports[i])
 				continue
 			}
 			reports[i] = s.spawnOne(ctx, call, i, spec)
@@ -254,6 +255,7 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 	for i, spec := range specs {
 		if ctx.Err() != nil {
 			reports[i] = notStartedReport(spec)
+			s.finishedWithoutStart(call, i, spec, reports[i])
 			continue
 		}
 		wg.Go(func() {
@@ -262,10 +264,12 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 				defer func() { <-slots }()
 			case <-ctx.Done():
 				reports[i] = notStartedReport(spec)
+				s.finishedWithoutStart(call, i, spec, reports[i])
 				return
 			}
 			if ctx.Err() != nil {
 				reports[i] = notStartedReport(spec)
+				s.finishedWithoutStart(call, i, spec, reports[i])
 				return
 			}
 			reports[i] = s.spawnOne(ctx, call, i, spec)
@@ -500,8 +504,16 @@ func notStartedReport(spec tools.SubagentSpec) tools.SubagentReport {
 		"not started: the run was canceled")
 }
 
-func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec tools.SubagentSpec) tools.SubagentReport {
+func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec tools.SubagentSpec) (report tools.SubagentReport) {
+	emitted := false
+	defer func() {
+		if !emitted {
+			s.finishedWithoutStart(call, index, spec, report)
+		}
+	}()
 	if spec.Session != "" {
+		// continueChild owns its finished event.
+		emitted = true
 		return s.continueChild(ctx, call, index, spec)
 	}
 	def, ok := s.opts.Definitions.Lookup(spec.Agent)
@@ -540,17 +552,27 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 	childCfg.Display = nil
 	adapter := s.newChildDisplay(call, index, def.Name, sessionID, modelID, effort, childCfg.Tools, resolution.Pricing).withIntent(spec.Task)
 	if err := adapter.started(); err != nil {
-		return failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
+		report = failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
+		adapter.finished(report)
+		emitted = true
+		return report
 	}
-	report := s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task), s.childCompleter(def, resolution, sessionID))
+	report = s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task), s.childCompleter(def, resolution, sessionID))
 	adapter.finished(report)
+	emitted = true
 	return report
 }
 
 // continueChild resumes a child session recorded by an earlier delegate call.
 // The recorded prompt and grant are reused, so editing the agent file never
 // changes an existing child session.
-func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int, spec tools.SubagentSpec) tools.SubagentReport {
+func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int, spec tools.SubagentSpec) (report tools.SubagentReport) {
+	emitted := false
+	defer func() {
+		if !emitted {
+			s.finishedWithoutStart(call, index, spec, report)
+		}
+	}()
 	path := session.SessionPath(s.opts.Config.StateDir, spec.Session)
 	head, err := session.ReadHead(path, 1)
 	if err != nil {
@@ -617,7 +639,10 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 	adapter := s.newChildDisplay(call, index, agentName, spec.Session, state.Model, state.ThinkingEffort, childCfg.Tools, state.Pricing).withIntent(spec.Task)
 	if err := adapter.started(); err != nil {
 		_ = store.Close()
-		return failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
+		report = failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
+		adapter.finished(report)
+		emitted = true
+		return report
 	}
 	def, _ := s.opts.Definitions.LookupDefinition(state.Agent)
 	resolution := ModelResolution{Dialect: state.Dialect, BaseURL: state.BaseURL, Limits: state.Limits, Pricing: state.Pricing}
@@ -628,13 +653,14 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 	if state.ThinkingEffort != "" {
 		completerDef.ThinkingEffort = state.ThinkingEffort
 	}
-	report := s.runChildOnStore(ctx, childCfg, store, adapter, spec.Session, RunOptions{
+	report = s.runChildOnStore(ctx, childCfg, store, adapter, spec.Session, RunOptions{
 		Task:           spec.Task,
 		TaskSet:        true,
 		TaskFrom:       taskFromDelegate,
 		ResumedFromSeq: state.LastEventSeq,
 	}, s.childCompleter(completerDef, resolution, spec.Session))
 	adapter.finished(report)
+	emitted = true
 	return report
 }
 
@@ -984,6 +1010,40 @@ func failedReport(spec tools.SubagentSpec, code tools.Code, status, message stri
 // taskFromDelegate is the user-message source recorded for a delegated task.
 const taskFromDelegate = "delegate"
 
+// finishedWithoutStart emits the outcome event for a task that failed before
+// its child run started. It carries the resolved agent, an empty session
+// unless the report names one, zero counters, the failed status, and the
+// reason. It never emits a SubagentStarted event.
+func (s *Spawner) finishedWithoutStart(call tools.Call, index int, spec tools.SubagentSpec, report tools.SubagentReport) {
+	agentName := report.Agent
+	if agentName == "" || agentName == "?" {
+		agentName = spec.Agent
+	}
+	d := s.newChildDisplay(call, index, agentName, report.Session, report.Model, report.Effort, nil, model.Pricing{})
+	d.intent = report.Intent
+	if d.intent == "" {
+		d.intent = subagentIntent(spec.Task)
+	}
+	d.finished(report)
+}
+
+// subagentReportError returns the failure text for a report that did not
+// complete or stop at its own limit. A partial report from a limit or a
+// mid-run interrupt is output, not an error.
+func subagentReportError(report tools.SubagentReport) string {
+	switch report.Status {
+	case tools.SubagentCompleted, tools.SubagentMaxTurns, tools.SubagentTokenLimit, tools.SubagentTimeLimit:
+		return ""
+	case tools.SubagentInterrupted:
+		if report.Turns == 0 {
+			return report.Text
+		}
+		return ""
+	default:
+		return report.Text
+	}
+}
+
 // childDisplay is the display adapter for one child run. It forwards only
 // counters and names: child text, arguments, and tool output stay in the
 // child's own transcript.
@@ -1006,6 +1066,7 @@ type childDisplay struct {
 	childTurns    int
 	contextTokens int
 	lastTool      string
+	finishedSent  bool
 }
 
 func (s *Spawner) newChildDisplay(call tools.Call, index int, agent, session, modelID, effort string, grant []string, pricing model.Pricing) *childDisplay {
@@ -1095,25 +1156,36 @@ func (d *childDisplay) priced() bool {
 }
 
 // finished emits SubagentFinished and folds the child's spend into the run's
-// child total used for the token budget.
+// child total used for the token budget. It is idempotent and emits once even
+// when the child never started, so a pre-start failure still has an outcome.
 func (d *childDisplay) finished(report tools.SubagentReport) {
 	d.spawner.addChildUsage(report.Usage)
-	if !d.announced {
+	if d.finishedSent {
 		return
+	}
+	d.finishedSent = true
+	duration := time.Duration(0)
+	if d.announced {
+		duration = d.spawner.opts.Now().Sub(d.startedAt)
+	}
+	sessionID := d.session
+	if !d.announced {
+		sessionID = report.Session
 	}
 	_ = d.emit(SubagentFinished{
 		Turn:          d.call.Turn,
 		CallID:        d.call.ID,
 		Index:         d.index,
 		Agent:         d.agent,
-		Session:       d.session,
+		Session:       sessionID,
 		Status:        report.Status,
 		ChildTurns:    report.Turns,
 		ContextTokens: report.ContextTokens,
 		Usage:         report.Usage,
 		CostMicroUSD:  report.CostMicroUSD,
 		CostComplete:  report.CostComplete,
-		Duration:      d.spawner.opts.Now().Sub(d.startedAt),
+		Duration:      duration,
+		Error:         subagentReportError(report),
 	})
 }
 

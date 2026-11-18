@@ -137,6 +137,7 @@ type runState struct {
 	subagentUsage        model.Usage
 	subagentCost         int64
 	subagentCostComplete bool
+	children             []ChildOutcome
 }
 
 // Run executes one run to a terminal state. Every initialized run emits
@@ -1041,6 +1042,37 @@ func (r *Runner) foldSubagent(st *runState, call model.ToolCall, result tools.Re
 		st.runCostComplete = false
 		st.costComplete = false
 	}
+	for _, task := range details.Tasks {
+		outcome := ChildOutcome{
+			Agent:         task.Agent,
+			Session:       task.Session,
+			CallID:        call.ID,
+			Intent:        task.Intent,
+			Status:        task.Status,
+			Turns:         task.Turns,
+			ContextTokens: task.ContextTokens,
+			Usage:         task.Usage,
+			CostMicroUSD:  task.CostMicroUSD,
+			CostComplete:  task.CostComplete,
+			Error:         task.Message,
+		}
+		if outcome.Error == "" && childFailureStatus(task.Status) {
+			outcome.Error = result.Error
+		}
+		st.children = append(st.children, outcome)
+	}
+}
+
+// childFailureStatus reports whether a task status is a failure rather than a
+// normal or limit stop. The aggregate delegate error is a useful fallback only
+// for these statuses.
+func childFailureStatus(status string) bool {
+	switch status {
+	case tools.SubagentCompleted, tools.SubagentMaxTurns, tools.SubagentTokenLimit, tools.SubagentTimeLimit, tools.SubagentInterrupted:
+		return false
+	default:
+		return true
+	}
 }
 
 // finishContext maps context cancellation after an in-flight operation.
@@ -1088,6 +1120,7 @@ func (r *Runner) finishResult(res *Result, st *runState, status StopReason, reas
 	res.SubagentUsage = st.subagentUsage
 	res.SubagentCostMicroUSD = st.subagentCost
 	res.SubagentCostComplete = st.subagentCostComplete
+	res.Children = append([]ChildOutcome(nil), st.children...)
 	if st.finalized {
 		return *res, res.Err
 	}

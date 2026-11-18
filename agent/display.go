@@ -157,6 +157,9 @@ type SubagentFinished struct {
 	CostMicroUSD  int64
 	CostComplete  bool
 	Duration      time.Duration
+	// Error is the failure text for a task that did not complete normally,
+	// including failures before the child run started.
+	Error string
 }
 
 // RunFinished is emitted after final and run_end are durable.
@@ -225,6 +228,7 @@ func sanitizeDisplayEvent(ev DisplayEvent) DisplayEvent {
 		ev.Session = displaySafe(ev.Session)
 		ev.CallID = displaySafe(ev.CallID)
 		ev.Status = displaySafe(ev.Status)
+		ev.Error = displaySafe(ev.Error)
 		return ev
 	case RunFinished:
 		ev.Reason = displaySafe(ev.Reason)

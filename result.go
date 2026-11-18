@@ -44,6 +44,26 @@ type Result struct {
 	SubagentUsage        Usage
 	SubagentCostMicroUSD int64
 	SubagentCostComplete bool
+	// Children carries one row per delegated task folded before the run
+	// terminated, in delegate array order. A task canceled before its delegate
+	// result returned may be absent; SubagentFinished covers the pre-start
+	// case.
+	Children []ChildOutcome
+}
+
+// ChildOutcome is one delegated task's folded outcome from a run.
+type ChildOutcome struct {
+	Agent         string
+	Session       string
+	CallID        string
+	Intent        string
+	Status        string
+	Turns         int
+	ContextTokens int
+	Usage         Usage
+	CostMicroUSD  int64
+	CostComplete  bool
+	Error         string
 }
 
 // Limits is the per-call context budget.
@@ -282,7 +302,31 @@ func fromInternalResult(result agent.Result, session string, err error) Result {
 		SubagentUsage:        fromInternalUsage(result.SubagentUsage),
 		SubagentCostMicroUSD: result.SubagentCostMicroUSD,
 		SubagentCostComplete: result.SubagentCostComplete,
+		Children:             fromInternalChildren(result.Children),
 	}
+}
+
+func fromInternalChildren(children []agent.ChildOutcome) []ChildOutcome {
+	if len(children) == 0 {
+		return nil
+	}
+	out := make([]ChildOutcome, len(children))
+	for i, child := range children {
+		out[i] = ChildOutcome{
+			Agent:         child.Agent,
+			Session:       child.Session,
+			CallID:        child.CallID,
+			Intent:        child.Intent,
+			Status:        child.Status,
+			Turns:         child.Turns,
+			ContextTokens: child.ContextTokens,
+			Usage:         fromInternalUsage(child.Usage),
+			CostMicroUSD:  child.CostMicroUSD,
+			CostComplete:  child.CostComplete,
+			Error:         child.Error,
+		}
+	}
+	return out
 }
 
 // deriveLimits computes the per-call budget from a model spec, matching the

@@ -228,6 +228,24 @@ func (s StopReason) ExitCode() int {
 }
 
 // Result is the outcome of one run.
+// ChildOutcome is one delegated task's folded outcome from this run. Children
+// contains every task whose delegate details were folded before termination;
+// a task canceled before its delegate result returned may be absent.
+type ChildOutcome struct {
+	Agent         string
+	Session       string
+	CallID        string
+	Intent        string
+	Status        string
+	Turns         int
+	ContextTokens int
+	Usage         model.Usage
+	CostMicroUSD  int64
+	CostComplete  bool
+	Error         string
+}
+
+// Result is the terminal outcome of one run.
 type Result struct {
 	Status          StopReason
 	FinalText       string
@@ -252,7 +270,11 @@ type Result struct {
 	SubagentUsage        model.Usage
 	SubagentCostMicroUSD int64
 	SubagentCostComplete bool
-	Err                  error
+	// Children carries one row per delegate task folded before termination, in
+	// delegate array order. It is not a promise that a cancelled call reported
+	// every task.
+	Children []ChildOutcome
+	Err      error
 }
 
 // Projection is the model input rebuilt from the event log.

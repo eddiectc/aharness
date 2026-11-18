@@ -130,8 +130,12 @@ type DelegateTaskDetails struct {
 	Usage         model.Usage `json:"usage"`
 	CostMicroUSD  int64       `json:"cost_micro_usd,omitempty"`
 	CostComplete  bool        `json:"cost_complete"`
-	ReportBytes   int         `json:"report_bytes,omitempty"`
-	Truncated     bool        `json:"truncated,omitempty"`
+	// Message is the failure text for a task that could not run or did not
+	// complete normally. It is absent for a completed task and for a limit
+	// report whose Text is partial output.
+	Message     string `json:"message,omitempty"`
+	ReportBytes int    `json:"report_bytes,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
 }
 
 // DelegateDetails is the structured delegate result recorded in
@@ -322,6 +326,7 @@ func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Re
 			Usage:         report.Usage,
 			CostMicroUSD:  report.CostMicroUSD,
 			CostComplete:  report.CostComplete,
+			Message:       taskFailureMessage(report),
 			ReportBytes:   len(text),
 			Truncated:     truncated,
 		})
@@ -361,6 +366,23 @@ func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Re
 	}
 	result.Details = data
 	return result
+}
+
+// taskFailureMessage returns the error text for a task that did not complete
+// or stop at its own limit. Limit and mid-run interrupt reports carry partial
+// output, not an error, so they stay message-free.
+func taskFailureMessage(report SubagentReport) string {
+	switch report.Status {
+	case SubagentCompleted, SubagentMaxTurns, SubagentTokenLimit, SubagentTimeLimit:
+		return ""
+	case SubagentInterrupted:
+		if report.Turns == 0 {
+			return sanitizeUTF8(report.Text)
+		}
+		return ""
+	default:
+		return sanitizeUTF8(report.Text)
+	}
 }
 
 // markInstructionShaped prepends one marker line when a report opens with a

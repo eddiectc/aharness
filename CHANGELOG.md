@@ -10,6 +10,12 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `Result.Children` carries one `ChildOutcome` per delegated task whose
+  delegate details were folded before termination. A task canceled before its
+  delegate result returned may be absent; that boundary is part of the
+  contract. `SubagentFinished` gains `Error`, and a child that fails before
+  its run starts now emits exactly one finished event with an empty session and
+  zero counters. Delegate task details gain an optional `message` for failures.
 - `engine.Host.History`, `Host.Todo`, and `Host.LastSeq` expose the durable
   transcript, restored checklist, and resume boundary without hosts touching
   `Store()`. `Store` and `WorkspaceHandle` are documented as engine wiring.
