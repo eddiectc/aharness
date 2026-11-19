@@ -765,7 +765,7 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 		PromptVersion:  parent.PromptVersion,
 		ToolsetVersion: parent.ToolsetVersion,
 		HarnessVersion: parent.HarnessVersion,
-		SystemPrompt:   childSystemPrompt(def, parent.Workspace, parent.Identity, promptVersion(parent)),
+		SystemPrompt:   childSystemPrompt(def, parent.Workspace, parent.Identity, promptVersion(parent), parent.AppendedPrompt),
 		Agent:          def.Name,
 		Tools:          cloneGrant(grant),
 		CustomTools:    append([]CustomTool(nil), parent.CustomTools...),
@@ -786,7 +786,8 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 // continuedConfig builds a resumed child's configuration from its own recorded
 // state. The recorded model, effort, prompt, and grant win; the grant is
 // narrowed by the current parent's authority, and only the budget comes from
-// the parent.
+// the parent. Nothing is appended: the recorded prompt already holds any host
+// text, so re-recording it would double the text on the next continuation.
 func (s *Spawner) continuedConfig(state State, call tools.Call) Config {
 	parent := s.opts.Config
 	grant := s.narrowChildGrant(state.Tools, state.ToolsetVersion)

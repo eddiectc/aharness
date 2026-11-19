@@ -119,6 +119,11 @@ type State struct {
 	Model        ModelSpec
 	AgentName    string
 	SystemPrompt string
+	// AppendedPrompt is the host text recorded as session_start.appended_prompt
+	// beside the resolved prompt. Empty means unset, including for logs written
+	// before the field and for delegated children. It is provenance only and
+	// never a replay key.
+	AppendedPrompt string
 	// PromptTag is the host prompt tag recorded beside the SDK prompt template
 	// version. Empty means unset. It is attribution only and never a replay
 	// key.
@@ -214,6 +219,7 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 			Pricing:         fromInternalPricing(state.Pricing),
 		},
 		SystemPrompt:         state.SystemPrompt,
+		AppendedPrompt:       state.AppendedPrompt,
 		PromptTag:            state.PromptTag,
 		AgentName:            state.Agent,
 		Limits:               fromInternalLimits(state.Limits),

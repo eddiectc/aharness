@@ -153,6 +153,55 @@ func TestRunCompleted(t *testing.T) {
 	}
 }
 
+func TestWriteSessionStartRecordsAppendedPrompt(t *testing.T) {
+	cfg := testConfig()
+	cfg.AppendedPrompt = "Workspace rules:\n- Read AGENTS.md before editing."
+	store := &fakeStore{}
+	if err := WriteSessionStart(store, cfg, nil); err != nil {
+		t.Fatalf("WriteSessionStart: %v", err)
+	}
+	start := decodePayload[sessionStartData](t, store.events[0])
+	if start.AppendedPrompt != cfg.AppendedPrompt {
+		t.Fatalf("recorded appended_prompt = %q, want %q", start.AppendedPrompt, cfg.AppendedPrompt)
+	}
+	if !strings.Contains(string(store.events[0].Data), `"appended_prompt"`) {
+		t.Fatal("session_start JSON omits appended_prompt when set")
+	}
+	// Record-only: the package never appends the text to the prompt.
+	if strings.Contains(start.SystemPrompt, cfg.AppendedPrompt) {
+		t.Fatalf("WriteSessionStart appended the host text to the prompt: %q", start.SystemPrompt)
+	}
+
+	// The recorded field is capped independently at the prompt cap.
+	capped := testConfig()
+	capped.AppendedPrompt = strings.Repeat("y", 40_000)
+	cappedStore := &fakeStore{}
+	if err := WriteSessionStart(cappedStore, capped, nil); err != nil {
+		t.Fatalf("WriteSessionStart capped: %v", err)
+	}
+	cappedStart := decodePayload[sessionStartData](t, cappedStore.events[0])
+	if len(cappedStart.AppendedPrompt) <= maxSystemPromptBytes {
+		t.Fatalf("appended_prompt length = %d, want the cap applied", len(cappedStart.AppendedPrompt))
+	}
+	if got := strings.Count(cappedStart.AppendedPrompt, "[truncated "); got != 1 {
+		t.Fatalf("appended_prompt truncation markers = %d, want 1", got)
+	}
+
+	// A config with an explicit prompt and no host text records no field.
+	explicit := testConfig()
+	explicit.SystemPrompt = "host-written contract"
+	plain := &fakeStore{}
+	if err := WriteSessionStart(plain, explicit, nil); err != nil {
+		t.Fatalf("WriteSessionStart explicit: %v", err)
+	}
+	if strings.Contains(string(plain.events[0].Data), `"appended_prompt"`) {
+		t.Fatal("session_start JSON carries appended_prompt when unset")
+	}
+	if got := decodePayload[sessionStartData](t, plain.events[0]).SystemPrompt; got != "host-written contract" {
+		t.Fatalf("explicit prompt = %q", got)
+	}
+}
+
 func TestRunToolLoopPairsEveryCall(t *testing.T) {
 	cfg := testConfig()
 	comp := &fakeCompleter{steps: []scriptStep{

@@ -193,6 +193,249 @@ func TestForkInstructionsAppendToRenderedPromptForLegacyLog(t *testing.T) {
 	}
 }
 
+func TestOpenNewRecordsAppendedPrompt(t *testing.T) {
+	const hostText = "Workspace rules:\n- Read AGENTS.md before editing."
+	spec := baseSpec(t, ModeNew)
+	spec.AppendPrompt = hostText
+	spec.AppendPromptSet = true
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	state, err := host.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.AppendedPrompt != hostText {
+		t.Fatalf("State.AppendedPrompt = %q, want %q", state.AppendedPrompt, hostText)
+	}
+	if !strings.Contains(state.SystemPrompt, hostText) {
+		t.Fatalf("recorded prompt lacks the instructions: %q", state.SystemPrompt)
+	}
+	if !strings.Contains(string(host.Store().Events()[0].Data), `"appended_prompt"`) {
+		t.Fatal("session_start JSON omits appended_prompt when set")
+	}
+}
+
+func TestResumeCarriesAppendedPromptWithoutRewriting(t *testing.T) {
+	const hostText = "Workspace rules."
+	spec := baseSpec(t, ModeNew)
+	spec.AppendPrompt = hostText
+	spec.AppendPromptSet = true
+	original, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	id, stateDir := original.ID(), original.StateDir()
+	before := string(original.Store().Events()[0].Data)
+	if err := original.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	resumed, err := Open(context.Background(), Spec{
+		StateDir:  stateDir,
+		Mode:      ModeResume,
+		SessionID: id,
+		UserAgent: "test-host/1.0",
+		NewCompleter: func(model.Dialect, string, string) model.Completer {
+			return engineModel{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Open resume: %v", err)
+	}
+	defer func() { _ = resumed.Close() }()
+	state, err := resumed.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.AppendedPrompt != hostText {
+		t.Fatalf("resumed AppendedPrompt = %q, want %q", state.AppendedPrompt, hostText)
+	}
+	events := resumed.Store().Events()
+	if len(events) == 0 || string(events[0].Data) != before {
+		t.Fatal("resume rewrote session_start")
+	}
+	count := 0
+	for _, ev := range events {
+		if ev.Type == session.TypeSessionStart {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("session_start events = %d, want 1", count)
+	}
+	cfg, err := resumed.runConfig(RunSpec{}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("runConfig: %v", err)
+	}
+	if cfg.AppendedPrompt != hostText {
+		t.Fatalf("run config AppendedPrompt = %q, want %q", cfg.AppendedPrompt, hostText)
+	}
+}
+
+func TestForkCarriesAppendedPrompt(t *testing.T) {
+	const hostText = "Workspace rules."
+	parentSpec := baseSpec(t, ModeNew)
+	parentSpec.AppendPrompt = hostText
+	parentSpec.AppendPromptSet = true
+	parent, err := Open(context.Background(), parentSpec)
+	if err != nil {
+		t.Fatalf("Open parent: %v", err)
+	}
+	parentID, stateDir := parent.ID(), parent.StateDir()
+	parentState, err := parent.State()
+	if err != nil {
+		t.Fatalf("parent State: %v", err)
+	}
+	if err := parent.Close(); err != nil {
+		t.Fatalf("Close parent: %v", err)
+	}
+
+	inheritedSpec := baseSpec(t, ModeFork)
+	inheritedSpec.StateDir = stateDir
+	inheritedSpec.Workspace = ""
+	inheritedSpec.SessionID = parentID
+	inherited, err := Open(context.Background(), inheritedSpec)
+	if err != nil {
+		t.Fatalf("Open inherited fork: %v", err)
+	}
+	state, err := inherited.State()
+	if err != nil {
+		t.Fatalf("inherited State: %v", err)
+	}
+	if state.SystemPrompt != parentState.SystemPrompt {
+		t.Fatal("a fork without Instructions changed the inherited prompt")
+	}
+	if state.AppendedPrompt != hostText {
+		t.Fatalf("inherited fork AppendedPrompt = %q, want %q", state.AppendedPrompt, hostText)
+	}
+	if err := inherited.Close(); err != nil {
+		t.Fatalf("Close inherited fork: %v", err)
+	}
+
+	appendSpec := baseSpec(t, ModeFork)
+	appendSpec.StateDir = stateDir
+	appendSpec.Workspace = ""
+	appendSpec.SessionID = parentID
+	appendSpec.AppendPrompt = "additional rule"
+	appendSpec.AppendPromptSet = true
+	appended, err := Open(context.Background(), appendSpec)
+	if err != nil {
+		t.Fatalf("Open appended fork: %v", err)
+	}
+	state, err = appended.State()
+	if err != nil {
+		t.Fatalf("appended State: %v", err)
+	}
+	if want := parentState.SystemPrompt + "\n\nadditional rule"; state.SystemPrompt != want {
+		t.Fatalf("fork with Instructions prompt = %q, want %q", state.SystemPrompt, want)
+	}
+	if want := hostText + "\n\nadditional rule"; state.AppendedPrompt != want {
+		t.Fatalf("fork with Instructions AppendedPrompt = %q, want %q", state.AppendedPrompt, want)
+	}
+	if err := appended.Close(); err != nil {
+		t.Fatalf("Close appended fork: %v", err)
+	}
+
+	explicitSpec := baseSpec(t, ModeFork)
+	explicitSpec.StateDir = stateDir
+	explicitSpec.Workspace = ""
+	explicitSpec.SessionID = parentID
+	explicitSpec.SystemPrompt = "host-written contract"
+	explicitSpec.SystemPromptSet = true
+	explicit, err := Open(context.Background(), explicitSpec)
+	if err != nil {
+		t.Fatalf("Open explicit fork: %v", err)
+	}
+	defer func() { _ = explicit.Close() }()
+	state, err = explicit.State()
+	if err != nil {
+		t.Fatalf("explicit State: %v", err)
+	}
+	if state.SystemPrompt != "host-written contract" || state.AppendedPrompt != "" {
+		t.Fatalf("explicit fork state = %+v", state)
+	}
+}
+
+func TestLegacyLogWithoutAppendedPrompt(t *testing.T) {
+	if session.Version != 2 {
+		t.Fatalf("session.Version = %d, want 2", session.Version)
+	}
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	id := session.NewID()
+	store, err := session.Create(stateDir, id)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	start := map[string]any{
+		"prompt_version":  agent.PromptVersion,
+		"toolset_version": tools.Version,
+		"workspace":       workspace,
+		"state_dir":       stateDir,
+		"provider":        "test",
+		"dialect":         "custom",
+		"model":           "engine-model",
+		"limits":          agent.Limits{MaxContextTokens: 10_000, MaxOutputTokens: 100, SafetyMargin: 1000, MaxInputTokens: 9000, CompactionTarget: 9000},
+		"system_prompt":   "recorded legacy prompt",
+	}
+	ev, err := session.NewEvent(session.TypeSessionStart, 0, "", start)
+	if err != nil {
+		t.Fatalf("build session_start: %v", err)
+	}
+	if err := store.Append(ev); err != nil {
+		t.Fatalf("append session_start: %v", err)
+	}
+	if err := store.Sync(); err != nil {
+		t.Fatalf("sync session_start: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	resumeSpec := baseSpec(t, ModeResume)
+	resumeSpec.StateDir = stateDir
+	resumeSpec.SessionID = id
+	resumeSpec.Workspace = ""
+	resumeSpec.Grant = nil
+	resumeSpec.GrantSet = false
+	resumed, err := Open(context.Background(), resumeSpec)
+	if err != nil {
+		t.Fatalf("Open resume: %v", err)
+	}
+	state, err := resumed.State()
+	if err != nil {
+		t.Fatalf("resume State: %v", err)
+	}
+	if state.SystemPrompt != "recorded legacy prompt" || state.AppendedPrompt != "" {
+		t.Fatalf("legacy resume state = %+v", state)
+	}
+	if err := resumed.Close(); err != nil {
+		t.Fatalf("Close resume: %v", err)
+	}
+
+	forkSpec := baseSpec(t, ModeFork)
+	forkSpec.StateDir = stateDir
+	forkSpec.SessionID = id
+	forkSpec.Workspace = ""
+	forkSpec.Grant = nil
+	forkSpec.GrantSet = false
+	forked, err := Open(context.Background(), forkSpec)
+	if err != nil {
+		t.Fatalf("Open fork: %v", err)
+	}
+	defer func() { _ = forked.Close() }()
+	state, err = forked.State()
+	if err != nil {
+		t.Fatalf("fork State: %v", err)
+	}
+	if state.SystemPrompt != "recorded legacy prompt" || state.AppendedPrompt != "" {
+		t.Fatalf("legacy fork state = %+v", state)
+	}
+}
+
 func TestOpenRequiresUserAgentAndFillsToolOptions(t *testing.T) {
 	for _, value := range []string{"", "   "} {
 		spec := baseSpec(t, ModeNew)

@@ -515,6 +515,7 @@ name, not assume the facade's shape:
 | Host identity | `Config.UserAgent` | `engine.Spec.UserAgent` (required); `tools.Options.UserAgent` is filled from it |
 | Prompt identity | `Config.Identity` | `engine.Spec.Identity` ↔ `agent.Config.Identity`; defaults to `aharness`, 64 bytes with no control characters, not recorded |
 | Prompt tag | `Config.PromptTag` | `engine.Spec.PromptTag` ↔ `agent.Config.PromptTag` ↔ recorded `session_start.prompt_tag`; optional, at most 64 printable ASCII bytes matching `[A-Za-z0-9._:/-]+`, never a replay key |
+| Prompt append | `Config.Instructions` | `engine.Spec.AppendPrompt` ↔ `agent.Config.AppendedPrompt` ↔ recorded `session_start.appended_prompt`; provenance only, never a replay key, carried to fresh children; the `agent` layer never appends the text |
 | Root tool offer | `ToolsConfig.RootGrant` | `engine.Spec.RootGrant` ↔ recorded `session_start.root_tools` |
 | Agent name | `Config.AgentName` | `engine.Spec.Agent` ↔ `agent.Config.Agent` |
 
@@ -688,7 +689,7 @@ comment on a field narrows these rules but never widens them.
 | Construction | `Config`: `Workspace`, `StateDir`, `Model`, `AgentName`, `UserAgent`, `Identity`, `PromptTag`, `Tools`, `Limits`, `MaxTurns`, `MaxTotalTokens`, `RunTimeout`, `ModelTimeout`, `ThinkingEffort`, `Instructions`, `SystemPrompt`, `Authorize`, `RequireUsage`, `LogModelRequests`, `Logger` |
 | Lifecycle | `Agent`: `ID`, `SessionPath`, `Workspace`, `State`, `Run`, `Start`, `Close`; `RunOptions`: `Model`, `ThinkingEffort`, `MaxTurns`, `MaxTotalTokens`, `Timeout`, `OnEvent`; `Run`: `Events`, `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, `Close` |
 | Outcome | `Result`: `Status`, `Session`, `Err`, `FinalText`, `RunTurns`, `RunUsage`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `RunCostMicroUSD`, `CostMicroUSD`, `RunCostComplete`, `CostComplete`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `Children`, `Reason`, `Duration`; `ChildOutcome`: `Agent`, `Session`, `CallID`, `Intent`, `Status`, `Turns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Error`; `StopReason` helpers `Failure`, `Label` |
-| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
+| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
 | Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `RunID`, `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `ID`, `Source`, `Text`; `SubagentMessageRecorded`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ID`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`, `Error`; `RunFinished`: `RunID`, `Result`, `Reason`, `Duration`; `EventView`: a flat JSON projection with `Kind`; `ViewEvent(Event) EventView`; `EventKind*` constants |
 | Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent`, `Session`, `Agent` |
 | Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
@@ -722,7 +723,12 @@ Behavioral rules that the field lists do not show:
   unchanged; a changed prompt records no tag. A delegated child's prompt is not
   the host template, so a child never records its parent's tag.
   `Instructions` and `SystemPrompt` are mutually exclusive and invalid on
-  `Resume`. A nil `Logger` discards.
+  `Resume`. `Instructions` composes host text after the SDK body and is
+  recorded once as `session_start.appended_prompt`; every fresh child composes
+  it into its prompt too, including children of a resumed or forked session,
+  and a continued child keeps it through its recorded prompt. The SDK does not
+  discover workspace files; the host reads the file and supplies the bytes. A
+  nil `Logger` discards.
 - `RunOptions` applies to one run and never rewrites the session; its `Timeout`
   replaces `Config.RunTimeout`. `RunOptions.OnEvent` observes the events the
   blocking `Run` consumes, in order, and never changes the result.
@@ -1044,7 +1050,9 @@ delegation independence criterion; it also states that the tool call is the only
 way to act and that every call receives exactly one result. As in v1 and v2, a
 parent session carries the available-agents catalog (one `- name: description`
 line per agent, capped at 4 KiB with an `[N agents omitted]` marker). A child's
-prompt is its agent body plus the environment block and shared rules. A child
+prompt is its agent body plus the environment block and shared rules. A fresh
+child also composes the host's `Config.Instructions` text after its role body;
+a continued child reuses its recorded prompt, which already holds it. A child
 gets no catalog and no delegation guidance because it cannot delegate; a
 prompt-v2 or prompt-v3 child whose grant includes `todo` also gets the todo
 guidance, while v0 and v1 children keep their frozen rules. The recorded text is
@@ -1127,6 +1135,25 @@ uncapped; `RenderSystemPrompt` and `CapSystemPrompt` apply the 32 KiB recorded
 prompt cap. `RenderSystemPrompt(version, workspace, identity, agents)` takes the
 identity as a deliberate breaking component change; an empty value renders
 `aharness`.
+
+The appended text is provenance, not a replay key. A new session records it once
+as optional `session_start.appended_prompt` and exposes it as
+`State.AppendedPrompt`; the projection keeps using `system_prompt`, so the field
+never changes a replay. Every fresh child composes the parent's text after its
+role body, so a delegated child's `system_prompt` contains it and the child
+records no `appended_prompt` of its own; a continued child reuses its recorded
+prompt, which already holds the bytes. Resume carries the recorded value without
+rewriting `session_start`. A fork inherits it with the prompt, records the union
+when it supplies its own `Instructions`, and records none when it replaces the
+prompt with an explicit `SystemPrompt`. A fork whose parent log predates the
+field records none: the bytes are not recoverable from a prompt. The recorded
+value is capped at 32 KiB independently and is not necessarily a suffix of
+`system_prompt` once truncation applies; a host that needs a rule to survive an
+over-cap prompt puts it at the front of its own text. The SDK does not discover
+workspace files: a host that wants `AGENTS.md`, or an equivalent, in the parent
+and in every child reads the file and passes the bytes here. The component
+`agent` layer never appends; `agent.Config.AppendedPrompt` only records text the
+caller already composed into `SystemPrompt`.
 
 Tool mechanics belong in tool descriptions; the system prompt states only when a
 coordination tool is worth a turn. Steering instructions are user messages and
@@ -1462,7 +1489,7 @@ it on every turn. Compaction never mutates the log.
 
 | Event type | Scope | Payload |
 |---|---|---|
-| `session_start` | once per session | Prompt version, optional `prompt_tag` (host attribution beside the template version; never a replay key), toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `agent` (the root's configured name or a child's definition name), the recorded `tools` grant (omitted means every tool of the version; `[]` means none), optional `root_tools` (root-only offer; omitted means `tools`), optional `custom_tools` (ordered `{name, description, parameters, concurrency_safe}` declarations, now additive in v2), optional `contract_override` (`parent_session`, `prompt`, `tools`) on a fork that changed the inherited contract, and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
+| `session_start` | once per session | Prompt version, optional `prompt_tag` (host attribution beside the template version; never a replay key), toolset version, workspace, state dir, provider, dialect, model, base URL, context/output limits, max turns/total tokens, timeouts (all four run budgets recorded as `0` for unlimited), harness version, optional `thinking_effort`, the resolved `system_prompt` (32 KiB cap), optional `appended_prompt` (the host text composed into the prompt; provenance only, empty on old logs and on children, never a replay key), optional `agent` (the root's configured name or a child's definition name), the recorded `tools` grant (omitted means every tool of the version; `[]` means none), optional `root_tools` (root-only offer; omitted means `tools`), optional `custom_tools` (ordered `{name, description, parameters, concurrency_safe}` declarations, now additive in v2), optional `contract_override` (`parent_session`, `prompt`, `tools`) on a fork that changed the inherited contract, and optional `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child (a fork has no call ID). |
 | `run_start` | once per run | `run_id` (UUIDv7), `resumed_from_seq`, effective provider, model, dialect, base URL, context/output limits, optional `thinking_effort`, recorded run budgets, prompt/toolset/harness versions, `interactive`, `stream`, `require_usage`, and the effective `pricing` snapshot. |
 | `user_message` | as needed | Task/hint/steering text and source (`-task`, `-task-file`, `continuation-hint`, `stuck-hint`, `steer`, `subagent-steer`, `interrupt-hint`). |
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |

@@ -36,7 +36,11 @@ type sessionStartData struct {
 	// present; a session recorded before it existed renders from
 	// PromptVersion instead.
 	SystemPrompt string `json:"system_prompt,omitempty"`
-	Agent        string `json:"agent,omitempty"`
+	// AppendedPrompt is the host text composed into SystemPrompt. It is
+	// provenance only: projection ignores it, and it is empty on every log
+	// written before the field and on every delegated child.
+	AppendedPrompt string `json:"appended_prompt,omitempty"`
+	Agent          string `json:"agent,omitempty"`
 	// Tools is the recorded grant. A nil grant is omitted and decodes as nil
 	// ("every tool of the recorded toolset"); an explicit empty grant is
 	// written as [] and decodes as non-nil empty ("no tools"). The field

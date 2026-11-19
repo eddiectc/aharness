@@ -8,6 +8,56 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- `session_start.appended_prompt` records the host text composed into the
+  prompt. It is optional, exposed as `agent.State.AppendedPrompt` and
+  `aharness.State.AppendedPrompt`, and empty on every log written before the
+  field and on every delegated child. The session schema stays `2`, and an old
+  reader ignores the field.
+- `agent.Config.AppendedPrompt` carries that text to the record and to
+  delegated children. It is record-only: the caller composes the bytes into
+  `SystemPrompt` first, and the package never appends them.
+
+### Changed
+
+- `aharness.Config.Instructions` now reaches every fresh child instead of only
+  the parent, and it survives `Resume` and `Fork`: a resumed session carries the
+  recorded text, a fork inherits or extends it, and a continued child keeps it
+  through its recorded prompt. The SDK still does not discover workspace files;
+  a host reads `AGENTS.md` or its equivalent and passes the bytes.
+  **Migration:** a host that already passes `Instructions` needs none. Text that
+  must stay root-only belongs in a composed `SystemPrompt` body
+  (`agent.LoopRules` plus host lines), not in `Instructions`.
+- A fork with `Instructions` records the union as `appended_prompt`; its
+  recorded `system_prompt` bytes are unchanged.
+
+### Removed
+
+- **Breaking:** `agent.Config.AppendSystemPrompt` is removed. It was
+  engine-dead: no engine, facade, or spawner path set it, and the facade already
+  folded `Instructions` into the prompt. **Migration:** compose the text into
+  `SystemPrompt` before the call. A config that already carried an explicit
+  prompt appends the text; a config that relied on the rendered prompt must
+  render it first, because a non-empty `SystemPrompt` suppresses rendering.
+  Either way the recorded output is byte-identical to the old field.
+
+  ```go
+  if cfg.SystemPrompt == "" {
+      rendered, err := agent.RenderSystemPrompt(agent.PromptVersion, cfg.Workspace, cfg.Identity, cfg.Agents)
+      if err != nil {
+          return err
+      }
+      cfg.SystemPrompt = rendered
+  }
+  cfg.SystemPrompt += "\n\n" + hostText
+  cfg.SystemPrompt = agent.CapSystemPrompt(cfg.SystemPrompt) // optional; the write caps once
+  ```
+
+  A config with an explicit `PromptVersion` passes that version instead of
+  `agent.PromptVersion`; a config that already carried an explicit
+  `SystemPrompt` needs only the last two lines.
+
 ## [v0.3.0] - 2026-11-19
 
 This is the prompt-surface release planned after `v0.2.0`. The SDK owns the

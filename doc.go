@@ -73,8 +73,19 @@
 // compose a body from agent.LoopRules, its own policy lines, and
 // agent.AgentCatalogText, which renders the catalog under the SDK cap and
 // omission marker. Config.SystemPrompt replaces the prompt wholesale;
-// Config.Instructions appends to the effective prompt (the recorded text on a
-// fork, or the rendered prompt when the log predates it).
+// Config.Instructions composes host text into the effective prompt (the
+// recorded text on a fork, or the rendered prompt when the log predates it).
+//
+// The SDK does not discover workspace files: a host that wants AGENTS.md, or an
+// equivalent, in its prompts reads the file and passes the bytes to
+// Config.Instructions. The parent records the text once as
+// session_start.appended_prompt, and every fresh child composes it into its own
+// prompt after the role body, including the children of a resumed or forked
+// session; a continued child keeps it through its recorded prompt. A delegated
+// child records neither appended_prompt nor prompt_tag. The recorded value is
+// provenance, never a replay key, and is not necessarily a suffix of the
+// prompt once truncation applies. The component agent layer never appends:
+// agent.Config.AppendedPrompt only records text the caller already composed.
 //
 // Config.PromptTag records the host's own prompt attribution beside the SDK
 // template version, for example "acode/prompt-v1". It is at most 64 bytes of

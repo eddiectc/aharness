@@ -158,8 +158,13 @@ recorded tag, and a fork inherits it only when the prompt is unchanged. Prompt
 composition has three tiers. Set only `Identity` and inherit
 `agent.DefaultPromptBody` (recommended for a coding agent); compose a body from
 `agent.LoopRules`, your own policy lines, and `agent.AgentCatalogText`; or replace
-the prompt wholesale with `Config.SystemPrompt`. `Config.Instructions` appends to
-the resolved prompt. A wholesale replacement must keep the invariants that
+the prompt wholesale with `Config.SystemPrompt`. `Config.Instructions` composes
+host text into the resolved prompt and records it once as
+`session_start.appended_prompt`; every fresh child, including a child of a
+resumed or forked session, composes it too, and a continued child keeps it
+through its recorded prompt. The SDK does not discover workspace files: read
+`AGENTS.md` or its equivalent yourself and pass the bytes there. A wholesale
+replacement must keep the invariants that
 `agent.LoopRules` returns; the primitives exist so a host never transcribes them.
 
 ### Tools and policy

@@ -76,8 +76,16 @@ type Config struct {
 	// session default; a pointer to "" clears it; a non-empty value sets it.
 	ThinkingEffort *string
 
-	// Instructions is appended to the harness system prompt. It is valid for
-	// New and Fork; Resume requires it to be empty.
+	// Instructions is composed into the effective system prompt after the SDK
+	// body. It is valid for New and Fork; Resume requires it to be empty. The
+	// parent records the text once as session_start.appended_prompt, and every
+	// fresh child composes it into its own prompt after the role body, including
+	// the children of a resumed or forked session; a continued child keeps it
+	// through its recorded prompt. The SDK does not discover workspace files: a
+	// host that wants AGENTS.md, or an equivalent, in the parent and in every
+	// child reads the file and passes the bytes here. The recorded value is
+	// provenance, never a replay key, and is capped independently, so after
+	// truncation it is not necessarily a suffix of the recorded prompt.
 	Instructions string
 	// SystemPrompt replaces the harness system prompt entirely. Advanced; the
 	// caller owns the tool and termination instructions. It is valid for New

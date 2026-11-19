@@ -309,14 +309,14 @@ func TestChildSystemPromptIdentity(t *testing.T) {
 	}
 	workspace := "/workspace"
 	wantLine := `You are the acode "reviewer" agent, working in the workspace "/workspace".`
-	got := childSystemPrompt(def, workspace, "acode", PromptVersion)
+	got := childSystemPrompt(def, workspace, "acode", PromptVersion, "")
 	if !strings.HasPrefix(got, wantLine+"\n\n") {
 		t.Fatalf("acode child prompt = %q, want it to start with %q", got, wantLine)
 	}
 	if strings.Contains(got, "aharness") {
 		t.Fatalf("acode child prompt still names aharness: %q", got)
 	}
-	empty := childSystemPrompt(def, workspace, "", PromptVersion)
+	empty := childSystemPrompt(def, workspace, "", PromptVersion, "")
 	if !strings.HasPrefix(empty, `You are the aharness "reviewer" agent, working in the workspace "/workspace".`+"\n\n") {
 		t.Fatalf("empty identity child prompt = %q, want the aharness default", empty)
 	}
@@ -335,6 +335,7 @@ func TestProjectUsesRecordedPrompt(t *testing.T) {
 			Model:          "test-model",
 			Limits:         testConfig().Limits,
 			SystemPrompt:   recorded,
+			AppendedPrompt: "host text that projection must ignore",
 			Agent:          "reviewer",
 			Tools:          []string{"search", "read_file"},
 			ParentSession:  "parent",
@@ -475,7 +476,7 @@ func TestChildSystemPrompt(t *testing.T) {
 		t.Fatalf("ParseAgentDefinition: %v", err)
 	}
 	for _, version := range []string{PromptVersionV0, PromptVersionV1, PromptVersionV2, PromptVersion} {
-		prompt := childSystemPrompt(def, "/workspace", "aharness", version)
+		prompt := childSystemPrompt(def, "/workspace", "aharness", version, "")
 		for _, want := range []string{"reviewer", "/workspace", "Review the assigned change", "Tools are your only way to act"} {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("%s child prompt missing %q: %q", version, want, prompt)
@@ -490,7 +491,7 @@ func TestChildSystemPrompt(t *testing.T) {
 	// v3 only; v0 and v1 keep their frozen child contract.
 	def.Tools = []string{"read_file", "todo"}
 	for _, version := range []string{PromptVersionV2, PromptVersion} {
-		prompt := childSystemPrompt(def, "/workspace", "aharness", version)
+		prompt := childSystemPrompt(def, "/workspace", "aharness", version, "")
 		if !strings.Contains(prompt, "`todo` tracks multi-step work") {
 			t.Fatalf("%s child with todo grant lacks the todo guidance: %q", version, prompt)
 		}
@@ -499,24 +500,55 @@ func TestChildSystemPrompt(t *testing.T) {
 		}
 	}
 	for _, version := range []string{PromptVersionV0, PromptVersionV1} {
-		if prompt := childSystemPrompt(def, "/workspace", "aharness", version); strings.Contains(prompt, "`todo`") {
+		if prompt := childSystemPrompt(def, "/workspace", "aharness", version, ""); strings.Contains(prompt, "`todo`") {
 			t.Fatalf("%s child gained todo guidance: %q", version, prompt)
 		}
 	}
 
 	// v2 children keep the frozen rules; v3 children get the v3 policy lines.
-	v2 := childSystemPrompt(def, "/workspace", "aharness", PromptVersionV2)
+	v2 := childSystemPrompt(def, "/workspace", "aharness", PromptVersionV2, "")
 	if strings.Contains(v2, "Every tool call receives exactly one result") || strings.Contains(v2, "project instructions") {
 		t.Fatalf("v2 child gained v3 rules: %q", v2)
 	}
 	if !strings.Contains(v2, "Run the relevant tests after changing code") {
 		t.Fatalf("v2 child lost its frozen test rule: %q", v2)
 	}
-	v3 := childSystemPrompt(def, "/workspace", "aharness", PromptVersion)
+	v3 := childSystemPrompt(def, "/workspace", "aharness", PromptVersion, "")
 	if !strings.Contains(v3, "Every tool call receives exactly one result") ||
 		!strings.Contains(v3, "Run the relevant tests before reporting the change done") ||
 		!strings.Contains(v3, "If the workspace carries project instructions") {
 		t.Fatalf("v3 child lacks the v3 rules: %q", v3)
+	}
+}
+
+func TestChildSystemPromptCarriesHostText(t *testing.T) {
+	def, err := ParseAgentDefinition([]byte(validDefinition))
+	if err != nil {
+		t.Fatalf("ParseAgentDefinition: %v", err)
+	}
+	host := "Workspace rules:\n- Keep the host text last."
+	prompt := childSystemPrompt(def, "/workspace", "aharness", PromptVersion, host)
+	roleAt := strings.Index(prompt, "## Your role")
+	if roleAt < 0 || strings.Index(prompt, host) < roleAt || !strings.HasSuffix(prompt, "\n\n"+host) {
+		t.Fatalf("host text is not after the role body: %q", prompt)
+	}
+	plain := childSystemPrompt(def, "/workspace", "aharness", PromptVersion, "")
+	if plain != strings.TrimSuffix(prompt, "\n\n"+host) {
+		t.Fatal("an empty append changed the child prompt bytes")
+	}
+
+	// The write point applies the single recorded-prompt cap, so an over-cap
+	// host text yields exactly one marker after the role body stays intact.
+	over := childSystemPrompt(def, "/workspace", "aharness", PromptVersion, strings.Repeat("x", 40_000))
+	recorded := systemPromptText(Config{SystemPrompt: over})
+	if got := strings.Count(recorded, "[truncated "); got != 1 {
+		t.Fatalf("truncation markers = %d, want 1", got)
+	}
+	if !strings.Contains(recorded, "## Your role\n\nReview the assigned change. Lead with findings.") {
+		t.Fatal("the cap cut into the role body")
+	}
+	if len(recorded) <= maxSystemPromptBytes {
+		t.Fatalf("recorded prompt length = %d, want the cap applied", len(recorded))
 	}
 }
 

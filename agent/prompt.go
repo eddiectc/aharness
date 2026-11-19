@@ -177,11 +177,13 @@ func AgentCatalogText(agents []AgentInfo) string {
 }
 
 // childSystemPrompt composes a child's recorded prompt: the environment block
-// and the shared rules, then the agent's role body. A child gets no catalog and
-// no delegation guidance; it cannot delegate. A prompt-v2 or prompt-v3 child
-// whose grant includes todo also gets the todo guidance, because most child
-// grants do not; v0 and v1 children keep their frozen rules.
-func childSystemPrompt(def AgentDefinition, workspace, identity, version string) string {
+// and the shared rules, then the agent's role body, then the host text carried
+// from the parent. A child gets no catalog and no delegation guidance; it cannot
+// delegate. A prompt-v2 or prompt-v3 child whose grant includes todo also gets
+// the todo guidance, because most child grants do not; v0 and v1 children keep
+// their frozen rules. The caller applies the recorded-prompt cap once when the
+// session starts.
+func childSystemPrompt(def AgentDefinition, workspace, identity, version, appendText string) string {
 	var rules string
 	switch version {
 	case PromptVersionV0, PromptVersionV1:
@@ -201,13 +203,19 @@ func childSystemPrompt(def AgentDefinition, workspace, identity, version string)
 		// an unknown one rather than silently dropping the rules.
 		rules = harnessRulesFrozen
 	}
-	return fmt.Sprintf("You are the %s %q agent, working in the workspace %q.\n\n%s\n\n## Your role\n\n%s",
+	text := fmt.Sprintf("You are the %s %q agent, working in the workspace %q.\n\n%s\n\n## Your role\n\n%s",
 		identityOrDefault(identity), def.Name, workspace, rules, strings.TrimSpace(def.Prompt))
+	if appendText != "" {
+		text += "\n\n" + appendText
+	}
+	return text
 }
 
 // systemPromptText returns the prompt a runner records and projects. A Config
 // that carries an explicit SystemPrompt (a child session) uses it verbatim;
 // otherwise the prompt is rendered from the configured version and catalog.
+// The package never appends AppendedPrompt: a caller that wants host text in
+// the prompt composes it into SystemPrompt first.
 func systemPromptText(cfg Config) string {
 	text := cfg.SystemPrompt
 	if text == "" {
@@ -219,9 +227,6 @@ func systemPromptText(cfg Config) string {
 			rendered = identityLine(cfg.Identity, cfg.Workspace) + "\n\n" + harnessRulesFrozen
 		}
 		text = rendered
-	}
-	if cfg.AppendSystemPrompt != "" {
-		text += "\n\n" + cfg.AppendSystemPrompt
 	}
 	return capText(text, maxSystemPromptBytes)
 }

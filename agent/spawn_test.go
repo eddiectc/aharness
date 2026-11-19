@@ -709,6 +709,49 @@ Changed body.
 	}
 }
 
+func TestSpawnerCarriesAppendedPromptToChildren(t *testing.T) {
+	cfg := testConfig()
+	host := "Workspace rules:\n- Read AGENTS.md before editing."
+	cfg.AppendedPrompt = host
+	f := newSpawnFixture(t, cfg)
+	f.completer.steps = []scriptStep{
+		completedStep("first", model.Usage{InputTokens: 1, OutputTokens: 1}),
+		completedStep("second", model.Usage{InputTokens: 1, OutputTokens: 1}),
+	}
+	first := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "explore", Task: "one"}))
+	start := decodePayload[sessionStartData](t, f.readLog(t, first.Session)[0])
+	if got := strings.Count(start.SystemPrompt, host); got != 1 {
+		t.Fatalf("fresh child prompt carries the host text %d times: %q", got, start.SystemPrompt)
+	}
+	roleAt := strings.Index(start.SystemPrompt, "## Your role")
+	if roleAt < 0 || strings.Index(start.SystemPrompt, host) < roleAt {
+		t.Fatalf("fresh child prompt lost the host text position: %q", start.SystemPrompt)
+	}
+	if start.AppendedPrompt != "" {
+		t.Fatalf("fresh child recorded appended_prompt = %q, want empty", start.AppendedPrompt)
+	}
+
+	second := onlyReport(t, f.spawn(t, tools.Call{ID: "call-2"}, tools.SubagentSpec{Task: "two", Session: first.Session}))
+	if second.Status != tools.SubagentCompleted {
+		t.Fatalf("continuation = %+v", second)
+	}
+	request := f.completer.requests[len(f.completer.requests)-1]
+	if len(request.Messages) == 0 || request.Messages[0].Content != start.SystemPrompt {
+		t.Fatalf("continued child prompt changed: %+v", request.Messages)
+	}
+	if got := strings.Count(request.Messages[0].Content, host); got != 1 {
+		t.Fatalf("continued child carries the host text %d times", got)
+	}
+	for _, ev := range f.readLog(t, second.Session) {
+		if ev.Type != session.TypeSessionStart {
+			continue
+		}
+		if continued := decodePayload[sessionStartData](t, ev); continued.AppendedPrompt != "" {
+			t.Fatalf("continued child recorded appended_prompt = %q, want empty", continued.AppendedPrompt)
+		}
+	}
+}
+
 func TestSpawnerRoutesSteeringToChild(t *testing.T) {
 	f := newSpawnFixture(t, testConfig())
 	steered := false

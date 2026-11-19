@@ -96,10 +96,13 @@ type Config struct {
 	// is authoritative for projection; an empty value renders the configured
 	// PromptVersion instead. A child session sets it to the agent's prompt.
 	SystemPrompt string
-	// AppendSystemPrompt is appended to the rendered or explicit system prompt
-	// when session_start is written. It is a new/fork input only; resume
-	// inherits the recorded prompt and rejects it.
-	AppendSystemPrompt string
+	// AppendedPrompt records the bytes the host contributed to the prompt in
+	// this config, recorded as session_start.appended_prompt when this config
+	// starts a session. It is record-only: the caller has already composed the
+	// text into SystemPrompt; the package never appends it. A running session's
+	// config carries it so delegated children inherit the text, and a child's
+	// own config leaves it empty.
+	AppendedPrompt string
 	// Agent is the definition name for a child run; empty for a parent.
 	Agent string
 	// SessionID is the durable session identifier for this run. It is

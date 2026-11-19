@@ -167,8 +167,11 @@ type Host struct {
 	workspace *tools.Workspace
 	workDir   string
 	tmpDir    string
-	policy    func(context.Context, agent.ToolPolicyRequest) error
-	closed    bool
+	// appendedPrompt is the host text recorded in session_start, carried so a
+	// delegated child inherits it and a resumed or forked session keeps it.
+	appendedPrompt string
+	policy         func(context.Context, agent.ToolPolicyRequest) error
+	closed         bool
 }
 
 // Open prepares a new, resumed, or forked session and returns its host. A
@@ -304,6 +307,10 @@ func openNew(spec Spec) (*Host, error) {
 		return nil, fmt.Errorf("create session log: %w", err)
 	}
 	prompt := resolvedNewPrompt(spec, promptVersion, ws.Dir())
+	appended := ""
+	if spec.AppendPromptSet {
+		appended = spec.AppendPrompt
+	}
 	cfg := agent.Config{
 		Provider:       spec.Provider,
 		Dialect:        spec.Dialect,
@@ -317,6 +324,7 @@ func openNew(spec Spec) (*Host, error) {
 		ToolsetVersion: toolsetVersion,
 		HarnessVersion: spec.Version,
 		SystemPrompt:   prompt,
+		AppendedPrompt: appended,
 		Agent:          spec.Agent,
 		Tools:          cloneGrant(spec.Grant),
 		RootTools:      cloneGrant(spec.RootGrant),
@@ -341,7 +349,7 @@ func openNew(spec Spec) (*Host, error) {
 	spec.Grant = cloneGrant(spec.Grant)
 	spec.RootGrant = cloneGrant(spec.RootGrant)
 	spec.CustomTools = cloneCustomTools(spec.CustomTools)
-	return newHost(spec, store, ws), nil
+	return newHost(spec, store, ws, appended), nil
 }
 
 func openResume(spec Spec) (*Host, error) {
@@ -375,7 +383,7 @@ func openResume(spec Spec) (*Host, error) {
 		_ = store.Close()
 		return nil, configError("ToolsetVersion", "session toolset version %q is not supported", state.ToolsetVersion)
 	}
-	resolved, prompt, err := resolveInherited(spec, state, false)
+	resolved, prompt, appended, err := resolveInherited(spec, state, false)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
@@ -388,7 +396,7 @@ func openResume(spec Spec) (*Host, error) {
 	resolved.Workspace = ws.Dir()
 	resolved.SessionID = store.ID()
 	resolved.SystemPrompt = prompt
-	return newHost(resolved, store, ws), nil
+	return newHost(resolved, store, ws, appended), nil
 }
 
 func openFork(spec Spec) (*Host, error) {
@@ -413,7 +421,7 @@ func openFork(spec Spec) (*Host, error) {
 		_ = source.Close()
 		return nil, configError("ToolsetVersion", "parent toolset version %q is not supported", parentState.ToolsetVersion)
 	}
-	resolved, prompt, err := resolveInherited(spec, parentState, true)
+	resolved, prompt, appended, err := resolveInherited(spec, parentState, true)
 	if err != nil {
 		_ = source.Close()
 		return nil, err
@@ -458,6 +466,7 @@ func openFork(spec Spec) (*Host, error) {
 		ToolsetVersion:   resolved.ToolsetVersion,
 		HarnessVersion:   resolved.Version,
 		SystemPrompt:     prompt,
+		AppendedPrompt:   appended,
 		Agent:            resolved.Agent,
 		Tools:            cloneGrant(resolved.Grant),
 		RootTools:        cloneGrant(resolved.RootGrant),
@@ -491,12 +500,13 @@ func openFork(spec Spec) (*Host, error) {
 		_ = ws.Close()
 		return nil, fmt.Errorf("close parent session: %w", err)
 	}
-	return newHost(resolved, store, ws), nil
+	return newHost(resolved, store, ws, appended), nil
 }
 
 // resolveInherited applies the resume/fork inheritance matrix. It validates
-// prompt and tool overrides before any new log exists.
-func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, error) {
+// prompt and tool overrides before any new log exists. It returns the resolved
+// spec, the effective prompt, and the host text to record as provenance.
+func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, string, error) {
 	resolved := spec
 	resolved.PromptVersion = state.PromptVersion
 	resolved.ToolsetVersion = state.ToolsetVersion
@@ -510,7 +520,7 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 			resolved.Model = state.InitialModel
 		}
 		if resolved.Model == "" {
-			return Spec{}, "", configError("Model", "session does not record a model; set a model")
+			return Spec{}, "", "", configError("Model", "session does not record a model; set a model")
 		}
 		resolved.Dialect = state.Dialect
 		if resolved.Dialect == "" {
@@ -522,12 +532,12 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 			resolved.Limits = clampLimits(spec.Limits, state.Limits)
 		}
 		if resolved.Limits.MaxContextTokens <= 0 {
-			return Spec{}, "", configError("Limits", "session does not record a context limit; supply an explicit model")
+			return Spec{}, "", "", configError("Limits", "session does not record a context limit; supply an explicit model")
 		}
 		resolved.Pricing = state.Pricing
 	}
 	if spec.NewCompleter == nil {
-		return Spec{}, "", configError("Model.Completer", "is required")
+		return Spec{}, "", "", configError("Model.Completer", "is required")
 	}
 	if explicitModel {
 		if resolved.Dialect == "" {
@@ -555,7 +565,7 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	if inheritedPrompt == "" {
 		rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, spec.Identity, spec.Agents)
 		if err != nil {
-			return Spec{}, "", configError("SystemPrompt", "render recorded prompt: %v", err)
+			return Spec{}, "", "", configError("SystemPrompt", "render recorded prompt: %v", err)
 		}
 		inheritedPrompt = rendered
 	}
@@ -563,7 +573,7 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	if fork {
 		switch {
 		case spec.SystemPromptSet && spec.AppendPromptSet:
-			return Spec{}, "", configError("SystemPrompt", "must not be combined with Instructions")
+			return Spec{}, "", "", configError("SystemPrompt", "must not be combined with Instructions")
 		case spec.SystemPromptSet:
 			prompt = agent.CapSystemPrompt(spec.SystemPrompt)
 		case spec.AppendPromptSet:
@@ -571,11 +581,28 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 			if base == "" {
 				rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, resolved.Identity, spec.Agents)
 				if err != nil {
-					return Spec{}, "", configError("SystemPrompt", "render prompt: %v", err)
+					return Spec{}, "", "", configError("SystemPrompt", "render prompt: %v", err)
 				}
 				base = rendered
 			}
 			prompt = agent.CapSystemPrompt(base + "\n\n" + spec.AppendPrompt)
+		}
+	}
+	// Appended text is provenance, never a replay key. Resume carries the
+	// recorded value. A fork with an explicit prompt records none: the explicit
+	// prompt is the host's whole contract. A fork that keeps the inherited
+	// prompt carries the recorded value, extended by its own Instructions.
+	appended := state.AppendedPrompt
+	if fork {
+		switch {
+		case spec.SystemPromptSet:
+			appended = ""
+		case spec.AppendPromptSet:
+			if appended == "" {
+				appended = spec.AppendPrompt
+			} else {
+				appended += "\n\n" + spec.AppendPrompt
+			}
 		}
 	}
 	// Prompt tag: recorded attribution, never a replay key. Resume keeps the
@@ -586,9 +613,9 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	case !fork:
 		if spec.PromptTag != "" && spec.PromptTag != state.PromptTag {
 			if state.PromptTag == "" {
-				return Spec{}, "", configError("PromptTag", "the session records no prompt tag; fork to set %q", spec.PromptTag)
+				return Spec{}, "", "", configError("PromptTag", "the session records no prompt tag; fork to set %q", spec.PromptTag)
 			}
-			return Spec{}, "", configError("PromptTag", "prompt tag %q is recorded; fork to change it", state.PromptTag)
+			return Spec{}, "", "", configError("PromptTag", "prompt tag %q is recorded; fork to change it", state.PromptTag)
 		}
 		resolved.PromptTag = state.PromptTag
 	case spec.PromptTag != "":
@@ -608,10 +635,10 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	if spec.CustomToolsSet {
 		if err := agent.VerifyCustomTools(recordedCustom, spec.CustomTools); err != nil {
 			if !fork {
-				return Spec{}, "", err
+				return Spec{}, "", "", err
 			}
 			if err := agent.ValidateCustomTools(spec.CustomTools); err != nil {
-				return Spec{}, "", configError("Tools.Extra", "%v", err)
+				return Spec{}, "", "", configError("Tools.Extra", "%v", err)
 			}
 		}
 		resolved.CustomTools = cloneCustomTools(spec.CustomTools)
@@ -620,14 +647,14 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 	}
 	if spec.GrantSet {
 		if !fork && !sameGrantSet(spec.Grant, state.Tools, state.ToolsetVersion, recordedCustom) {
-			return Spec{}, "", fmt.Errorf("%w: recorded grant %v, caller supplied %v", agent.ErrToolMismatch, state.Tools, spec.Grant)
+			return Spec{}, "", "", fmt.Errorf("%w: recorded grant %v, caller supplied %v", agent.ErrToolMismatch, state.Tools, spec.Grant)
 		}
 		resolved.Grant = cloneGrant(spec.Grant)
 	} else {
 		resolved.Grant = cloneGrant(state.Tools)
 	}
 	if !fork && !spec.CustomToolsSet && len(recordedCustom) > 0 {
-		return Spec{}, "", fmt.Errorf("%w: session records %d custom tool(s) but none were supplied; supply matching Tools.Extra", agent.ErrToolMismatch, len(recordedCustom))
+		return Spec{}, "", "", fmt.Errorf("%w: session records %d custom tool(s) but none were supplied; supply matching Tools.Extra", agent.ErrToolMismatch, len(recordedCustom))
 	}
 	// Root grant: an explicit set replaces on fork and is matched on resume. A
 	// nil set inherits the recorded root grant; nil in the log means the root
@@ -639,7 +666,7 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 				recorded = state.Tools
 			}
 			if !sameGrantSet(spec.RootGrant, recorded, state.ToolsetVersion, recordedCustom) {
-				return Spec{}, "", fmt.Errorf("%w: recorded root grant %v, caller supplied %v", agent.ErrToolMismatch, state.RootTools, spec.RootGrant)
+				return Spec{}, "", "", fmt.Errorf("%w: recorded root grant %v, caller supplied %v", agent.ErrToolMismatch, state.RootTools, spec.RootGrant)
 			}
 		}
 		resolved.RootGrant = cloneGrant(spec.RootGrant)
@@ -647,9 +674,9 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 		resolved.RootGrant = cloneGrant(state.RootTools)
 	}
 	if err := validateToolsForVersion(resolved.Grant, resolved.RootGrant, resolved.CustomTools, resolved.ToolsetVersion, len(spec.Definitions) > 0); err != nil {
-		return Spec{}, "", err
+		return Spec{}, "", "", err
 	}
-	return resolved, prompt, nil
+	return resolved, prompt, appended, nil
 }
 
 func resolvedNewPrompt(spec Spec, promptVersion, workspace string) string {
@@ -859,14 +886,15 @@ func effortValue(effort *string, fallback string) string {
 	return *effort
 }
 
-func newHost(spec Spec, store *session.Store, ws *tools.Workspace) *Host {
+func newHost(spec Spec, store *session.Store, ws *tools.Workspace, appendedPrompt string) *Host {
 	workDir := filepath.Join(spec.StateDir, "work", store.ID())
 	host := &Host{
-		spec:      spec,
-		store:     store,
-		workspace: ws,
-		workDir:   workDir,
-		tmpDir:    filepath.Join(workDir, "tmp"),
+		spec:           spec,
+		store:          store,
+		workspace:      ws,
+		workDir:        workDir,
+		tmpDir:         filepath.Join(workDir, "tmp"),
+		appendedPrompt: appendedPrompt,
 	}
 	if spec.ToolPolicy != nil {
 		var mu sync.Mutex

@@ -39,6 +39,11 @@ type State struct {
 	// SystemPrompt is the prompt recorded in session_start. Empty for a log
 	// written before the field existed.
 	SystemPrompt string
+	// AppendedPrompt is the host text recorded in session_start beside
+	// SystemPrompt. It is provenance only and never a replay key: projection
+	// keeps using SystemPrompt, it is empty on logs written before the field,
+	// and a delegated child leaves it empty.
+	AppendedPrompt string
 	// Agent is the definition name recorded for a child session.
 	Agent string
 	// Tools is the recorded tool grant; nil means every tool of the version
@@ -136,6 +141,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.ParentSeq = data.ParentSeq
 			state.ParentCallID = data.ParentCallID
 			state.SystemPrompt = data.SystemPrompt
+			state.AppendedPrompt = data.AppendedPrompt
 			state.Agent = data.Agent
 			state.Tools = cloneGrant(data.Tools)
 			state.RootTools = cloneGrant(data.RootTools)

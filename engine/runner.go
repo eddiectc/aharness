@@ -166,6 +166,7 @@ func (h *Host) runConfig(run RunSpec, display func(agent.DisplayEvent) error, st
 		ToolsetVersion: h.spec.ToolsetVersion,
 		HarnessVersion: h.spec.Version,
 		SystemPrompt:   h.spec.SystemPrompt,
+		AppendedPrompt: h.appendedPrompt,
 		SessionID:      h.ID(),
 		Agent:          h.spec.Agent,
 		Tools:          cloneGrant(h.spec.Grant),

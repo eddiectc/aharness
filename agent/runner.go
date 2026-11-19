@@ -71,6 +71,7 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 		HarnessVersion:   cfg.HarnessVersion,
 		ThinkingEffort:   cfg.ThinkingEffort,
 		SystemPrompt:     systemPromptText(cfg),
+		AppendedPrompt:   capText(cfg.AppendedPrompt, maxSystemPromptBytes),
 		Agent:            cfg.Agent,
 		Tools:            cloneGrant(cfg.Tools),
 		RootTools:        cloneGrant(cfg.RootTools),

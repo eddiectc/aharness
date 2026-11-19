@@ -23,6 +23,32 @@ func TestStateTotalUsage(t *testing.T) {
 	}
 }
 
+func TestInspectRecordsAppendedPrompt(t *testing.T) {
+	events := []session.Event{
+		newTestEvent(t, session.TypeSessionStart, 0, "", sessionStartData{
+			PromptVersion: PromptVersion, ToolsetVersion: tools.Version, Workspace: "/workspace",
+			Provider: "opencode-go", Model: "model-a", Dialect: "openai-chat",
+			Limits: testConfig().Limits, SystemPrompt: "recorded prompt", AppendedPrompt: "host text",
+		}),
+	}
+	state, err := Inspect(events)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.AppendedPrompt != "host text" || state.SystemPrompt != "recorded prompt" {
+		t.Fatalf("state = %+v", state)
+	}
+
+	// A log written before the field reads empty, exactly like prompt_tag.
+	legacy, err := Inspect([]session.Event{startEvent(t, "/workspace")})
+	if err != nil {
+		t.Fatalf("Inspect legacy: %v", err)
+	}
+	if legacy.AppendedPrompt != "" {
+		t.Fatalf("legacy AppendedPrompt = %q, want empty", legacy.AppendedPrompt)
+	}
+}
+
 func TestSummarizeSessionHead(t *testing.T) {
 	events := []session.Event{
 		histEvent(t, 1, session.TypeSessionStart, 0, sessionStartData{
