@@ -8,6 +8,22 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-19
+
+This is the workspace-instructions release. `Config.Instructions` now reaches
+every fresh delegated child, survives `Resume` and `Fork`, and is recorded once
+as `session_start.appended_prompt`. It is a minor release because the module is
+pre-1.0 and the change set is both additive and breaking: component hosts lose
+`agent.Config.AppendSystemPrompt`, which was engine-dead. Every item under
+**Changed** or **Removed** carries a **Migration** note. The session schema
+stays `2`, existing logs need no migration, `prompt-v3` is unchanged, and tool
+grants, tool schemas, and the toolset version are unchanged.
+
+The build plan's fresh-acode session check had not run when this tag was cut:
+acode is a separate repository. The exact pending check is recorded in
+[the plan](docs/plans/workspace-instructions-build.md) §7.4; the release does
+not claim it was verified.
+
 ### Added
 
 - `session_start.appended_prompt` records the host text composed into the
@@ -402,6 +418,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[v0.4.0]: https://github.com/eddiectc/aharness/compare/v0.3.0...v0.4.0
+[v0.3.0]: https://github.com/eddiectc/aharness/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/eddiectc/aharness/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/eddiectc/aharness/compare/v0.0.1...v0.1.0
 [v0.0.1]: https://github.com/eddiectc/aharness/releases/tag/v0.0.1

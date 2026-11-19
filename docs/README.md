@@ -62,7 +62,7 @@ rewriting its conclusions.
 | [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |
 | [plans/web-fetch-build.md](plans/web-fetch-build.md) | Implemented 2026-11-13; public-page and Crawl4AI smoke passed |
 | [plans/web-search-build.md](plans/web-search-build.md) | Implemented 2026-11-13; manual SearXNG smoke passed |
-| [plans/workspace-instructions-build.md](plans/workspace-instructions-build.md) | Implemented 2026-11-19; fresh-acode check pending |
+| [plans/workspace-instructions-build.md](plans/workspace-instructions-build.md) | Implemented and released 2026-11-19 as v0.4.0; fresh-acode check pending |
 
 ### Research
 

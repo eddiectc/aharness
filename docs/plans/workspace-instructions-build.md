@@ -1,9 +1,10 @@
 # aharness workspace-instructions build plan
 
 - **Date:** 2026-11-19
-- **Status:** implemented 2026-11-19. Phases 1–4 landed; `make dod` passes. The
-  fresh-acode session check in §7.4 was **not run** (acode is a separate
-  repository). §8.1's double cap is untouched and remains unfiled.
+- **Status:** implemented and released 2026-11-19 as `v0.4.0`. Phases 1–4
+  landed; `make dod` passes. The fresh-acode session check in §7.4 was **not
+  run** (acode is a separate repository). §8.1's double cap is untouched and
+  remains unfiled.
 - **Shape (owner decision, A):** delete `agent.Config.AppendSystemPrompt` instead
   of fixing it. `Config.Instructions` stays the facade's only append-shaped
   input; the `agent` layer gains `AppendedPrompt`, which records the host's text
