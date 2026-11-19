@@ -8,6 +8,22 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-11-19
+
+This is the prompt-surface release planned after `v0.2.0`. The SDK owns the
+prompt contract and the loop invariants; identity, prompt content, and role
+definitions now belong to the host. The module is pre-1.0, so this minor
+release contains breaking changes for component hosts and for facade hosts that
+used the bundled role set; every item under **Changed** or **Removed** carries a
+**Migration** note. `prompt-v3` is the current prompt, the session schema stays
+`2`, existing logs need no migration, and tool grants, tool schemas, and the
+toolset version are unchanged.
+
+The real-model component probes required by the build plan had not run when
+this tag was cut. The exact pending checks are recorded in
+[the plan](docs/plans/prompt-surface-build.md) §12; do not read this release as
+probe-verified.
+
 ### Added
 
 - Prompt composition primitives: `agent.LoopRules()` returns the

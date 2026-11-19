@@ -1090,10 +1090,11 @@ These are the §7.1 automated gates. The cross-repo gate remains unnecessary:
 all three breaks are compile-time, so acode's migration is validated by its own
 build.
 
-**Release status.** The CHANGELOG entries for this work live under
-`## [Unreleased]`. The `v0.3.0` heading and tag are cut by the owner after the
-§7.2 probes, so the release notes and the probes land together. The plan index
-records the work as implemented with the probes pending.
+**Release status.** The CHANGELOG entries for this work were cut as
+`v0.3.0` on 2026-11-19, before the §7.2 probes ran. The tag exists with the
+probes pending; the release notes say so rather than implying they passed. Run
+the probes against the tagged commit, or against a later commit if the prompts
+change, and record the traces before treating the prompt behavior as verified.
 
 **Pending: §7.2 real-model component probes (owner, manual, before the tag).**
 The exact pending checks are probe 1 (review-before-done: a three-file change
