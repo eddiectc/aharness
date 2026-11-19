@@ -113,12 +113,16 @@ type ContractOverride struct {
 
 // State is the durable session state reconstructed from the log.
 type State struct {
-	ID               string
-	Workspace        string
-	StateDir         string
-	Model            ModelSpec
-	AgentName        string
-	SystemPrompt     string
+	ID           string
+	Workspace    string
+	StateDir     string
+	Model        ModelSpec
+	AgentName    string
+	SystemPrompt string
+	// PromptTag is the host prompt tag recorded beside the SDK prompt template
+	// version. Empty means unset. It is attribution only and never a replay
+	// key.
+	PromptTag        string
 	Tools            []ToolName
 	RootTools        []ToolName
 	CustomTools      []ToolSchema
@@ -210,6 +214,7 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 			Pricing:         fromInternalPricing(state.Pricing),
 		},
 		SystemPrompt:         state.SystemPrompt,
+		PromptTag:            state.PromptTag,
 		AgentName:            state.Agent,
 		Limits:               fromInternalLimits(state.Limits),
 		Turns:                state.Turns,

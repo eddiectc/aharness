@@ -35,6 +35,21 @@ type Config struct {
 	// UserAgent identifies the host on outbound tool requests, for example
 	// "acode/1.2.0". Required.
 	UserAgent string
+	// Identity is the host product name used in the parent prompt's identity
+	// line and in a delegated child's line, for example "acode". Empty means
+	// "aharness". It is trimmed and limited to 64 bytes with no control
+	// characters. It is not recorded in the session log, so supply it on every
+	// construction, including Resume and Fork; a fork's new children use the
+	// identity supplied to Fork.
+	Identity string
+	// PromptTag attributes the host's prompt template, for example
+	// "acode/prompt-v1". It is recorded in session_start beside the SDK
+	// prompt template version and is never a replay key. Empty means unset;
+	// otherwise it is at most 64 bytes of printable ASCII matching
+	// [A-Za-z0-9._:/-]+. Resume keeps the recorded tag and rejects a different
+	// explicit one; Fork prefers an explicit tag and otherwise inherits only
+	// when the prompt is unchanged.
+	PromptTag string
 
 	// Tools selects built-in tools, registers custom ones, and configures the
 	// web and delegation tools. Nil selects the default built-in set. On
@@ -66,7 +81,10 @@ type Config struct {
 	Instructions string
 	// SystemPrompt replaces the harness system prompt entirely. Advanced; the
 	// caller owns the tool and termination instructions. It is valid for New
-	// and Fork; Resume requires it to be empty.
+	// and Fork; Resume requires it to be empty. To compose a replacement without
+	// transcribing the loop invariants, use agent.LoopRules for the invariant
+	// lines and agent.AgentCatalogText for the agent catalog, or inherit the
+	// default body with only Identity set.
 	SystemPrompt string
 
 	// Authorize is called before every tool execution, including delegated
@@ -101,14 +119,18 @@ func New(ctx context.Context, cfg Config) (*Agent, error) {
 }
 
 // Resume opens an existing session for append. cfg.Model is required; a zero
-// Spec inherits the recorded model identity, limits, and pricing.
+// Spec inherits the recorded model identity, limits, and pricing. An explicit
+// cfg.PromptTag must equal the recorded tag; use Fork to change it.
 func Resume(ctx context.Context, cfg Config, sessionID string) (*Agent, error) {
 	return openAgent(ctx, cfg, engine.ModeResume, sessionID)
 }
 
 // Fork copies an existing session into a new self-contained session and opens
-// it for append. Explicit Instructions, SystemPrompt, and Tools apply to the
-// new session and are recorded with a contract_override.
+// it for append. Explicit Instructions, SystemPrompt, Tools, and PromptTag
+// apply to the new session and are recorded with a contract_override. Identity
+// is not recorded, so the fork and its new children use the Config.Identity
+// supplied to Fork. With no explicit PromptTag, the fork inherits the parent
+// tag only when its resulting prompt is unchanged.
 func Fork(ctx context.Context, cfg Config, sessionID string) (*Agent, error) {
 	return openAgent(ctx, cfg, engine.ModeFork, sessionID)
 }
@@ -177,6 +199,8 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 		Mode:            mode,
 		SessionID:       sessionID,
 		UserAgent:       cfg.UserAgent,
+		Identity:        cfg.Identity,
+		PromptTag:       cfg.PromptTag,
 		Provider:        modelCfg.Spec.Provider,
 		Dialect:         string(modelCfg.Spec.Dialect),
 		BaseURL:         modelCfg.Spec.BaseURL,
@@ -484,7 +508,7 @@ func validateDelegationDefinitions(cfg *DelegationConfig, enabled map[ToolName]b
 		return nil
 	}
 	if len(cfg.Agents) == 0 {
-		return &ConfigError{Field: "Tools.Delegation.Agents", Detail: "must not be empty; use DefaultAgents for the bundled set"}
+		return &ConfigError{Field: "Tools.Delegation.Agents", Detail: "must not be empty; supply the host's definition set"}
 	}
 	if cfg.MaxSubagents < -1 {
 		return &ConfigError{Field: "Tools.Delegation.MaxSubagents", Detail: "must be -1 or greater"}

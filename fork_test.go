@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/eddiectc/aharness"
@@ -86,6 +87,55 @@ func TestForkReplaysHistoryWithToolAbsentFromNewGrant(t *testing.T) {
 	}
 	if resumedFrom != parentLastSeq {
 		t.Fatalf("forked ResumedFromSeq = %d, want parent last sequence %d", resumedFrom, parentLastSeq)
+	}
+}
+
+func TestForkInstructionsAppendToRecordedPrompt(t *testing.T) {
+	const recorded = "you are an analyst"
+	stateDir := t.TempDir()
+	parent, err := aharness.New(context.Background(), aharness.Config{
+		Workspace:    t.TempDir(),
+		StateDir:     stateDir,
+		UserAgent:    "aharness-test/1.0",
+		Model:        testModel(&scriptedModel{}),
+		Tools:        &aharness.ToolsConfig{},
+		SystemPrompt: recorded,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	parentID := parent.ID()
+	if err := parent.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	forked, err := aharness.Fork(context.Background(), aharness.Config{
+		StateDir:     stateDir,
+		UserAgent:    "aharness-test/1.0",
+		Model:        testModel(&scriptedModel{}),
+		Tools:        &aharness.ToolsConfig{},
+		Instructions: "extra rule",
+	}, parentID)
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+	defer func() { _ = forked.Close() }()
+	state, err := forked.State()
+	if err != nil {
+		t.Fatalf("fork State: %v", err)
+	}
+	prompt := state.SystemPrompt
+	if !strings.HasPrefix(prompt, recorded) {
+		t.Fatalf("fork prompt = %q, want it to start with the recorded prompt %q", prompt, recorded)
+	}
+	if !strings.Contains(prompt, "extra rule") {
+		t.Fatalf("fork prompt = %q, want the appended instructions", prompt)
+	}
+	if strings.Contains(prompt, "You are aharness") || strings.Contains(prompt, "aharness") {
+		t.Fatalf("fork prompt = %q, want no SDK identity line", prompt)
+	}
+	if state.ContractOverride == nil || !state.ContractOverride.Prompt {
+		t.Fatalf("fork contract override = %+v, want a prompt override", state.ContractOverride)
 	}
 }
 

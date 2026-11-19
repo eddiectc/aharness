@@ -21,10 +21,14 @@ type PendingCall struct {
 // State is the durable session state reconstructed from the event log. A run
 // starts with an empty per-run output but inherits cumulative turns and usage.
 type State struct {
-	Workspace      string
-	StateDir       string
-	Provider       string
-	PromptVersion  string
+	Workspace     string
+	StateDir      string
+	Provider      string
+	PromptVersion string
+	// PromptTag is the host prompt tag recorded in session_start beside
+	// PromptVersion. Empty means unset, including for logs written before the
+	// field existed. It is attribution only and never a replay key.
+	PromptTag      string
 	ToolsetVersion string
 	HarnessVersion string
 	ParentSession  string
@@ -125,6 +129,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.StateDir = data.StateDir
 			state.Provider = data.Provider
 			state.PromptVersion = data.PromptVersion
+			state.PromptTag = data.PromptTag
 			state.ToolsetVersion = data.ToolsetVersion
 			state.HarnessVersion = data.HarnessVersion
 			state.ParentSession = data.ParentSession
@@ -341,7 +346,8 @@ func removePending(pending []PendingCall, id string) []PendingCall {
 
 // SupportsPrompt reports whether this binary can replay a prompt version.
 func SupportsPrompt(version string) bool {
-	return version == PromptVersionV0 || version == PromptVersionV1 || version == PromptVersion
+	return version == PromptVersionV0 || version == PromptVersionV1 ||
+		version == PromptVersionV2 || version == PromptVersion
 }
 
 // SupportsToolset reports whether this binary can replay a toolset version.

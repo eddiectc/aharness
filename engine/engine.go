@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/eddiectc/aharness/agent"
 	"github.com/eddiectc/aharness/model"
@@ -64,6 +66,20 @@ type Spec struct {
 	// "acode/1.2.0". It is required. The model completer closure captures the
 	// same identity independently; the engine cannot inspect its headers.
 	UserAgent string
+	// Identity is the host product name used in the parent prompt's identity
+	// line and in a delegated child's line, for example "acode". Empty means
+	// "aharness". It is trimmed, limited to 64 bytes, and must not contain
+	// control characters. It is not recorded, so the host re-supplies it on
+	// every construction, including resume and fork.
+	Identity string
+	// PromptTag attributes the host's prompt template, for example
+	// "acode/prompt-v1". It is recorded in session_start beside the SDK
+	// PromptVersion and never affects rendering, caps, or replay. Empty means
+	// unset; otherwise it is at most 64 bytes of printable ASCII matching
+	// [A-Za-z0-9._:/-]+. It is not trimmed. Resume keeps the recorded tag and
+	// rejects a different explicit one; Fork prefers an explicit tag and
+	// otherwise inherits only when the prompt is unchanged.
+	PromptTag string
 
 	Provider string
 	Dialect  string
@@ -178,6 +194,16 @@ func Open(ctx context.Context, spec Spec) (*Host, error) {
 	if spec.MaxSubagents < -1 {
 		return nil, configError("MaxSubagents", "must be -1 or greater")
 	}
+	spec.Identity = strings.TrimSpace(spec.Identity)
+	if spec.Identity == "" {
+		spec.Identity = "aharness"
+	}
+	if err := validateIdentity(spec.Identity); err != nil {
+		return nil, err
+	}
+	if err := validatePromptTag(spec.PromptTag); err != nil {
+		return nil, err
+	}
 	if err := prepareStateDir(spec.StateDir); err != nil {
 		return nil, err
 	}
@@ -191,6 +217,47 @@ func Open(ctx context.Context, spec Spec) (*Host, error) {
 	default:
 		return nil, configError("Mode", "is not supported")
 	}
+}
+
+// validateIdentity enforces the product-name shape: valid UTF-8, at most 64
+// bytes, and no control characters. A product name is not arbitrary prompt
+// text.
+func validateIdentity(identity string) error {
+	if !utf8.ValidString(identity) {
+		return configError("Identity", "must be valid UTF-8")
+	}
+	if len(identity) > 64 {
+		return configError("Identity", "must be at most 64 bytes")
+	}
+	for _, r := range identity {
+		if unicode.IsControl(r) {
+			return configError("Identity", "must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// validatePromptTag enforces the attribution-tag shape: empty means unset;
+// otherwise at most 64 bytes, each a printable ASCII character in
+// [A-Za-z0-9._:/-]. A tag is not prompt text.
+func validatePromptTag(tag string) error {
+	if tag == "" {
+		return nil
+	}
+	if len(tag) > 64 {
+		return configError("PromptTag", "must be at most 64 bytes")
+	}
+	for i := 0; i < len(tag); i++ {
+		switch b := tag[i]; {
+		case b >= 'A' && b <= 'Z',
+			b >= 'a' && b <= 'z',
+			b >= '0' && b <= '9',
+			b == '.', b == '_', b == ':', b == '/', b == '-':
+		default:
+			return configError("PromptTag", "must contain only printable ASCII matching [A-Za-z0-9._:/-]")
+		}
+	}
+	return nil
 }
 
 func openNew(spec Spec) (*Host, error) {
@@ -244,7 +311,9 @@ func openNew(spec Spec) (*Host, error) {
 		BaseURL:        spec.BaseURL,
 		Workspace:      ws.Dir(),
 		StateDir:       spec.StateDir,
+		Identity:       spec.Identity,
 		PromptVersion:  promptVersion,
+		PromptTag:      spec.PromptTag,
 		ToolsetVersion: toolsetVersion,
 		HarnessVersion: spec.Version,
 		SystemPrompt:   prompt,
@@ -359,7 +428,7 @@ func openFork(spec Spec) (*Host, error) {
 	resolved.SystemPrompt = prompt
 	parentPrompt := parentState.SystemPrompt
 	if parentPrompt == "" {
-		rendered, renderErr := agent.RenderSystemPrompt(parentState.PromptVersion, parentState.Workspace, spec.Agents)
+		rendered, renderErr := agent.RenderSystemPrompt(parentState.PromptVersion, parentState.Workspace, spec.Identity, spec.Agents)
 		if renderErr == nil {
 			parentPrompt = rendered
 		}
@@ -383,7 +452,9 @@ func openFork(spec Spec) (*Host, error) {
 		BaseURL:          resolved.BaseURL,
 		Workspace:        ws.Dir(),
 		StateDir:         resolved.StateDir,
+		Identity:         resolved.Identity,
 		PromptVersion:    resolved.PromptVersion,
+		PromptTag:        resolved.PromptTag,
 		ToolsetVersion:   resolved.ToolsetVersion,
 		HarnessVersion:   resolved.Version,
 		SystemPrompt:     prompt,
@@ -480,14 +551,15 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 		resolved.ThinkingEffort = new(*spec.ThinkingEffort)
 	}
 	// Prompt: resume inherits; fork applies explicit overrides.
-	prompt := state.SystemPrompt
-	if prompt == "" {
-		rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, spec.Agents)
+	inheritedPrompt := state.SystemPrompt
+	if inheritedPrompt == "" {
+		rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, spec.Identity, spec.Agents)
 		if err != nil {
 			return Spec{}, "", configError("SystemPrompt", "render recorded prompt: %v", err)
 		}
-		prompt = rendered
+		inheritedPrompt = rendered
 	}
+	prompt := inheritedPrompt
 	if fork {
 		switch {
 		case spec.SystemPromptSet && spec.AppendPromptSet:
@@ -495,12 +567,36 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, er
 		case spec.SystemPromptSet:
 			prompt = agent.CapSystemPrompt(spec.SystemPrompt)
 		case spec.AppendPromptSet:
-			rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, spec.Agents)
-			if err != nil {
-				return Spec{}, "", configError("SystemPrompt", "render prompt: %v", err)
+			base := state.SystemPrompt
+			if base == "" {
+				rendered, err := agent.RenderSystemPrompt(state.PromptVersion, state.Workspace, resolved.Identity, spec.Agents)
+				if err != nil {
+					return Spec{}, "", configError("SystemPrompt", "render prompt: %v", err)
+				}
+				base = rendered
 			}
-			prompt = agent.CapSystemPrompt(rendered + "\n\n" + spec.AppendPrompt)
+			prompt = agent.CapSystemPrompt(base + "\n\n" + spec.AppendPrompt)
 		}
+	}
+	// Prompt tag: recorded attribution, never a replay key. Resume keeps the
+	// recorded tag and rejects a different explicit one. Fork prefers an
+	// explicit tag and otherwise inherits only when the prompt is unchanged; a
+	// changed prompt with an inherited tag would misattribute.
+	switch {
+	case !fork:
+		if spec.PromptTag != "" && spec.PromptTag != state.PromptTag {
+			if state.PromptTag == "" {
+				return Spec{}, "", configError("PromptTag", "the session records no prompt tag; fork to set %q", spec.PromptTag)
+			}
+			return Spec{}, "", configError("PromptTag", "prompt tag %q is recorded; fork to change it", state.PromptTag)
+		}
+		resolved.PromptTag = state.PromptTag
+	case spec.PromptTag != "":
+		resolved.PromptTag = spec.PromptTag
+	case prompt == inheritedPrompt:
+		resolved.PromptTag = state.PromptTag
+	default:
+		resolved.PromptTag = ""
 	}
 	resolved.SystemPrompt = prompt
 	resolved.SystemPromptSet = false
@@ -561,7 +657,7 @@ func resolvedNewPrompt(spec Spec, promptVersion, workspace string) string {
 	case spec.SystemPromptSet:
 		return agent.CapSystemPrompt(spec.SystemPrompt)
 	default:
-		rendered, err := agent.RenderSystemPrompt(promptVersion, workspace, spec.Agents)
+		rendered, err := agent.RenderSystemPrompt(promptVersion, workspace, spec.Identity, spec.Agents)
 		if err != nil {
 			rendered = workspace
 		}

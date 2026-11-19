@@ -173,7 +173,9 @@ Other event payloads:
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
 | Toolset version | `toolset-v2` for new sessions | `toolset-v0` and `toolset-v1` declarations are frozen for replay; `toolset-v2` adds `delegate` to v1. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, and an older session cannot delegate. |
-| Prompt version | `prompt-v2` for new sessions | `prompt-v0` and `prompt-v1` stay frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
+| Prompt version | `prompt-v3` for new sessions | `prompt-v0`, `prompt-v1`, and `prompt-v2` stay frozen for replay. The resolved `system_prompt` is recorded and scoped to 32 KiB. |
+| Prompt identity | `aharness` default | 64 bytes of valid UTF-8, trimmed, with no control characters. Used in the parent and child identity lines; not recorded, so it is re-supplied like `UserAgent`. |
+| Prompt tag | unset | At most 64 bytes of printable ASCII matching `[A-Za-z0-9._:/-]+`; empty means unset. Recorded as optional `session_start.prompt_tag` beside `prompt_version`; attribution only, never a replay key, and it never changes rendering or caps. |
 | `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Results always appear in array order. |
 | `delegate` | Concurrent children per call | 4 | A call runs concurrently only when every task's effective grant is a subset of `read_file`, `search`, `web_search`, and `web_fetch`; any write-capable task forces the whole call sequential. The cap matches `maxItems`. |
 | `delegate` | Recorded execution mode | `concurrent` or `sequential` in `details` | `execution_reason` explains a sequential choice. A call that cannot reserve every fresh child under `DelegationConfig.MaxSubagents` runs sequentially so the rejected spawn is deterministic. |
@@ -186,13 +188,13 @@ Other event payloads:
 | `delegate` | Child cancellation | parent operation context | `Interrupt` cancels the child loop and any child `run_command` process group; the child log ends `interrupted` with one `final`. |
 | `delegate` | Session continuation | canonical UUID | A `session` task must be a child whose recorded `parent_session` matches the caller; a sibling, parent, unknown, foreign, or duplicate ID is `invalid_args`. |
 | `delegate` | Progress events | 1 per child response, 1 per second per child | Counters and names only; never child text, arguments, or tool output. |
-| `delegate` | Subagents per run | 8 default; 0 unlimited | `DelegationConfig.MaxSubagents`. A fan-out guard, not a spend budget. |
+| `delegate` | Subagents per run | 8 default; -1 unlimited | `DelegationConfig.MaxSubagents`; 0 selects the default of 8. A fan-out guard, not a spend budget. |
 | Agent definition | File size | 64 KiB | Larger files are skipped with a warning. |
 | Agent definition | Name | 64 bytes, `[a-z][a-z0-9-]*` | Stable identifier in logs and prompts. |
 | Agent definition | Description | 200 bytes | Billed on every parent call through the catalog. |
 | Agent definition | Prompt body | 16 KiB | Recorded per session. |
 | Agent definition | Tools | non-empty, current toolset, no `delegate` | A child with no tools cannot act, and depth is one. |
-| Agent definitions | Discovered count | 32 | The catalog stays readable; later files are ignored with a warning. |
+| Agent definitions | Discovered count | 32 | The catalog stays readable; the host-provided base and later user files are capped together, and later entries are ignored with a warning. |
 | Agent override | Entries | 32 | One per discovered agent at most; a larger `agent_overrides` object is a config error. |
 | Agent override | Model | 200 bytes | Non-empty; resolved through the catalog at spawn time. |
 | Agent override | Thinking effort | 32 bytes, `[a-z][a-z0-9_-]*` | A concrete catalog effort; `default` and an empty value are rejected. |

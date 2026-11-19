@@ -38,7 +38,7 @@ func newSpawnFixture(t *testing.T, cfg Config) *spawnFixture {
 		t.Fatalf("OpenWorkspace: %v", err)
 	}
 	t.Cleanup(func() { _ = ws.Close() })
-	f := &spawnFixture{stateDir: stateDir, workspace: ws, catalog: LoadAgents(t.TempDir())}
+	f := &spawnFixture{stateDir: stateDir, workspace: ws, catalog: LoadAgents(testAgentDefinitions(), t.TempDir())}
 	cfg.StateDir = stateDir
 	cfg.Workspace = ws.Dir()
 	cfg.Provider = "opencode-go"
@@ -167,6 +167,76 @@ func TestSpawnerRecordsAChildSession(t *testing.T) {
 	}
 }
 
+func TestSpawnerChildPromptFollowsParentVersion(t *testing.T) {
+	frozenTestRule := "Run the relevant tests after changing code"
+	v3TestRule := "Run the relevant tests before reporting the change done"
+	tests := []struct {
+		name    string
+		version string
+		want    string
+		notWant string
+	}{
+		{name: "v0", version: PromptVersionV0, want: frozenTestRule, notWant: "Every tool call receives exactly one result"},
+		{name: "v1", version: PromptVersionV1, want: frozenTestRule, notWant: "Every tool call receives exactly one result"},
+		{name: "v2", version: PromptVersionV2, want: frozenTestRule, notWant: v3TestRule},
+		{name: "v3", version: PromptVersion, want: v3TestRule, notWant: frozenTestRule},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.PromptVersion = tc.version
+			f := newSpawnFixture(t, cfg)
+			f.completer.steps = []scriptStep{completedStep("done", model.Usage{InputTokens: 1, OutputTokens: 1, Reported: true})}
+			report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "explore", Task: "read"}))
+			start := decodePayload[sessionStartData](t, f.readLog(t, report.Session)[0])
+			if start.PromptVersion != tc.version {
+				t.Fatalf("child prompt version = %q, want %q", start.PromptVersion, tc.version)
+			}
+			if !strings.Contains(start.SystemPrompt, tc.want) {
+				t.Fatalf("%s child prompt lacks %q: %q", tc.name, tc.want, start.SystemPrompt)
+			}
+			if strings.Contains(start.SystemPrompt, tc.notWant) {
+				t.Fatalf("%s child prompt carries %q: %q", tc.name, tc.notWant, start.SystemPrompt)
+			}
+		})
+	}
+}
+
+func TestSpawnerChildTodoGuidanceFollowsParentVersion(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{PromptVersionV0, false},
+		{PromptVersionV1, false},
+		{PromptVersionV2, true},
+		{PromptVersion, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.version, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.PromptVersion = tc.version
+			f := newSpawnFixture(t, cfg)
+			catalog := testAgentDefinitions()
+			for i := range catalog {
+				if catalog[i].Name == "explore" {
+					catalog[i].Tools = append(catalog[i].Tools, "todo")
+				}
+			}
+			f.catalog = LoadAgents(catalog, t.TempDir())
+			opts := f.spawner.opts
+			opts.Definitions = f.catalog
+			f.spawner = NewSpawner(opts)
+			f.completer.steps = []scriptStep{completedStep("done", model.Usage{InputTokens: 1, OutputTokens: 1, Reported: true})}
+			report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "explore", Task: "read"}))
+			start := decodePayload[sessionStartData](t, f.readLog(t, report.Session)[0])
+			if got := strings.Contains(start.SystemPrompt, "`todo` tracks multi-step work"); got != tc.want {
+				t.Fatalf("%s child todo guidance = %t, want %t: %q", tc.version, got, tc.want, start.SystemPrompt)
+			}
+		})
+	}
+}
+
 func TestSpawnerEnforcesTheChildGrant(t *testing.T) {
 	f := newSpawnFixture(t, testConfig())
 	dir := f.workspace.Dir()
@@ -219,7 +289,7 @@ max_turns: 1
 Do one turn only.
 `)
 	f := newSpawnFixture(t, testConfig())
-	f.catalog = LoadAgents(stateDir)
+	f.catalog = LoadAgents(testAgentDefinitions(), stateDir)
 	f.spawner.opts.Definitions = f.catalog
 	f.completer.steps = []scriptStep{
 		{resp: model.Response{
@@ -501,7 +571,7 @@ Body.
 `)
 	f := newSpawnFixture(t, testConfig())
 	f.spawner.opts.Config.ThinkingEffort = "high"
-	f.catalog = LoadAgents(stateDir)
+	f.catalog = LoadAgents(testAgentDefinitions(), stateDir)
 	f.spawner.opts.Definitions = f.catalog
 	f.completer.steps = []scriptStep{completedStep("ok", model.Usage{InputTokens: 1, OutputTokens: 1})}
 	report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "switcher", Task: "t"}))
@@ -538,7 +608,7 @@ tools: read_file
 Body.
 `)
 	f := newSpawnFixture(t, testConfig())
-	f.catalog = LoadAgents(stateDir)
+	f.catalog = LoadAgents(testAgentDefinitions(), stateDir)
 	f.spawner.opts.Definitions = f.catalog
 	report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1"}, tools.SubagentSpec{Agent: "broken", Task: "t"}))
 	if report.Status != tools.SubagentFailed || report.Code != tools.CodeInvalidArgs {
@@ -563,8 +633,8 @@ func TestSpawnerRejectsUnknownAgent(t *testing.T) {
 func TestSpawnerAgentsCatalog(t *testing.T) {
 	f := newSpawnFixture(t, testConfig())
 	infos := f.spawner.Agents()
-	if len(infos) != 5 {
-		t.Fatalf("agents = %d, want the bundled set", len(infos))
+	if len(infos) != len(testAgentDefinitions()) {
+		t.Fatalf("agents = %d, want the %d fixture names", len(infos), len(testAgentDefinitions()))
 	}
 	for i := 1; i < len(infos); i++ {
 		if infos[i].Name <= infos[i-1].Name {
@@ -614,7 +684,7 @@ tools: edit_file
 ---
 Changed body.
 `)
-	f.catalog = LoadAgents(stateDir)
+	f.catalog = LoadAgents(testAgentDefinitions(), stateDir)
 	f.spawner.opts.Definitions = f.catalog
 
 	second := onlyReport(t, f.spawn(t, tools.Call{ID: "call-2"},

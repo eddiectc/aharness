@@ -28,8 +28,8 @@ const (
 
 // Agent sources recorded for the definitions browser and the catalog.
 const (
-	agentSourceBundled = "bundled"
-	agentSourceUser    = "user"
+	SourceDefault = "default" // a host-provided base default
+	SourceUser    = "user"    // <state-dir>/agents/*.md
 )
 
 // AgentDefinition is one agent definition: a strict header plus a markdown
@@ -42,9 +42,10 @@ type AgentDefinition struct {
 	Tools          []string
 	MaxTurns       int
 	Prompt         string
-	// Source is agentSourceBundled or agentSourceUser.
+	// Source is SourceDefault for a host-provided base definition or SourceUser
+	// for a definition file.
 	Source string
-	// Path is the definition file for a user agent; empty when bundled.
+	// Path is the definition file for a user agent; empty for a default.
 	Path string
 	// Err is the parse or validation error for an invalid entry.
 	Err string
@@ -67,9 +68,9 @@ type AgentDefinition struct {
 func (d AgentDefinition) Valid() bool { return d.Err == "" }
 
 // AgentCatalog is the discovered, validated definition set for one process.
-// Invalid holds the user files that were skipped so the definitions browser
-// can explain why. The catalog is immutable after loading: a mid-run edit
-// cannot change what a child in flight will run.
+// Invalid holds the base entries and user files that were skipped so the
+// definitions browser can explain why. The catalog is immutable after loading:
+// a mid-run edit cannot change what a child in flight will run.
 type AgentCatalog struct {
 	Agents   []AgentDefinition
 	Invalid  []AgentDefinition
@@ -167,7 +168,7 @@ func ParseAgentDefinition(data []byte) (AgentDefinition, error) {
 		return AgentDefinition{}, errors.New("definition has no prompt body after the --- header terminator")
 	}
 
-	def := AgentDefinition{Source: agentSourceUser, Prompt: body}
+	def := AgentDefinition{Source: SourceUser, Prompt: body}
 	seen := make(map[string]bool, len(agentHeaderKeys))
 	for i, line := range strings.Split(header, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -303,26 +304,78 @@ func validAgentName(name string) bool {
 	return true
 }
 
-// LoadAgents resolves the effective definition set: the bundled agents, then
-// `<state-dir>/agents/*.md` in file-name order replacing a bundled agent of the
-// same name. Invalid files are skipped with a warning and never replace a
-// bundled agent of the same name. A missing agent directory is not an error.
-func LoadAgents(stateDir string) *AgentCatalog {
-	catalog := &AgentCatalog{Agents: bundledAgents()}
+// LoadAgents resolves the effective definition set: the host-supplied base
+// first, then `<state-dir>/agents/*.md` in file-name order, replacing a base
+// entry of the same name and appending new names. A nil or empty base means no
+// host defaults. Invalid base entries and files are skipped with a warning and
+// never replace a valid entry; a missing agent directory is not an error. The
+// 32-agent cap applies to the combined set.
+func LoadAgents(base []AgentDefinition, stateDir string) *AgentCatalog {
+	catalog := &AgentCatalog{}
+	seen := make(map[string]bool, len(base))
+	for i, supplied := range base {
+		def := cloneAgentDefinition(supplied)
+		def.Source = SourceDefault
+		def.Path = ""
+		def.Err = ""
+		label := def.Name
+		if label == "" {
+			label = fmt.Sprintf("base[%d]", i)
+		}
+		if err := validateAgentDefinition(&def); err != nil {
+			def.Err = err.Error()
+			catalog.Invalid = append(catalog.Invalid, def)
+			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: %v", label, err))
+			continue
+		}
+		if seen[def.Name] {
+			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: duplicate agent name %q; the first definition wins", label, def.Name))
+			continue
+		}
+		seen[def.Name] = true
+		catalog.Agents = append(catalog.Agents, def)
+	}
+	if len(catalog.Agents) > maxAgents {
+		catalog.Agents = catalog.Agents[:maxAgents]
+		catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("only the first %d agents are loaded; later definitions are ignored", maxAgents))
+	}
+	loadAgentDirectory(catalog, stateDir)
+	slices.SortFunc(catalog.Agents, func(a, b AgentDefinition) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return catalog
+}
+
+// cloneAgentDefinition returns a catalog-safe copy of a caller-supplied base
+// definition, including its owned tool slice and override.
+func cloneAgentDefinition(def AgentDefinition) AgentDefinition {
+	def.Tools = slices.Clone(def.Tools)
+	if def.Override != nil {
+		override := def.Override.Clone()
+		def.Override = &override
+	}
+	return def
+}
+
+// loadAgentDirectory adds the user definitions under <state-dir>/agents to
+// catalog, replacing a base entry of the same name. A missing directory is not
+// an error; an invalid entry is recorded in Invalid with a warning and never
+// replaces anything.
+func loadAgentDirectory(catalog *AgentCatalog, stateDir string) {
 	dir := filepath.Join(stateDir, "agents")
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("read agent directory %s: %v", dir, err))
 		}
-		return catalog
+		return
 	}
 	defer func() { _ = root.Close() }()
 
 	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("read agent directory %s: %v", dir, err))
-		return catalog
+		return
 	}
 	seen := make(map[string]bool, len(entries))
 	for _, entry := range entries {
@@ -332,7 +385,7 @@ func LoadAgents(stateDir string) *AgentCatalog {
 		path := filepath.Join(dir, entry.Name())
 		if !entry.Type().IsRegular() {
 			catalog.Invalid = append(catalog.Invalid, AgentDefinition{
-				Name: entry.Name(), Source: agentSourceUser, Path: path, Err: "not a regular file",
+				Name: entry.Name(), Source: SourceUser, Path: path, Err: "not a regular file",
 			})
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: not a regular file", path))
 			continue
@@ -340,12 +393,12 @@ func LoadAgents(stateDir string) *AgentCatalog {
 		def, err := readAgentDefinition(root, entry.Name())
 		if err != nil {
 			catalog.Invalid = append(catalog.Invalid, AgentDefinition{
-				Name: entry.Name(), Source: agentSourceUser, Path: path, Err: err.Error(),
+				Name: entry.Name(), Source: SourceUser, Path: path, Err: err.Error(),
 			})
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: %v", path, err))
 			continue
 		}
-		def.Source = agentSourceUser
+		def.Source = SourceUser
 		def.Path = path
 		if seen[def.Name] {
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: duplicate agent name %q; the first file wins", path, def.Name))
@@ -359,10 +412,6 @@ func LoadAgents(stateDir string) *AgentCatalog {
 			break
 		}
 	}
-	slices.SortFunc(catalog.Agents, func(a, b AgentDefinition) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-	return catalog
 }
 
 // readAgentDefinition reads one definition file through the state-directory
@@ -383,8 +432,8 @@ func readAgentDefinition(root *os.Root, name string) (AgentDefinition, error) {
 	return ParseAgentDefinition(data)
 }
 
-// replaceOrAppendAgent installs def, replacing a bundled agent of the same
-// name in place and otherwise appending it.
+// replaceOrAppendAgent installs def, replacing a base agent of the same name in
+// place and otherwise appending it.
 func replaceOrAppendAgent(agents []AgentDefinition, def AgentDefinition) []AgentDefinition {
 	for i, existing := range agents {
 		if existing.Name == def.Name {
@@ -393,59 +442,4 @@ func replaceOrAppendAgent(agents []AgentDefinition, def AgentDefinition) []Agent
 		}
 	}
 	return append(agents, def)
-}
-
-// DefaultAgents returns copies of the bundled definition set. The public
-// library passes these to the spawner; file discovery stays in the CLI.
-func DefaultAgents() []AgentDefinition {
-	source := bundledAgents()
-	out := make([]AgentDefinition, len(source))
-	for i, def := range source {
-		def.Tools = append([]string{}, def.Tools...)
-		out[i] = def
-	}
-	return out
-}
-
-// bundledAgents returns a fresh copy of the compiled-in default set.
-func bundledAgents() []AgentDefinition {
-	taskTools := tools.NamesWithout("delegate")
-	defs := []AgentDefinition{
-		{
-			Name:        "explore",
-			Description: "Read-only codebase exploration: find where something lives and report it.",
-			Tools:       []string{"read_file", "search"},
-			Source:      agentSourceBundled,
-			Prompt:      "Explore the assigned area of the repository and report what you found. Lead with the answer, cite file and line, and include only the facts the caller needs. Do not edit files; if a change is needed, describe it precisely instead.",
-		},
-		{
-			Name:        "implementer",
-			Description: "Scoped implementation and verification: edit files and run the tests for one change.",
-			Tools:       []string{"read_file", "edit_file", "search", "run_command"},
-			Source:      agentSourceBundled,
-			Prompt:      "Implement the assigned change, keeping it minimal and focused. Read the surrounding code first, run the relevant tests after editing, and report what changed, which commands you ran, and anything you could not verify.",
-		},
-		{
-			Name:        "researcher",
-			Description: "Exploration plus web sources: answer a question from the repository and the web.",
-			Tools:       []string{"read_file", "search", "web_search", "web_fetch"},
-			Source:      agentSourceBundled,
-			Prompt:      "Research the assigned question using the workspace and the web. Cite every claim with a file and line or a URL. Separate what you verified from what you inferred, and say plainly when the evidence is insufficient.",
-		},
-		{
-			Name:        "reviewer",
-			Description: "Correctness, regression, and test-gap review of a change.",
-			Tools:       []string{"read_file", "search"},
-			Source:      agentSourceBundled,
-			Prompt:      "Review the assigned change. Lead with concrete findings, cite file and line, and say plainly when you find nothing. Prioritize correctness, regressions, and missing tests, and do not propose unrelated refactors.",
-		},
-		{
-			Name:        "task",
-			Description: "General-purpose work with a model-written prompt and every tool except delegate.",
-			Tools:       taskTools,
-			Source:      agentSourceBundled,
-			Prompt:      "Carry out the assigned task end to end. Read before editing, keep changes minimal, run the relevant tests, and report what you changed, what you verified, and what remains.",
-		},
-	}
-	return defs
 }

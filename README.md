@@ -146,11 +146,21 @@ inspect its adapter's headers.
 
 `Config.MaxTurns` and `MaxTotalTokens` bound the agent's cumulative turn and
 token usage, while `RunTimeout` and `ModelTimeout` bound one run and one model
-attempt; a zero value is unlimited. `Config.Instructions` appends to the
-harness system prompt, while `Config.SystemPrompt` replaces it. A replacement
-must preserve the loop's invariants: a tool call is the only way to act on the
-workspace, every tool call receives exactly one result, and a reply without a
-tool call ends the run.
+attempt; a zero value is unlimited. `Config.Identity` is the product name used in
+the parent and delegated-child identity lines: empty means `aharness`, it is
+limited to 64 bytes with no control characters, and it is not recorded, so supply
+it on every construction; a fork's new children use the identity supplied to
+Fork. `Config.PromptTag` tags the host prompt beside the SDK `prompt-v3`
+template version: optional, at most 64 printable ASCII bytes matching
+`[A-Za-z0-9._:/-]+`, recorded as `session_start.prompt_tag` and exposed as
+`State.PromptTag`; it never affects rendering, caps, or replay. Resume keeps the
+recorded tag, and a fork inherits it only when the prompt is unchanged. Prompt
+composition has three tiers. Set only `Identity` and inherit
+`agent.DefaultPromptBody` (recommended for a coding agent); compose a body from
+`agent.LoopRules`, your own policy lines, and `agent.AgentCatalogText`; or replace
+the prompt wholesale with `Config.SystemPrompt`. `Config.Instructions` appends to
+the resolved prompt. A wholesale replacement must keep the invariants that
+`agent.LoopRules` returns; the primitives exist so a host never transcribes them.
 
 ### Tools and policy
 
@@ -185,7 +195,9 @@ Tool calls within one run execute sequentially in arrival order, which is also
 the durable log, replay, authorization, and stuck-detection order. Independent
 work belongs in one batch tool that fans out internally, or in delegated
 children whose grants are read-only or declare `ConcurrencySafe`. Delegation
-depth is one.
+depth is one. `DelegationConfig.Agents` is required: the SDK ships no role
+definitions, and `Example_delegation` in `example_test.go` is the starting
+template.
 
 `Tool.Run` and `Config.Authorize` receive the calling session in
 `ToolCall.Session` and, for a delegated child, the definition name in

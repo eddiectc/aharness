@@ -377,14 +377,16 @@ func ValidateCustomTools(custom []CustomTool) error {
 	return nil
 }
 
-// renders the recorded version when the log predates the recorded prompt. The
-// recorded text wins verbatim, so editing an agent file never rewrites an
-// existing session's prompt.
+// projectPrompt returns the recorded prompt, or renders the recorded version
+// when the log predates the recorded prompt. The recorded text wins verbatim,
+// so editing an agent file never rewrites an existing session's prompt. The
+// replay passes the explicit default "aharness" identity: such a log predates
+// the identity parameter, so the default is the faithful reconstruction.
 func projectPrompt(start sessionStartData) (string, error) {
 	if start.SystemPrompt != "" {
 		return capText(cleanText(start.SystemPrompt), maxSystemPromptBytes), nil
 	}
-	prompt, err := renderPrompt(start.PromptVersion, start.Workspace, nil)
+	prompt, err := renderPrompt(start.PromptVersion, start.Workspace, "aharness", nil)
 	if err != nil {
 		return "", err
 	}

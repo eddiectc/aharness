@@ -27,7 +27,7 @@ type AgentDefinition struct {
 // DelegationConfig enables the delegate tool and configures its definitions.
 type DelegationConfig struct {
 	// Agents is the runnable definition set. Nil or empty is a ConfigError;
-	// use DefaultAgents to opt into the bundled set.
+	// the host supplies every definition.
 	Agents []AgentDefinition
 	// MaxSubagents bounds fresh children per run. 0 selects the default of 8;
 	// -1 means unlimited.
@@ -35,27 +35,6 @@ type DelegationConfig struct {
 	// ResolveModel resolves a definition's non-empty Model/ThinkingEffort. Nil
 	// uses the parent model and rejects definitions that name another model.
 	ResolveModel func(ctx context.Context, modelID, effort string) (*ModelConfig, error)
-}
-
-// DefaultAgents returns copies of the bundled definitions.
-func DefaultAgents() []AgentDefinition {
-	source := agent.DefaultAgents()
-	out := make([]AgentDefinition, 0, len(source))
-	for _, def := range source {
-		tools := make([]ToolName, len(def.Tools))
-		for i, name := range def.Tools {
-			tools[i] = ToolName(name)
-		}
-		out = append(out, AgentDefinition{
-			Name:        def.Name,
-			Description: def.Description,
-			Prompt:      def.Prompt,
-			Tools:       tools,
-			Model:       def.Model,
-			MaxTurns:    def.MaxTurns,
-		})
-	}
-	return out
 }
 
 // delegationSetup is the per-run bridge between public definitions and the
@@ -76,7 +55,7 @@ func newDelegationSetup(cfg *DelegationConfig, parent *ModelConfig, enabled map[
 		return nil, nil
 	}
 	if len(cfg.Agents) == 0 {
-		return nil, &ConfigError{Field: "Tools.Delegation.Agents", Detail: "must not be empty; use DefaultAgents for the bundled set"}
+		return nil, &ConfigError{Field: "Tools.Delegation.Agents", Detail: "must not be empty; supply the host's definition set"}
 	}
 	if cfg.MaxSubagents < -1 {
 		return nil, &ConfigError{Field: "Tools.Delegation.MaxSubagents", Detail: "must be -1 or greater"}

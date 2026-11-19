@@ -93,7 +93,7 @@ func overrideTestCatalog() *AgentCatalog {
 			ThinkingEffort: "low",
 			Tools:          []string{"read_file", "search"},
 			Prompt:         "Explore.",
-			Source:         agentSourceBundled,
+			Source:         SourceDefault,
 			MaxTurns:       9,
 		},
 		{
@@ -103,7 +103,7 @@ func overrideTestCatalog() *AgentCatalog {
 			ThinkingEffort: "high",
 			Tools:          []string{"read_file", "search"},
 			Prompt:         "Review.",
-			Source:         agentSourceUser,
+			Source:         SourceUser,
 			Path:           "/state/agents/reviewer.md",
 			MaxTurns:       12,
 		},
@@ -142,7 +142,7 @@ func TestApplyAgentOverrides(t *testing.T) {
 	if strings.Join(def.Tools, ",") != "read_file,search" || def.Prompt != "Review." {
 		t.Fatalf("override changed the grant or prompt: %+v", def)
 	}
-	if def.Source != agentSourceUser || def.Path != "/state/agents/reviewer.md" {
+	if def.Source != SourceUser || def.Path != "/state/agents/reviewer.md" {
 		t.Fatalf("source/path changed: %+v", def)
 	}
 

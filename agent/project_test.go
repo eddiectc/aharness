@@ -118,7 +118,7 @@ func TestProjectSelectsToolsetSchemas(t *testing.T) {
 // projects.
 func testSystemPrompt(t *testing.T, workspace string) string {
 	t.Helper()
-	text, err := renderPrompt(PromptVersion, workspace, nil)
+	text, err := renderPrompt(PromptVersion, workspace, "aharness", nil)
 	if err != nil {
 		t.Fatalf("renderPrompt: %v", err)
 	}

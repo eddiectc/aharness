@@ -8,6 +8,82 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- Prompt composition primitives: `agent.LoopRules()` returns the
+  version-independent loop invariants without coding policy,
+  `agent.AgentCatalogText(agents)` renders the one-line catalog under the 4 KiB
+  cap and omission marker, and `agent.DefaultPromptBody(version, agents)` returns
+  the SDK default body without the identity line or recorded-prompt cap. A host
+  can compose a replacement prompt without transcribing contract text.
+- `aharness.Config.Identity`, `engine.Spec.Identity`, and `agent.Config.Identity`
+  name the host product in the parent and delegated-child identity lines. Empty
+  means `aharness`; the engine trims it, caps it at 64 bytes, and rejects invalid
+  UTF-8 and control characters. It is not recorded; supply it on every
+  construction, including `Resume` and `Fork`.
+- `aharness.Config.PromptTag`, `engine.Spec.PromptTag`, and
+  `agent.Config.PromptTag` attribute the host's prompt template beside the SDK
+  template version. It is recorded as optional `session_start.prompt_tag` and
+  exposed as `State.PromptTag` (`aharness.State` and `agent.State`). Empty means
+  unset; otherwise it is at most 64 bytes of printable ASCII matching
+  `[A-Za-z0-9._:/-]+`. It is never a replay key and never affects rendering,
+  caps, or replay. Resume keeps the recorded tag and rejects a different
+  explicit tag; Fork prefers an explicit tag and inherits only when the prompt
+  is unchanged. A delegated child never records its parent's tag. The session
+  schema stays `2`; the field is optional.
+
+- `agent.PromptVersionV2` names the now-frozen `prompt-v2` template;
+  `agent.PromptVersion` is `prompt-v3`. `agent.SupportsPrompt` accepts v0, v1,
+  v2, and v3.
+
+### Changed
+
+- Prompt content: `prompt-v2` is no longer current; new sessions record
+  `prompt-v3`. The v3 default body keeps the available-agents catalog and the
+  unchanged todo guidance, and replaces the shared rules with nine lines: it
+  adds project instructions, verified-versus-unverified reporting, and the
+  refuse-or-flag rule, states that every tool call receives exactly one result,
+  and conditions delegation on the independence of the conclusion as well as on
+  output volume or parallelism. A prompt-v2 or prompt-v3 child whose grant
+  includes `todo` gets the todo guidance; v0 and v1 children keep their frozen
+  rules. Existing logs replay their recorded prompt or frozen template and need
+  no migration.
+- **Breaking:** `agent.RenderSystemPrompt` now takes the host identity:
+  `RenderSystemPrompt(version, workspace, identity string, agents []AgentInfo)`.
+  **Migration:** pass your product name, or `""` for the `aharness` default, as
+  the third argument. `Identity == "aharness"` renders the exact frozen v0/v1/v2
+  bytes.
+- **Breaking:** `agent.LoadAgents` now takes the host's base definitions:
+  `LoadAgents(base []AgentDefinition, stateDir string)`.
+  **Migration:** replace `LoadAgents(dir)` with `LoadAgents(hostDefaults(), dir)`
+  when you have host defaults, or `LoadAgents(nil, dir)` when you do not. `nil`
+  means no host defaults: the former bundled set is no longer implicit. If you
+  relied on that set, supply your own base (see **Removed** below); the
+  `Example_delegation` example in `example_test.go` is the starting template.
+  `AgentDefinition.Source` values are exported as `agent.SourceDefault`
+  (`"default"`, formerly `"bundled"`) and `agent.SourceUser` (`"user"`).
+
+### Removed
+
+- **Breaking:** `agent.DefaultAgents` and `aharness.DefaultAgents` are removed.
+  The SDK ships no role definitions, so no name, description, prompt body, or
+  tool grant is implicit. `DelegationConfig.Agents` stays required, and a nil or
+  empty set is a `ConfigError`.
+  **Migration:** supply the host's definition set. A facade host passes it in
+  `DelegationConfig.Agents`; a component host that wants `<state>/agents/*.md`
+  discovery seeds `agent.LoadAgents(hostDefinitions, stateDir)` and converts the
+  catalog for the facade. Use `Example_delegation` in `example_test.go` as the
+  starting template; it defines two roles, configures `Tools.Delegation`, and
+  runs one delegated task.
+
+### Fixed
+
+- Fork with `Instructions` now appends to the effective recorded prompt instead
+  of re-rendering the SDK prompt from scratch. A forked session whose parent
+  recorded a replacement `SystemPrompt` keeps that text and gains the appended
+  instructions; only a parent log that predates the recorded prompt renders the
+  version's prompt as the append base.
+
 ## [v0.2.0] - 2026-11-18
 
 This is the host-surface expansion planned after `v0.1.0`. It adds required

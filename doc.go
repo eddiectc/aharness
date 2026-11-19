@@ -59,11 +59,34 @@
 //
 // # Replacing the system prompt
 //
-// Config.SystemPrompt replaces the harness prompt entirely; Config.Instructions
-// appends to it. A replacement must keep the invariants the loop depends on: a
-// tool call is the only way to act on the workspace; every tool call receives
-// exactly one result; the model stops by replying without a tool call; and tool
-// errors are data to read and adapt to. The package does not parse or enforce a
+// Config.Identity names the host product in the parent identity line and in
+// each delegated child's line, for example "You are acode, a coding harness
+// working in the workspace ...". Empty means "aharness". It is trimmed, limited
+// to 64 bytes, must contain no control characters, and is not recorded, so it is
+// re-supplied on every construction, including Resume and Fork; a fork's new
+// children use the identity supplied to Fork.
+//
+// Prompt composition has three tiers. The recommended tier sets only
+// Config.Identity and inherits the default body, agent.DefaultPromptBody: the
+// loop invariants, the coding and coordination policy, and the catalog of the
+// host's own agent definitions. A host whose product is not a coding agent can
+// compose a body from agent.LoopRules, its own policy lines, and
+// agent.AgentCatalogText, which renders the catalog under the SDK cap and
+// omission marker. Config.SystemPrompt replaces the prompt wholesale;
+// Config.Instructions appends to the effective prompt (the recorded text on a
+// fork, or the rendered prompt when the log predates it).
+//
+// Config.PromptTag records the host's own prompt attribution beside the SDK
+// template version, for example "acode/prompt-v1". It is at most 64 bytes of
+// printable ASCII matching [A-Za-z0-9._:/-]+, is never a replay key, and does
+// not affect rendering or caps. Resume keeps the recorded tag; Fork may set a
+// new one, and a fork that changes the prompt inherits none.
+//
+// LoopRules returns the invariants the loop depends on: a tool call is the only
+// way to act on the workspace; every tool call receives exactly one result;
+// commands run with the harness's privileges; tool errors are data; and a reply
+// without a tool call ends the run. A replacement prompt that does not use
+// DefaultPromptBody must keep them. The package does not parse or enforce a
 // caller prompt.
 //
 // # Parallelism

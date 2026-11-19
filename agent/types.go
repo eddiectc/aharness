@@ -70,13 +70,26 @@ func (l Limits) MaxOutputSet() bool { return l.MaxOutputTokens > 0 }
 
 // Config is the runner's immutable effective configuration for one run.
 type Config struct {
-	Provider       string
-	Dialect        string
-	Model          string
-	BaseURL        string
-	Workspace      string
-	StateDir       string
-	PromptVersion  string
+	Provider  string
+	Dialect   string
+	Model     string
+	BaseURL   string
+	Workspace string
+	StateDir  string
+	// Identity is the host product name used in the parent prompt's identity
+	// line and in a delegated child's line. Empty means "aharness". It is not
+	// recorded in session_start; the host supplies it on every construction,
+	// like UserAgent. The engine validates and defaults it; a host that builds
+	// an agent.Config directly must apply the same rules (valid UTF-8, at most
+	// 64 bytes, no control characters).
+	Identity      string
+	PromptVersion string
+	// PromptTag is the host's attribution tag for the prompt template it ran,
+	// recorded in session_start beside PromptVersion. Empty means unset. The
+	// engine validates it (at most 64 printable ASCII bytes matching
+	// [A-Za-z0-9._:/-]+); a host that builds a Config directly must apply the
+	// same rules. It never affects rendering, caps, or replay.
+	PromptTag      string
 	ToolsetVersion string
 	HarnessVersion string
 	// SystemPrompt is the resolved prompt text recorded in session_start. It

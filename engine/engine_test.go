@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/eddiectc/aharness/agent"
 	"github.com/eddiectc/aharness/model"
 	"github.com/eddiectc/aharness/session"
+	"github.com/eddiectc/aharness/tools"
 )
 
 type engineModel struct{}
@@ -75,6 +77,122 @@ func TestOpenNewPreservesEmptyAndNilGrants(t *testing.T) {
 	}
 }
 
+func TestPromptTagValidatedBeforeDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tag  string
+	}{
+		{name: "space", tag: "acode prompt"},
+		{name: "newline", tag: "acode\nprompt"},
+		{name: "at sign", tag: "acode@prompt"},
+		{name: "non ascii", tag: "acodé"},
+		{name: "sixty five bytes", tag: strings.Repeat("a", 65)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := baseSpec(t, ModeNew)
+			spec.PromptTag = tc.tag
+			_, err := Open(context.Background(), spec)
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) || configErr.Field != "PromptTag" {
+				t.Fatalf("Open with PromptTag %q: err = %v, want ConfigError for PromptTag", tc.tag, err)
+			}
+			if paths, globErr := filepath.Glob(filepath.Join(spec.StateDir, "sessions", "*.jsonl")); globErr != nil || len(paths) != 0 {
+				t.Fatalf("invalid tag created session logs %v (err %v)", paths, globErr)
+			}
+		})
+	}
+
+	spec := baseSpec(t, ModeNew)
+	spec.PromptTag = "acode/prompt-v1"
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open with valid tag: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	state, err := host.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.PromptTag != "acode/prompt-v1" {
+		t.Fatalf("State.PromptTag = %q", state.PromptTag)
+	}
+	if host.Spec().PromptTag != "acode/prompt-v1" {
+		t.Fatalf("Spec.PromptTag = %q", host.Spec().PromptTag)
+	}
+
+	// 64 bytes is the inclusive limit.
+	long := baseSpec(t, ModeNew)
+	long.PromptTag = strings.Repeat("a", 64)
+	longHost, err := Open(context.Background(), long)
+	if err != nil {
+		t.Fatalf("Open with a 64-byte tag: %v", err)
+	}
+	defer func() { _ = longHost.Close() }()
+	if state, stateErr := longHost.State(); stateErr != nil || state.PromptTag != long.PromptTag {
+		t.Fatalf("64-byte tag state = %+v (err %v)", state, stateErr)
+	}
+}
+
+func TestForkInstructionsAppendToRenderedPromptForLegacyLog(t *testing.T) {
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	id := session.NewID()
+	store, err := session.Create(stateDir, id)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	// A log written before system_prompt was recorded: the fork must render the
+	// version's prompt and append to that.
+	start := map[string]any{
+		"prompt_version":  agent.PromptVersion,
+		"toolset_version": tools.Version,
+		"workspace":       workspace,
+		"state_dir":       stateDir,
+		"provider":        "test",
+		"dialect":         "custom",
+		"model":           "engine-model",
+		"limits":          agent.Limits{MaxContextTokens: 10_000, MaxOutputTokens: 100, SafetyMargin: 1000, MaxInputTokens: 9000, CompactionTarget: 9000},
+	}
+	ev, err := session.NewEvent(session.TypeSessionStart, 0, "", start)
+	if err != nil {
+		t.Fatalf("build session_start: %v", err)
+	}
+	if err := store.Append(ev); err != nil {
+		t.Fatalf("append session_start: %v", err)
+	}
+	if err := store.Sync(); err != nil {
+		t.Fatalf("sync session_start: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	spec := baseSpec(t, ModeFork)
+	spec.StateDir = stateDir
+	spec.Workspace = workspace
+	spec.SessionID = id
+	spec.AppendPrompt = "extra rule"
+	spec.AppendPromptSet = true
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open fork: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	state, err := host.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if !strings.HasPrefix(state.SystemPrompt, "You are aharness,") {
+		t.Fatalf("fork prompt = %q, want the rendered prompt first", state.SystemPrompt)
+	}
+	if !strings.Contains(state.SystemPrompt, "extra rule") {
+		t.Fatalf("fork prompt = %q, want the appended instructions", state.SystemPrompt)
+	}
+	if state.ContractOverride == nil || !state.ContractOverride.Prompt {
+		t.Fatalf("fork contract override = %+v, want a prompt override", state.ContractOverride)
+	}
+}
+
 func TestOpenRequiresUserAgentAndFillsToolOptions(t *testing.T) {
 	for _, value := range []string{"", "   "} {
 		spec := baseSpec(t, ModeNew)
@@ -104,6 +222,96 @@ func TestOpenRequiresUserAgentAndFillsToolOptions(t *testing.T) {
 	var configErr *ConfigError
 	if !errors.As(err, &configErr) || configErr.Field != "ToolOptions.UserAgent" {
 		t.Fatalf("mismatched ToolOptions.UserAgent: err = %v, want ConfigError", err)
+	}
+}
+
+func TestIdentityDefaultsTrimsAndValidates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: "aharness"},
+		{name: "whitespace only", in: " \t\n ", want: "aharness"},
+		{name: "trimmed", in: "  acode  ", want: "acode"},
+		{name: "sixty four bytes", in: strings.Repeat("a", 64), want: strings.Repeat("a", 64)},
+		{name: "printable non ascii", in: "acode-日本", want: "acode-日本"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := baseSpec(t, ModeNew)
+			spec.Identity = tc.in
+			host, err := Open(context.Background(), spec)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer func() { _ = host.Close() }()
+			if got := host.Spec().Identity; got != tc.want {
+				t.Fatalf("Spec.Identity = %q, want %q", got, tc.want)
+			}
+			state, err := host.State()
+			if err != nil {
+				t.Fatalf("State: %v", err)
+			}
+			wantFirst := fmt.Sprintf("You are %s, a coding harness working in the workspace %q.", tc.want, host.Workspace())
+			first, _, _ := strings.Cut(state.SystemPrompt, "\n")
+			if first != wantFirst {
+				t.Fatalf("recorded prompt first line = %q, want %q", first, wantFirst)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{name: "newline", in: "aco\nde"},
+		{name: "carriage return", in: "aco\rde"},
+		{name: "tab", in: "aco\tde"},
+		{name: "control", in: "aco\x01de"},
+		{name: "delete", in: "aco\x7fde"},
+		{name: "c1 control", in: "aco\u0085de"},
+		{name: "invalid utf8", in: string([]byte{0xff})},
+		{name: "too long", in: strings.Repeat("a", 65)},
+		{name: "too many bytes not runes", in: strings.Repeat("日", 22)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := baseSpec(t, ModeNew)
+			spec.Identity = tc.in
+			_, err := Open(context.Background(), spec)
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) || configErr.Field != "Identity" {
+				t.Fatalf("Open with Identity %q: err = %v, want ConfigError for Identity", tc.in, err)
+			}
+		})
+	}
+}
+
+func TestNewSessionRecordsCurrentPromptBody(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	state, err := host.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.PromptVersion != agent.PromptVersion || agent.PromptVersion != "prompt-v3" {
+		t.Fatalf("recorded prompt version = %q", state.PromptVersion)
+	}
+	for _, want := range []string{
+		"Every tool call receives exactly one result.",
+		"If the workspace carries project instructions (AGENTS.md or the file it names)",
+		"Run the relevant tests before reporting the change done",
+		"when the conclusion must be reached without the context that produced the work",
+	} {
+		if !strings.Contains(state.SystemPrompt, want) {
+			t.Fatalf("recorded v3 prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(state.SystemPrompt, "Run the relevant tests after changing code") {
+		t.Fatal("recorded prompt still carries the frozen v2 test rule")
 	}
 }
 

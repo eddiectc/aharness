@@ -55,6 +55,7 @@ rewriting its conclusions.
 | [plans/go-library-build.md](plans/go-library-build.md) | Implemented M0–M6 and M8 docs; real-provider library smoke pending |
 | [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
+| [plans/prompt-surface-build.md](plans/prompt-surface-build.md) | Implemented 2026-11-19 as v0.3.0 work; real-model probes pending |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
 | [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |

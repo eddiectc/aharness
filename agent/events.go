@@ -15,6 +15,7 @@ import (
 
 type sessionStartData struct {
 	PromptVersion    string `json:"prompt_version"`
+	PromptTag        string `json:"prompt_tag,omitempty"`
 	ToolsetVersion   string `json:"toolset_version"`
 	Workspace        string `json:"workspace"`
 	StateDir         string `json:"state_dir"`

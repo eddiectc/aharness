@@ -55,6 +55,7 @@ func WriteSessionStart(store sessionWriter, cfg Config, parent *ParentRef) error
 	}
 	data := sessionStartData{
 		PromptVersion:    promptVersion(cfg),
+		PromptTag:        cfg.PromptTag,
 		ToolsetVersion:   toolsetVersion(cfg),
 		Workspace:        cfg.Workspace,
 		StateDir:         cfg.StateDir,
