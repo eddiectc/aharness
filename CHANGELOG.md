@@ -8,6 +8,17 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Fixed
+
+- Responses thinking text is restored: the adapter now sends
+  `reasoning: {"effort": "<value>", "summary": "auto"}` whenever an explicit
+  thinking effort is set. Without `"summary": "auto"` the endpoint returns
+  encrypted reasoning only (empty `summary` while reasoning tokens are still
+  billed), so no thinking text reached `Response.Reasoning`, `ReasoningDelta`,
+  or `ResponseCompleted.Reasoning` in buffered or streamed calls. The
+  encrypted copy still drives tool-round replay, and an empty effort still
+  omits the field.
+
 ## [v0.4.0] - 2026-11-19
 
 This is the workspace-instructions release. `Config.Instructions` now reaches

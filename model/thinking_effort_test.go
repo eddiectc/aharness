@@ -470,13 +470,17 @@ func TestOpenAIResponsesReasoningEffortBody(t *testing.T) {
 				}
 			} else {
 				var nested struct {
-					Effort string `json:"effort"`
+					Effort  string `json:"effort"`
+					Summary string `json:"summary"`
 				}
 				if err := jsonv2.Unmarshal(raw["reasoning"], &nested); err != nil {
 					t.Fatalf("decode reasoning: %v", err)
 				}
 				if nested.Effort != tc.effort {
 					t.Errorf("reasoning.effort = %q, want %q", nested.Effort, tc.effort)
+				}
+				if nested.Summary != "auto" {
+					t.Errorf("reasoning.summary = %q, want %q", nested.Summary, "auto")
 				}
 			}
 			if _, present := raw["reasoning_effort"]; present {

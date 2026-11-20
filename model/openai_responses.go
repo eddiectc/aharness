@@ -79,7 +79,8 @@ type responsesRequest struct {
 }
 
 type responsesReasoning struct {
-	Effort string `json:"effort"`
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 type responsesContentPart struct {
@@ -266,7 +267,11 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 		Include: []string{"reasoning.encrypted_content"},
 	}
 	if req.ThinkingEffort != "" {
-		payload.Reasoning = &responsesReasoning{Effort: req.ThinkingEffort}
+		// Without an explicit summary the endpoint returns encrypted
+		// reasoning only, so no thinking text can be displayed even though
+		// reasoning tokens are billed. Requesting "auto" summaries keeps the
+		// display copy populated; the encrypted copy still drives replay.
+		payload.Reasoning = &responsesReasoning{Effort: req.ThinkingEffort, Summary: "auto"}
 	}
 	for i, msg := range req.Messages {
 		switch msg.Role {

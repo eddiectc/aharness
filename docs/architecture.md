@@ -233,7 +233,7 @@ type Request struct {
 
 | Canonical | Chat Completions | Responses | Empty |
 |---|---|---|---|
-| `ThinkingEffort` | top-level `reasoning_effort` | `reasoning: {"effort": "<value>"}` | Field omitted in both dialects. |
+| `ThinkingEffort` | top-level `reasoning_effort` | `reasoning: {"effort": "<value>", "summary": "auto"}` | Field omitted in both dialects. |
 
 - Both adapters construct buffered and streaming requests with the same
   `payload` function, so the mapping cannot diverge between paths. Tool-call
@@ -254,7 +254,12 @@ type Request struct {
 - Thinking text is display-only. `model.Response.Reasoning` carries the
   provider's thinking: Chat reads `reasoning_content` (DeepSeek-compatible) and
   falls back to `reasoning`; Responses concatenates `reasoning` item summary
-  and content text and ignores encrypted content for display. It is capped at
+  and content text and ignores encrypted content for display. The Responses
+  adapter always pairs an explicit effort with `"summary": "auto"`: without it
+  the endpoint returns encrypted reasoning only (empty `summary`, reasoning
+  tokens still billed), so no thinking text can be displayed in either the
+  buffered terminal item or the `response.reasoning_summary_text.delta` /
+  `response.reasoning_text.delta` stream. It is capped at
   64 KiB, never counted against the canonical response cap, and never written
   to the log or projected. Usage already counts reasoning tokens as output
   tokens, so no accounting change is needed. Both adapters additionally retain
