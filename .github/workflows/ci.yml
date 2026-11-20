@@ -1,0 +1,55 @@
+# CI for the aharness SDK. The source of truth for the gates is `make dod`
+# (docs/coding-standard.md §8); this workflow only pins the environment and
+# calls it. Process details live in docs/ci-release.md.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOIMPORTS_VERSION: v0.51.0 # golang.org/x/tools
+  GOVULNCHECK_VERSION: v1.9.0 # golang.org/x/vuln
+  GOLANGCI_LINT_VERSION: v2.15.0
+
+jobs:
+  dod:
+    name: make dod
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gcc for -race
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Install pinned dev tools
+        run: |
+          go install "golang.org/x/tools/cmd/goimports@${GOIMPORTS_VERSION}"
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+      - name: Run definition-of-done gates
+        run: make dod

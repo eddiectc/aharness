@@ -1,0 +1,33 @@
+# Keep dependencies at latest: weekly PRs for Go modules and GitHub Actions.
+# Each PR runs `make dod` via ci.yml; a maintainer merges when green.
+# Policy lives in docs/ci-release.md §4.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore"
+    labels:
+      - dependencies
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore"
+    labels:
+      - dependencies

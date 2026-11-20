@@ -33,7 +33,7 @@ working-directory, TTY, or signal layer, and imports no CLI or TUI code. The
 recorded contracts, including the public facade surface, are in
 [architecture.md](docs/architecture.md#321-public-library-facade).
 
-This module requires Go 1.27.3 or later. Add it to an existing module; it ships
+This module requires Go 1.27.4 or later. Add it to an existing module; it ships
 no binary and needs no separate installation:
 
 ```sh
@@ -318,6 +318,11 @@ Follow [AGENTS.md](AGENTS.md), the [coding standard](docs/coding-standard.md),
 and the [definition of done](docs/definition-of-done.md). `make dod` runs
 `docs-check`, formatting, `go vet`, `golangci-lint`, `go test -race`,
 `go build ./...`, and `govulncheck`.
+
+`main` is protected: work on a short-lived feature branch and open a pull
+request targeting `main`; never push directly to `main`. See
+[docs/ci-release.md](docs/ci-release.md) §1.5 for the branching workflow and
+§2 for releases.
 
 ## License
 
