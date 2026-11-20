@@ -137,20 +137,44 @@ are not changelog entries.
 
 ### 2.3 Cutting a release
 
-1. Move `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD` in
+`main` is protected (§1.5), so the release commit lands through a pull
+request like any other change. Tag only after the release PR merges: an
+early tag fires the `release` workflow while the tag-is-on-`main` check
+still fails, and that red run pins itself to the PR head.
+
+1. Cut a release branch from `main`:
+   `git checkout main && git pull && git checkout -b release-vX.Y.Z`.
+2. Move `## [Unreleased]` to `## [vX.Y.Z] - YYYY-MM-DD` in
    [CHANGELOG](../CHANGELOG.md), with migration notes for every breaking
    item.
-2. Run `make dod` locally and fix failures.
-3. Commit the release: `git commit -m "Release vX.Y.Z"`.
-4. Tag the commit: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`.
-5. Push both: `git push origin main vX.Y.Z`.
-6. The `release` workflow re-runs `make dod` on the tag and verifies:
+3. Run `make dod` locally and fix failures.
+4. Commit the release: `git commit -m "Release vX.Y.Z"`. Push the branch
+   and open a pull request targeting `main`.
+5. Merge only when CI (`make dod`) is green. Use a merge commit, never
+   squash: the tag must be (or point at) an ancestor of `main`, and a
+   squash merge mints a new hash that orphans it.
+6. After the merge lands, update local `main` and tag the release commit:
+   `git tag -a vX.Y.Z -m "Release vX.Y.Z" <sha>`. Tagging the merge commit
+   itself also satisfies the ancestry check.
+7. Push the tag only: `git push origin vX.Y.Z`.
+8. The `release` workflow re-runs `make dod` on the tag and verifies:
    the tag is `vX.Y.Z`, the tag is on `main`, the tag has a
    `## [vX.Y.Z]` CHANGELOG entry, and `go.mod`/`go.sum` are tidy.
    It then creates the GitHub Release (CHANGELOG stays authoritative;
    generated notes are supplementary).
-7. Confirm the version resolves on the Go module proxy
+9. Confirm the version resolves on the Go module proxy
    (`go list -m github.com/eddiectc/aharness@vX.Y.Z` from a clean checkout).
+
+Before pushing the tag, dry-run the checks locally:
+`git merge-base --is-ancestor <sha> origin/main`,
+`grep -q "## \\[vX.Y.Z\\]" CHANGELOG.md`, and
+`go mod tidy && git diff --exit-code -- go.mod go.sum`.
+
+Recovery: if a tag goes up before its release PR merges, merge the release
+PR with a merge commit (owner bypass with written justification when
+protections block it — the failure is procedural, the code gate is green),
+then re-run the failed `release` workflow. Never move or delete the tag
+(§2.4).
 
 Record any pending manual smoke (hosted-endpoint loop, adapter, tool, or
 session-schema changes) in the release notes or the plan; never describe an
