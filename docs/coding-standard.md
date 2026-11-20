@@ -1,8 +1,8 @@
 # Go coding standard
 
-- **Date:** 2026-11-18
+- **Date:** 2026-11-20
 - **Status:** normative for all Go code in this repository
-- **Toolchain:** Go 1.27.3; stdlib-first, with the approved extractor exception
+- **Toolchain:** Go 1.27.4; stdlib-first, with the approved extractor exception
 - **Related:** [system architecture](architecture.md), [bare-minimum harness research](research/agent-harness-minimum.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
@@ -17,7 +17,7 @@ only with a recorded reason; **MAY** = optional.
 
 ## 1. Toolchain and module
 
-- Use Go **1.27.3**. Keep `go 1.27.3` in `go.mod`; do not lower it. Go 1.27's
+- Use Go **1.27.4**. Keep `go 1.27.4` in `go.mod`; do not lower it. Go 1.27's
   `go test` runs the `stdversion` vet check by default, so the `go` line must
   admit every standard-library symbol used.
 - The module is `github.com/eddiectc/aharness`. The root package is the
@@ -84,7 +84,10 @@ apply to every package.
   extractor was rejected. Measured 2026-11-13 on a stripped
   `-trimpath -ldflags=-s -w` build: 19,009,696 to 37,707,936 bytes (+18.7 MB,
   +98%); `go list -m all` grew from 53 to 106 modules. `govulncheck ./...`
-  reports no vulnerabilities after the `golang.org/x/net` v0.62.0 upgrade. The
+  reports no vulnerabilities after the `golang.org/x/net` v0.63.0 upgrade
+  (re-verified 2026-11-20 with `gomoji` v1.4.1, `go-dateparser` v1.4.8,
+  `go-colorable` v0.1.16, `go-re2` v1.13.0, `x/sys` v0.50.0, `x/text` v0.44.0;
+  `make dod` green). The
   approved fallback if this decision is reversed is
   `codeberg.org/readeck/go-readability/v2` v2.1.3 (MIT, about +5.2 MB); do not
   ship both.
@@ -316,7 +319,7 @@ linters:
 ## 9. Appendix: verified Go 1.27 facts
 
 Reference only; the rules are above. These were checked against the installed
-Go 1.27.3 toolchain, not recalled:
+Go 1.27.4 toolchain, not recalled:
 
 | Fact | Consequence |
 |---|---|
@@ -325,7 +328,7 @@ Go 1.27.3 toolchain, not recalled:
 | `os.Root` rejects `..`, absolute names, and symlink escapes. It rejects absolute symlinks even inside the root. It does not block bind mounts, `/proc`, or device files. Unix `Chmod`/`Chown`/`Chtimes` have a TOCTOU race. | Normalize absolute inputs; treat Root as an accident guard, not a sandbox. |
 | `exec.CommandContext` kills only the direct child; `Cmd.Cancel` and `Cmd.WaitDelay` control the group and inherited pipes. | Use the `Setpgid` + group-kill + `WaitDelay` pattern for child process groups. |
 | `testing/synctest` provides fake time; `httptest.NewTestServer` uses an in-memory network; `synctest.Sleep` exists. `t.Run`, `t.Parallel`, and `t.Deadline` are forbidden inside a bubble. | Use synctest for retry/deadline tests; use real short timeouts for subprocesses. |
-| `go test` invokes `stdversion` vet by default; `go mod init` writes `go 1.27.3`. | Keep the `go` line honest; new stdlib symbols require Go 1.27. |
+| `go test` invokes `stdversion` vet by default; `go mod init` writes `go 1.27.4`. | Keep the `go` line honest; new stdlib symbols require Go 1.27. |
 | `log.Exit`/`log.Exitf` are not in the Go 1.27 standard library. | Use `slog` and a returned exit code; do not copy the Google style guide literally here. |
 | `go fix` has `atomictypes`, `embedlit`, `slicesbackward`, and `unsafefuncs` modernizers; `go doc -ex` prints runnable examples. | Run `go fix ./...` before review; use `go doc -ex` while coding. |
 

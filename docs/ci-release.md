@@ -49,7 +49,7 @@ are pinned in the workflow `env` block so CI matches the local gates:
 
 | Tool | Pin | Notes |
 |---|---|---|
-| Go | `go.mod` (`go 1.27.3`) | `actions/setup-go@v7` reads `go-version-file` |
+| Go | `go.mod` (`go 1.27.4`) | `actions/setup-go@v7` reads `go-version-file` |
 | goimports | `golang.org/x/tools` v0.51.0 | Falls back to `gofmt` only locally, never in CI |
 | golangci-lint | v2.15.0 (2026-10-16) | Via `golangci/golangci-lint-action@v9`; config is [.golangci.yml](../.golangci.yml) |
 | govulncheck | `golang.org/x/vuln` v1.9.0 | |
@@ -178,8 +178,29 @@ regression. Fuzzing stays out of per-commit CI.
 - Bumping Go means changing the `go` directive in `go.mod` (never lowering
   it), then verifying `make dod` locally; CI follows automatically via
   `go-version-file`.
-- Bumping a dev tool means updating the workflow `env` pins, this document's
-  §1.3 table, and the local installs in the same change.
+- Bumping a dev tool means updating the workflow `uses:` lines, the workflow
+  `env` pins, this document's §1.3 table, and the local installs in the same
+  change.
 - Workflow changes are verified by opening a PR (CI runs on it) and, for
   `release.yml`, by dry-running the verify steps locally against the intended
   tag before pushing it.
+
+### 4.1 Dependency freshness
+
+Dependencies stay at latest through weekly Dependabot PRs
+([dependabot.yml](../.github/dependabot.yml)), not through blind `go get -u`
+on `main`. The policy is "latest, but verified":
+
+- Dependabot opens one grouped Go-modules PR and one grouped Actions PR each
+  Monday. Each PR runs the full `make dod` gate via `ci.yml`.
+- A maintainer merges when green. A red gate means the update waits: fix the
+  code or pin back, never force-merge.
+- A manual update follows the same flow: `go get -u ./... && go mod tidy`
+  (plus `go mod tidy` in `testdata/external`), then `make dod`, then a PR.
+- A dependency change that alters the approved-exception versions in the
+  [coding standard](coding-standard.md) §3, the binary-size posture, or the
+  `govulncheck` result updates that section in the same change — the reference
+  must stay honest about what ships.
+- Security advisories skip the queue: bump the fixed version immediately
+  (Go directive for stdlib, `go get pkg@latest` for modules), verify
+  `make dod`, and ship through the normal PR flow.

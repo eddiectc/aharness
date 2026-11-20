@@ -33,7 +33,7 @@ working-directory, TTY, or signal layer, and imports no CLI or TUI code. The
 recorded contracts, including the public facade surface, are in
 [architecture.md](docs/architecture.md#321-public-library-facade).
 
-This module requires Go 1.27.3 or later. Add it to an existing module; it ships
+This module requires Go 1.27.4 or later. Add it to an existing module; it ships
 no binary and needs no separate installation:
 
 ```sh
