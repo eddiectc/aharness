@@ -49,14 +49,17 @@ are pinned in the workflow `env` block so CI matches the local gates:
 
 | Tool | Pin | Notes |
 |---|---|---|
-| Go | `go.mod` (`go 1.27.3`) | `setup-go` reads `go-version-file` |
+| Go | `go.mod` (`go 1.27.3`) | `actions/setup-go@v7` reads `go-version-file` |
 | goimports | `golang.org/x/tools` v0.51.0 | Falls back to `gofmt` only locally, never in CI |
-| golangci-lint | v2.15.0 | Via the lint action; config is [.golangci.yml](../.golangci.yml) |
+| golangci-lint | v2.15.0 (2026-10-16) | Via `golangci/golangci-lint-action@v9`; config is [.golangci.yml](../.golangci.yml) |
 | govulncheck | `golang.org/x/vuln` v1.9.0 | |
 | gcc | `apt-get install gcc` | Required for `-race` (cgo) |
+| actions/checkout | v7 | Node24 runtime; needs runner v2.327.1+ |
+| actions/setup-go | v7 | ESM internals; no input/behavior change from v6 |
 
 Dependabot (or a manual bump) keeps the `actions/*` versions current; a tool
-bump updates the workflow `env` and this table in the same change.
+bump updates the workflow `uses:` lines, the workflow `env`, and this table in
+the same change.
 
 ### 1.4 Hardening
 
