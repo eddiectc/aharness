@@ -1,0 +1,84 @@
+# Release verification for the aharness SDK. A `vX.Y.Z` tag push re-runs
+# `make dod`, checks the tag and CHANGELOG entry, and cuts a GitHub Release.
+# Tags are created deliberately by a maintainer; CI never tags.
+# Process details live in docs/ci-release.md.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # gh release create
+
+env:
+  GOIMPORTS_VERSION: v0.51.0 # golang.org/x/tools
+  GOVULNCHECK_VERSION: v1.9.0 # golang.org/x/vuln
+  GOLANGCI_LINT_VERSION: v2.15.0
+
+jobs:
+  verify-and-release:
+    name: verify and release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out code with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gcc for -race
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Install pinned dev tools
+        run: |
+          go install "golang.org/x/tools/cmd/goimports@${GOIMPORTS_VERSION}"
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+      - name: Run definition-of-done gates
+        run: make dod
+
+      - name: Verify tag and release metadata
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "${TAG}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "tag ${TAG} is not vX.Y.Z"; exit 1;
+          }
+          git merge-base --is-ancestor "${TAG}" origin/main || {
+            echo "tag ${TAG} is not on main; cut releases from main only"; exit 1;
+          }
+          grep -q "## \[${TAG}\]" CHANGELOG.md || {
+            echo "tag ${TAG} has no '## [${TAG}]' entry in CHANGELOG.md"; exit 1;
+          }
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "${PREV}" ]; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --target "${GITHUB_SHA}" \
+              --generate-notes --notes-start-tag "${PREV}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --target "${GITHUB_SHA}" \
+              --generate-notes
+          fi

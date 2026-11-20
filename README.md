@@ -319,6 +319,11 @@ and the [definition of done](docs/definition-of-done.md). `make dod` runs
 `docs-check`, formatting, `go vet`, `golangci-lint`, `go test -race`,
 `go build ./...`, and `govulncheck`.
 
+`main` is protected: work on a short-lived feature branch and open a pull
+request targeting `main`; never push directly to `main`. See
+[docs/ci-release.md](docs/ci-release.md) §1.5 for the branching workflow and
+§2 for releases.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
