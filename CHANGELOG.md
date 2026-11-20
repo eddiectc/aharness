@@ -6,7 +6,12 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
-## [Unreleased]
+## [v0.4.1] - 2026-11-20
+
+This is a patch release: it restores Responses thinking text with no public API
+change. The session schema stays `2`, existing logs need no migration,
+`prompt-v3` is unchanged, and tool grants, tool schemas, and the toolset
+version are unchanged.
 
 ### Fixed
 
@@ -429,6 +434,7 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[v0.4.1]: https://github.com/eddiectc/aharness/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/eddiectc/aharness/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/eddiectc/aharness/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/eddiectc/aharness/compare/v0.1.0...v0.2.0
