@@ -6,11 +6,17 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
-## [Unreleased]
+## [v0.5.0] - 2026-11-22
 
 This release adds prompt and request transparency with no schema change. The
 session schema stays `2`, existing logs need no migration, `prompt-v3` is
 unchanged, and tool grants, tool schemas, and the toolset version are unchanged.
+
+It supersedes `v0.4.2`, which published the same source without this record; see
+that entry below. A consumer already on `v0.4.2` sees no code change, and one on
+`v0.4.1` gains the readers. The optional real-session smoke in
+[the plan](docs/plans/prompt-transparency-build.md) §7.7 has not run: it needs an
+existing acode session log and remains a maintainer check.
 
 ### Added
 
@@ -31,6 +37,16 @@ unchanged, and tool grants, tool schemas, and the toolset version are unchanged.
   is derived by re-running the cap rule over the recorded text, so it is correct
   for logs written before the field, and hosts never match the marker, whose
   format stays internal. It is never a replay key.
+
+## [v0.4.2] - 2026-11-22
+
+Tagged in error on the prompt-transparency merge commit (`72c271e`) without a
+CHANGELOG entry. The `release` workflow re-ran `make dod` successfully but failed
+its metadata check on the missing `## [v0.4.2]` heading, so no GitHub Release was
+created. The tag stays where it is: the module proxy and the checksum database
+already serve it, and a published tag is never moved or deleted
+([ci-release.md](docs/ci-release.md) §2.4). The source is the tree `v0.5.0`
+documents above; use `v0.5.0`.
 
 ## [v0.4.1] - 2026-11-20
 
@@ -460,6 +476,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[v0.5.0]: https://github.com/eddiectc/aharness/compare/v0.4.2...v0.5.0
+[v0.4.2]: https://github.com/eddiectc/aharness/compare/v0.4.1...v0.4.2
 [v0.4.1]: https://github.com/eddiectc/aharness/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/eddiectc/aharness/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/eddiectc/aharness/compare/v0.2.0...v0.3.0
