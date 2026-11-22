@@ -124,6 +124,12 @@ type State struct {
 	// before the field and for delegated children. It is provenance only and
 	// never a replay key.
 	AppendedPrompt string
+	// PromptCapped reports whether the recorded system prompt was truncated by
+	// the SDK's 32 KiB prompt cap. It is derived from the recorded text, so it
+	// is correct for logs written before this field: false for a legacy log with
+	// no recorded prompt and false for a prompt that fits. It is never a replay
+	// key, and a host never matches the SDK's truncation marker itself.
+	PromptCapped bool
 	// PromptTag is the host prompt tag recorded beside the SDK prompt template
 	// version. Empty means unset. It is attribution only and never a replay
 	// key.
@@ -220,6 +226,7 @@ func stateFromSnapshot(snapshot engine.Snapshot) State {
 		},
 		SystemPrompt:         state.SystemPrompt,
 		AppendedPrompt:       state.AppendedPrompt,
+		PromptCapped:         state.PromptCapped,
 		PromptTag:            state.PromptTag,
 		AgentName:            state.Agent,
 		Limits:               fromInternalLimits(state.Limits),

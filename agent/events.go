@@ -2,7 +2,7 @@ package agent
 
 import (
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -295,6 +295,19 @@ const (
 	maxSteeringBytes      = 64 << 10
 )
 
+// Truncation marker. capText appends exactly one suffix naming how many bytes
+// it dropped, and truncatedBy is its inverse; both live here so the format has
+// one owner. The format is internal: hosts must never match it themselves.
+const (
+	truncationMarkerOpen  = "\n[truncated "
+	truncationMarkerClose = " bytes]"
+)
+
+// truncationMarker renders the suffix capText appends after a cut.
+func truncationMarker(dropped int) string {
+	return truncationMarkerOpen + strconv.Itoa(dropped) + truncationMarkerClose
+}
+
 // capText sanitizes invalid UTF-8, truncates at a byte limit on a rune
 // boundary, and marks the truncation.
 func capText(s string, limit int) string {
@@ -309,7 +322,34 @@ func capText(s string, limit int) string {
 	for cut > 0 && !utf8.ValidString(s[:cut]) {
 		cut--
 	}
-	return s[:cut] + fmt.Sprintf("\n[truncated %d bytes]", len(s)-cut)
+	return s[:cut] + truncationMarker(len(s)-cut)
+}
+
+// truncatedBy reports whether text is exactly what capText(text, limit)
+// produces when it truncates: a marker suffix naming a positive dropped-byte
+// count, over a valid UTF-8 prefix whose length is within one rune of limit.
+// The marker format is internal; hosts must never match it themselves.
+func truncatedBy(text string, limit int) bool {
+	if limit <= 0 || len(text) <= limit {
+		return false
+	}
+	at := strings.LastIndex(text, truncationMarkerOpen)
+	if at < 0 {
+		return false
+	}
+	prefix, suffix := text[:at], text[at+len(truncationMarkerOpen):]
+	count, ok := strings.CutSuffix(suffix, truncationMarkerClose)
+	if !ok {
+		return false
+	}
+	dropped, err := strconv.Atoi(count)
+	if err != nil || dropped <= 0 {
+		return false
+	}
+	if len(prefix) < limit-3 || len(prefix) > limit {
+		return false
+	}
+	return utf8.ValidString(prefix)
 }
 
 // safeArguments makes provider-supplied JSON safe to marshal into the session

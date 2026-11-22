@@ -153,9 +153,11 @@ it on every construction; a fork's new children use the identity supplied to
 Fork. `Config.PromptTag` tags the host prompt beside the SDK `prompt-v3`
 template version: optional, at most 64 printable ASCII bytes matching
 `[A-Za-z0-9._:/-]+`, recorded as `session_start.prompt_tag` and exposed as
-`State.PromptTag`; it never affects rendering, caps, or replay. Resume keeps the
-recorded tag, and a fork inherits it only when the prompt is unchanged. Prompt
-composition has three tiers. Set only `Identity` and inherit
+`State.PromptTag`; it never affects rendering, caps, or replay. A recorded
+prompt over the 32 KiB prompt cap is flagged by `State.PromptCapped`, so a host
+reads the truncation state instead of matching the SDK's marker. Resume keeps
+the recorded tag, and a fork inherits it only when the prompt is unchanged.
+Prompt composition has three tiers. Set only `Identity` and inherit
 `agent.DefaultPromptBody` (recommended for a coding agent); compose a body from
 `agent.LoopRules`, your own policy lines, and `agent.AgentCatalogText`; or replace
 the prompt wholesale with `Config.SystemPrompt`. `Config.Instructions` composes
@@ -291,7 +293,7 @@ in [architecture.md §3](docs/architecture.md#3-packages-and-contracts):
 
 | Package | Use it for |
 |---|---|
-| `github.com/eddiectc/aharness/agent` | The runner, display events, history reconstruction, state inspection, prompt/agent definitions, and the subagent spawner. |
+| `github.com/eddiectc/aharness/agent` | The runner, display events, history and latest-model-exchange readers, state inspection, prompt/agent definitions, and the subagent spawner. |
 | `github.com/eddiectc/aharness/engine` | New/resume/fork composition, workspace and work-directory setup (`WorkDir`, `CleanupWork`), session metadata (`History`, `Todo`, `LastSeq`), head-read `ListSummaries`, and lock-free inspection/listing. |
 | `github.com/eddiectc/aharness/model` | Canonical model types, Chat Completions and Responses adapters, streaming, and models.dev catalog discovery. |
 | `github.com/eddiectc/aharness/tools` | The builtin registry, workspace containment, the seven workspace/web tools, and the `delegate` seam. |

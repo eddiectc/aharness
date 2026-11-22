@@ -604,11 +604,24 @@ is the contract for hosts that mix levels today.
   terminal status, and every unpaired tool call.
   It also folds every recorded `delegate` result's `details` into
   `SubagentTurns`, `SubagentUsage`, and `SubagentCostMicroUSD`, so a resumed
-  parent keeps the spend those children already incurred. Unknown event types
-  and fields within v2 are ignored.
+  parent keeps the spend those children already incurred. It derives
+  `State.PromptCapped` by re-running the 32 KiB prompt-cap rule over the
+  recorded `system_prompt`, so the flag is correct for logs written before it
+  existed and a host never matches the truncation marker itself. Unknown event
+  types and fields within v2 are ignored.
 - `agent.Summarize(events) (SessionSummary, error)` — decodes only the
   `session_start` metadata and first user message from a log head for the
   `/resume` picker. It is not a substitute for `Inspect`.
+- `agent.LatestModelExchange(events) (ModelExchange, error)` — component-level
+  reader for the newest recorded model attempt: the newest `model_request` or
+  `model_response` plus its pair when one exists in the same turn without an
+  intervening `run_start` or `session_start`. Payloads are copies of the
+  recorded event JSON, never wire bytes, and are never decoded. An empty log, or
+  one with no model events, returns the zero value; a returned payload that is
+  not a JSON object is a corrupt-log error. There is no facade DTO: a facade
+  host reads with `session.ReadSnapshot` and calls this, so raw payload bytes
+  never cross the facade boundary. On a fork the newest attempt may be an event
+  copied from the parent, and `Run` counts the parent's runs.
 - `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
   once-per-session `session_start` event for a new, forked, or delegated
   session. It records the resolved `system_prompt`, the optional `agent` name,
@@ -694,7 +707,7 @@ comment on a field narrows these rules but never widens them.
 | Construction | `Config`: `Workspace`, `StateDir`, `Model`, `AgentName`, `UserAgent`, `Identity`, `PromptTag`, `Tools`, `Limits`, `MaxTurns`, `MaxTotalTokens`, `RunTimeout`, `ModelTimeout`, `ThinkingEffort`, `Instructions`, `SystemPrompt`, `Authorize`, `RequireUsage`, `LogModelRequests`, `Logger` |
 | Lifecycle | `Agent`: `ID`, `SessionPath`, `Workspace`, `State`, `Run`, `Start`, `Close`; `RunOptions`: `Model`, `ThinkingEffort`, `MaxTurns`, `MaxTotalTokens`, `Timeout`, `OnEvent`; `Run`: `Events`, `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, `Close` |
 | Outcome | `Result`: `Status`, `Session`, `Err`, `FinalText`, `RunTurns`, `RunUsage`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `RunCostMicroUSD`, `CostMicroUSD`, `RunCostComplete`, `CostComplete`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `Children`, `Reason`, `Duration`; `ChildOutcome`: `Agent`, `Session`, `CallID`, `Intent`, `Status`, `Turns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Error`; `StopReason` helpers `Failure`, `Label` |
-| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
+| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptCapped`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
 | Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `RunID`, `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `ID`, `Source`, `Text`; `SubagentMessageRecorded`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ID`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`, `Error`; `RunFinished`: `RunID`, `Result`, `Reason`, `Duration`; `EventView`: a flat JSON projection with `Kind`; `ViewEvent(Event) EventView`; `EventKind*` constants |
 | Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent`, `Session`, `Agent` |
 | Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
@@ -1457,7 +1470,9 @@ it on every turn. Compaction never mutates the log.
   (skipping its `session_start`) with the new session ID and renumbered `seq`
   while preserving payloads and timestamps, repair unpaired calls in the copy,
   and append the new run. A fork is self-contained; it never reads the parent
-  again.
+  again. Because the copy keeps the parent's `model_request`/`model_response`
+  events, `agent.LatestModelExchange` on a fresh fork reports the parent's last
+  exchange, and its `Run` counts the parent's runs.
 - **Format:** one JSON object per line, encoded with `encoding/json/v2` through
   `jsontext.NewEncoder` (`jsonv2.MarshalEncode`). Common fields:
   `v` (schema version, 2 for v1), `seq` (starts at 1 and increments by 1),
@@ -1508,6 +1523,12 @@ it on every turn. Compaction never mutates the log.
 | `session_repair` | on resume | Discarded bytes, last good `seq`, reason. |
 | `final` | once per run | Terminal status and last assistant text for this run, if any. |
 | `run_end` | once per run | Status, reason, run turns/usage, cumulative turns/usage, duration, estimated run/cumulative cost, cost-completeness flags, and the folded `subagent_turns`/`subagent_usage`/`subagent_cost_micro_usd`/`subagent_cost_complete` totals. Child turns are excluded from the parent's turn budget; child tokens are included in the token budget. |
+
+`model_request` and `model_response` pairing is part of the session-schema
+contract. A host that needs the latest recorded attempt reads it with
+`agent.LatestModelExchange` (see §3.2) instead of reimplementing the rule; it
+returns the recorded payloads as copies, with the request included only when it
+shares the response's turn and no run or session boundary intervenes.
 
 v1 uses `run_end` and does not emit `session_end`. The projection ignores every
 run/control event. `seq` and `turn` continue across runs. A run without a
