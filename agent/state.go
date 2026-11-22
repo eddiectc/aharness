@@ -44,6 +44,12 @@ type State struct {
 	// keeps using SystemPrompt, it is empty on logs written before the field,
 	// and a delegated child leaves it empty.
 	AppendedPrompt string
+	// PromptCapped reports whether the recorded system prompt was truncated by
+	// the SDK's prompt cap. It is derived by re-running the cap rule against the
+	// recorded text, so it is correct for logs written before this field: false
+	// for an empty recorded prompt (a legacy log) and false for a prompt that
+	// fits. It is never a replay key; projection uses SystemPrompt verbatim.
+	PromptCapped bool
 	// Agent is the definition name recorded for a child session.
 	Agent string
 	// Tools is the recorded tool grant; nil means every tool of the version
@@ -141,6 +147,7 @@ func Inspect(events []session.Event) (State, error) {
 			state.ParentSeq = data.ParentSeq
 			state.ParentCallID = data.ParentCallID
 			state.SystemPrompt = data.SystemPrompt
+			state.PromptCapped = truncatedBy(data.SystemPrompt, maxSystemPromptBytes)
 			state.AppendedPrompt = data.AppendedPrompt
 			state.Agent = data.Agent
 			state.Tools = cloneGrant(data.Tools)

@@ -142,6 +142,55 @@ func TestIdentityParentAndChildPrompts(t *testing.T) {
 	}
 }
 
+// TestStatePromptCapped checks the facade mirror: State() and InspectSession
+// agree on whether the recorded prompt was truncated.
+func TestStatePromptCapped(t *testing.T) {
+	tests := []struct {
+		name         string
+		systemPrompt string
+		want         bool
+	}{
+		{name: "prompt fits"},
+		{
+			name:         "prompt over the cap",
+			systemPrompt: strings.Repeat("x", 40_000),
+			want:         true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			ag, err := aharness.New(context.Background(), aharness.Config{
+				Workspace:    t.TempDir(),
+				StateDir:     stateDir,
+				UserAgent:    "aharness-test/1.0",
+				Model:        testModel(&scriptedModel{}),
+				SystemPrompt: tc.systemPrompt,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			defer func() { _ = ag.Close() }()
+
+			state, err := ag.State()
+			if err != nil {
+				t.Fatalf("State: %v", err)
+			}
+			if state.PromptCapped != tc.want {
+				t.Fatalf("State.PromptCapped = %t for a %d-byte prompt, want %t",
+					state.PromptCapped, len(tc.systemPrompt), tc.want)
+			}
+			inspected, err := aharness.InspectSession(context.Background(), stateDir, ag.ID())
+			if err != nil {
+				t.Fatalf("InspectSession: %v", err)
+			}
+			if inspected.PromptCapped != state.PromptCapped {
+				t.Fatalf("InspectSession PromptCapped = %t, State = %t", inspected.PromptCapped, state.PromptCapped)
+			}
+		})
+	}
+}
+
 func TestComposedSystemPromptKeepsLoopInvariants(t *testing.T) {
 	catalog := []agent.AgentInfo{
 		{Name: "researcher", Description: "Research a question over the data."},

@@ -6,6 +6,32 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
+## [Unreleased]
+
+This release adds prompt and request transparency with no schema change. The
+session schema stays `2`, existing logs need no migration, `prompt-v3` is
+unchanged, and tool grants, tool schemas, and the toolset version are unchanged.
+
+### Added
+
+- `agent.LatestModelExchange(events) (agent.ModelExchange, error)` returns the
+  newest recorded model attempt: the latest `model_request` or `model_response`
+  plus its pair when one exists in the same turn without an intervening run or
+  session start. Payloads are copies of the recorded event JSON, never wire
+  bytes, and are not decoded. A newest `model_request` is returned alone, so an
+  in-flight or failed call never borrows an older exchange. On a fork the newest
+  attempt may be an event copied from the parent, and `Run` counts the parent's
+  runs. It is a component-level reader: the facade has no exchange DTO, and a
+  facade host reads with `session.ReadSnapshot` and calls this directly.
+- `agent.ModelExchange` carries the payloads, their sequence numbers, the run
+  count, the turn, and which sides were found. It is exported with the reader;
+  no new runtime dependency or encode/decode path is involved.
+- `agent.State.PromptCapped` and `aharness.State.PromptCapped` report whether
+  the recorded `system_prompt` was truncated by the 32 KiB prompt cap. The flag
+  is derived by re-running the cap rule over the recorded text, so it is correct
+  for logs written before the field, and hosts never match the marker, whose
+  format stays internal. It is never a replay key.
+
 ## [v0.4.1] - 2026-11-20
 
 This is a patch release: it restores Responses thinking text with no public API
