@@ -1,9 +1,10 @@
 # aharness subagent observation and transcript build plan
 
 - **Date:** 2026-11-23
-- **Status:** implemented 2026-11-23. Phases 1–4 landed as written except where
-  §5 records a deviation; the automated gates pass and the real-provider
-  observation smoke in §7 is pending.
+- **Status:** implemented 2026-11-23 and released 2026-11-25 as `v0.6.0`.
+  Phases 1–4 landed as written except where §5 records a deviation; the
+  automated gates pass and the real-provider observation smoke in §7 is
+  pending.
 - **Maintained during implementation:** this is a living work record, not a
   reference document. Update it as each phase lands — status, decisions,
   deviations, and §7 verification — and correct any claim the code outgrows.
