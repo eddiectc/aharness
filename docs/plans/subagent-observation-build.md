@@ -16,9 +16,10 @@
   `prompt-v3`, `toolset-v2`.
 - **Source:** a host reported that a delegated child exposes a narrower
   observation contract than the root session, and asked for one merged live
-  view of every child. The supporting audit is
-  [.issues/aharness-host-surface-issues.md](../../.issues/aharness-host-surface-issues.md)
-  issue 6 (root-only events), which this plan supersedes for the child half.
+  view of every child. The supporting audit is `aharness-host-surface-issues.md`
+  issue 6 (root-only events), in the filer's gitignored `.issues/` directory, so
+  it is named here rather than linked. This plan supersedes it for the child
+  half.
 - **Target:** Go 1.27.3, module `aharness`.
 - **Architecture:** [architecture.md](../architecture.md) §3.2.1 (facade),
   §3.3 (host observation), §4 (loop), §7 (session log).
@@ -684,7 +685,7 @@ reversed, only `forward`/`observe` in `agent/spawn.go` and the §4 rows change.
 | Facade has no transcript reader | `aharness.go`, `Agent` methods; `engine/engine.go`, `Host.History` |
 | Display errors are terminal today | `agent/runner.go`, `emit`, `failDisplay` |
 | Per-child sinks can run concurrently | `docs/architecture.md` §3.3 (read-only fan-out); `agent/spawn.go` `displayMu` |
-| Root-only child events were already an audit finding | [.issues/aharness-host-surface-issues.md](../../.issues/aharness-host-surface-issues.md) issue 6 |
+| Root-only child events were already an audit finding | `aharness-host-surface-issues.md` issue 6 (gitignored `.issues/` directory; named, not linked) |
 | Recorded child run shape | [subagent-build.md](subagent-build.md) §3.6 table, §3.8 |
 | Facade copies DTOs | [architecture.md](../architecture.md#321-public-library-facade) |
 | DoD gates | [definition-of-done.md](../definition-of-done.md) |
