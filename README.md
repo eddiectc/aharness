@@ -131,6 +131,14 @@ record. `ViewEvent` projects any event to a flat JSON shape with a `kind`
 discriminator for an SSE endpoint or structured log. The display callback is
 never invoked after the run returns, and `RunFinished` is terminal.
 
+`Transcript(ctx, stateDir, sessionID)` reads the display transcript — run
+headers, user messages, assistant markdown source, tool calls paired with
+results, and notices — of any session: a root, a delegated child, or a fork.
+`Agent.Transcript()` is the same read for the current agent's session. Both read
+a byte snapshot of the log without taking the session lock, so a running session
+stays readable and a torn final line is ignored; neither replaces the log as the
+durable record.
+
 `OpenAIModel` builds a Chat Completions or Responses adapter for an explicit
 OpenAI-compatible endpoint. `DiscoverModel` and `ListModels` resolve models and
 limits from the [models.dev](https://models.dev) catalog. `CustomModel` wraps
@@ -205,6 +213,19 @@ children whose grants are read-only or declare `ConcurrencySafe`. Delegation
 depth is one. `DelegationConfig.Agents` is required: the SDK ships no role
 definitions, and `Example_delegation` in `example_test.go` is the starting
 template.
+
+`DelegationConfig.ObserveChild` opts into a live per-child view. It is called
+once per child that starts a run with a `ChildTarget` (session, agent, intent,
+model, effort, tools) and returns that child's event sink, which receives its
+own text, thinking, tool calls and results, notices, and run start and finish,
+stamped with the child session. Ordering is per child; merging children into one
+view is the host's. Sinks for different children may run concurrently with each
+other and with the run's own stream, so a sink must not block and must be safe
+for concurrent use. Registering an observer streams delegated children, which
+makes a post-delta transport failure terminal for that child; leave
+`ObserveChild` nil to keep the counter-only `Subagent*` roster with the full
+retry budget. A sink error or panic ends that child as `internal_error` and
+leaves its siblings and the run alone.
 
 `Tool.Run` and `Config.Authorize` receive the calling session in
 `ToolCall.Session` and, for a delegated child, the definition name in

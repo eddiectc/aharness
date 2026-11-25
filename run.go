@@ -196,6 +196,7 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 	if delegation != nil {
 		runSpec.ResolveModel = delegation.internalResolver()
 		runSpec.NewChildCompleter = delegation.internalChildCompleter()
+		runSpec.ObserveChild = delegation.internalObserve()
 		maxSubagents := delegation.maxSubagents
 		runSpec.MaxSubagents = &maxSubagents
 	}

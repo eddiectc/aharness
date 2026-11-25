@@ -668,8 +668,7 @@ callers should use. The shipped surface, by area:
   `Resume`/`Fork` take the caller's model implementation and inherit the
   recorded identity when `ModelConfig.Spec.ID` is empty. `Resume` rejects prompt
   and tool-contract changes; `Fork` applies explicit prompt or tool overrides
-  and records `contract_override`.
-- Runs: blocking `Agent.Run(ctx, task, RunOptions) (Result, error)` and
+  and records `contract_override`.- Runs: blocking `Agent.Run(ctx, task, RunOptions) (Result, error)` and
   streaming `Agent.Start(...) *Run` with `Events() iter.Seq2[Event, error]`,
   `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, and `Close`.
   `Result.Status` is authoritative and `Result.Err` is the same cause returned
@@ -693,11 +692,17 @@ callers should use. The shipped surface, by area:
   file replacing a base entry of the same name.
   Child grants are intersected with the parent's authority, a child can never
   delegate, and `ConcurrencySafe` extends concurrent child fan-out only.
+  `DelegationConfig.ObserveChild` opts into a per-child display stream: it
+  receives one `ChildTarget` per child that starts a run and returns that
+  child's sink. The sink is optional and additive; the `Subagent*` roster
+  events keep arriving on the run's own stream.
 - State and discovery: `State`, `SessionInfo`, `InspectSession`, `Sessions`,
   `SchemaVersion`, `Version`, sentinel errors, `ConfigError`, and
   `ProviderError`. `InspectSession` canonicalizes the ID and reads a snapshot
   without the exclusive lock; `Sessions` lists newest first and tolerates a live
-  writer.
+  writer. `Transcript` reads the display transcript of any session — root,
+  delegated child, or fork — from the same lock-free snapshot, and
+  `Agent.Transcript` is that read for the live root session.
 
 **Field-level contract.** The exported surface is listed here; the `go doc`
 comment on a field narrows these rules but never widens them.
@@ -705,16 +710,16 @@ comment on a field narrows these rules but never widens them.
 | Group | Types and fields |
 |---|---|
 | Construction | `Config`: `Workspace`, `StateDir`, `Model`, `AgentName`, `UserAgent`, `Identity`, `PromptTag`, `Tools`, `Limits`, `MaxTurns`, `MaxTotalTokens`, `RunTimeout`, `ModelTimeout`, `ThinkingEffort`, `Instructions`, `SystemPrompt`, `Authorize`, `RequireUsage`, `LogModelRequests`, `Logger` |
-| Lifecycle | `Agent`: `ID`, `SessionPath`, `Workspace`, `State`, `Run`, `Start`, `Close`; `RunOptions`: `Model`, `ThinkingEffort`, `MaxTurns`, `MaxTotalTokens`, `Timeout`, `OnEvent`; `Run`: `Events`, `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, `Close` |
+| Lifecycle | `Agent`: `ID`, `SessionPath`, `Workspace`, `State`, `Transcript`, `Run`, `Start`, `Close`; `RunOptions`: `Model`, `ThinkingEffort`, `MaxTurns`, `MaxTotalTokens`, `Timeout`, `OnEvent`; `Run`: `Events`, `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, `Close` |
 | Outcome | `Result`: `Status`, `Session`, `Err`, `FinalText`, `RunTurns`, `RunUsage`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `RunCostMicroUSD`, `CostMicroUSD`, `RunCostComplete`, `CostComplete`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `Children`, `Reason`, `Duration`; `ChildOutcome`: `Agent`, `Session`, `CallID`, `Intent`, `Status`, `Turns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Error`; `StopReason` helpers `Failure`, `Label` |
-| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptCapped`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools` |
+| Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptCapped`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools`; `TranscriptItem`: the same fields as `agent.HistoryItem` with `TranscriptKind`, `NoticeKind`, `StopReason`, and the public `Usage`; `Transcript(ctx, stateDir, sessionID) ([]TranscriptItem, error)` |
 | Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `RunID`, `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `ID`, `Source`, `Text`; `SubagentMessageRecorded`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ID`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`, `Error`; `RunFinished`: `RunID`, `Result`, `Reason`, `Duration`; `EventView`: a flat JSON projection with `Kind`; `ViewEvent(Event) EventView`; `EventKind*` constants |
 | Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent`, `Session`, `Agent` |
 | Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
 | Discovery | `OpenAIModelOptions`: `Spec`, `APIKey`, `UserAgent`, `HTTPClient`, `Timeout`; `DiscoverModelOptions`: `Catalog`, `Provider`, `Model`, `APIKey`, `BaseURL`, `HTTPClient`, `Timeout`; `CatalogConfig`: `URL`, `StateDir`, `HTTPClient`, `TTL`, `Timeout`, `UserAgent`, `Validate`; `CatalogModel`: `ID`, `Name`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `InputLimit`, `MaxOutputTokens`, `ToolCall`, `Reasoning`, `ThinkingEfforts`, `Deprecated`, `Status`, `Unavailable`, `Pricing`, `Validate`; `Catalog`: `Lookup`, `Price`, `Usable`, `SortedModels`; `CatalogListing`: `Provider`, `FetchedAt`, `Models`, `Warnings`; helpers `ValidateCatalogURL`, `ValidateBaseURL`, `CatalogOptions.Validate` |
 | Tools | `Tool`: `Name`, `Description`, `InputSchema`, `Run`, `ConcurrencySafe`; `ToolResult`: `OK`, `Code`, `Output`, `Error`, `ExitCode`, `TimedOut`, `Truncated`, `Details`; `ToolSchema`: `Name`, `Description`, `Parameters`; `ToolsConfig`: `Disable`, `RootGrant`, `Extra`, `WebSearch`, `WebFetch`, `Delegation`; `ToolRequest`: `Tool`, `Call`, `Intent`, `Turn`, `Session`, `Agent`, `Path`; `Deny`: `Reason`; `WebSearchConfig`: `BaseURL`, `Timeout`; `WebFetchConfig`: `Provider`, `Endpoint`, `Key`, `Timeout`, `UserAgent`; helpers `TextResult`, `ErrorResult`, `Name*`, `NamesFor`, `ParseDelegateArgs`, `ParseTodoDetails`, `IntentLine` |
-| Delegation | `AgentDefinition`: `Name`, `Description`, `Prompt`, `Tools`, `Model`, `ThinkingEffort`, `MaxTurns`; `DelegationConfig`: `Agents`, `MaxSubagents`, `ResolveModel` |
-| Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the seven built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`, `Failure`; `Subagent*` status constants; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI`; `EventKind*` |
+| Delegation | `AgentDefinition`: `Name`, `Description`, `Prompt`, `Tools`, `Model`, `ThinkingEffort`, `MaxTurns`; `DelegationConfig`: `Agents`, `MaxSubagents`, `ResolveModel`, `ObserveChild`; `ChildTarget`: `CallID`, `Index`, `Agent`, `Session`, `Intent`, `Model`, `Effort`, `Tools` |
+| Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the seven built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`, `Failure`; `Subagent*` status constants; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI`; `EventKind*`; `TranscriptKind`: `TranscriptRun`, `TranscriptUser`, `TranscriptAssistant`, `TranscriptTool`, `TranscriptNotice` |
 | Errors and versions | Sentinels `ErrClosed`, `ErrBusy`, `ErrEmptyTask`, `ErrIteratorConsumed`, `ErrSessionNotFound`, `ErrSessionLocked`, `ErrInvalidSessionID`, `ErrModelRequired`, `ErrToolConflict`, `ErrToolMismatch`, `ErrSteeringFull`, `ErrNoSuchChild`, `ErrAuth`, `ErrModelUnavailable`; `ConfigError`: `Field`, `Value`, `Detail`; `ProviderError`: `StatusCode`, `Retryable`, `Err`; `SchemaVersion`, `Version()` |
 
 Behavioral rules that the field lists do not show:
@@ -766,6 +771,11 @@ Behavioral rules that the field lists do not show:
   session grant (`session_start.tools`) remains the authority for child
   intersection; `session_start.root_tools` records the root grant, and nil
   means the session grant.
+- `Transcript` and `Agent.Transcript` read a byte snapshot of the log without
+  the session lock or the in-memory event slice, so both tolerate a live writer
+  and a torn final line. `Transcript` accepts a root, child, or fork session ID;
+  an unusable ID is `ErrInvalidSessionID` and a missing log `ErrSessionNotFound`.
+  `Agent.Transcript` returns `ErrClosed` after `Close`.
 - The engine host reads a session without touching `Store`:
   `History` reconstructs the transcript, `Todo` restores the checklist,
   `LastSeq` returns the resume boundary, `WorkDir` names the per-session work
@@ -891,23 +901,49 @@ observation path. Events are `RunStarted`, `ModelStarted`, `ReasoningDelta`,
 `SubagentProgress`, `SubagentFinished`, `ToolCompleted`, `MessageRecorded`,
 `SubagentMessageRecorded`, `Notice`, and `RunFinished`, emitted in that contract
 order around the matching durable events. The four subagent events carry
-counters and names only; child text, arguments, and tool output stay in the
-child's own transcript, except that host-originated steering text is echoed on
+counters and names only, and host-originated steering text is echoed on
 `SubagentMessageRecorded` so the host can acknowledge it.
 `SubagentProgress` is emitted at child model-response boundaries and throttled
 to one event per second per child, so its usage and cost are cumulative so far,
-not final. Read-only fan-out runs children on separate
-goroutines, so the spawner serializes their display callbacks before forwarding
-them; the callback is never entered concurrently, and each child's
-`SubagentStarted` precedes its own progress and finish events. A child failure
-before its run starts still emits one `SubagentFinished` with an empty session,
-zero counters, and `Error`. They are display-only and carry no provider token
-or ANSI. `ToolCompleted` also carries the structured tool result `details`,
-which a host uses to maintain derived UI such as a todo widget without parsing
-rendered output. A display failure before
-`RunFinished` is an internal error; during a tool round it pairs the current and
-unstarted calls with `canceled`. `ReasoningDelta` and
-`ResponseCompleted.Reasoning` carry thinking text that is never logged.
+not final. Read-only fan-out runs children on separate goroutines, so the
+spawner serializes the parent display callback before forwarding them; that
+callback is never entered concurrently, and each child's `SubagentStarted`
+precedes its own progress and finish events. A child failure before its run
+starts still emits one `SubagentFinished` with an empty session, zero counters,
+and `Error`, and it registers no observation sink.
+
+A child's own event stream is available through
+`agent.SpawnerOptions.Observe` (`DelegationConfig.ObserveChild` at the facade).
+It registers one sink per child that starts a run, after the intent is resolved
+and before `SubagentStarted`. The sink receives that child's `RunStarted`,
+`ModelStarted`, text and thinking deltas, `ResponseCompleted`, `ToolStarted`,
+`ToolCompleted`, `MessageRecorded`, `Notice`, and `RunFinished`, sanitized as for
+the parent display. Identity is structural: the registration names the child
+session, and the facade stamps it on every sink event, because the delta events
+carry no session field. The facade forwards only events with a public form; an
+internal transport event such as `ModelStarted` has no public counterpart and is
+not delivered, and a retry stays visible through `Notice`. One sink is never entered concurrently with itself;
+distinct child sinks, and a child sink versus the parent display, may run
+concurrently. The sink is synchronous and unbuffered, so a blocking sink
+throttles only that child. A returned error, or a recovered panic, from the
+registration or the sink terminates that child as `internal_error` with the
+cause in its report and leaves its siblings and the run untouched.
+
+Registering an observer sets `Config.Stream` for every delegated child, so an
+observed child streams when its adapter supports streaming and emits one
+buffered `TextDelta` otherwise; `model_response.streamed` records which happened.
+The trade is the same retry rule as the root: once partial text has been
+displayed, a transport failure is terminal instead of retried. An unobserved
+child keeps `Stream: false`, the full retry budget, and the counter-only
+stream.
+
+Every display event is observation only and carries no provider token or ANSI.
+`ToolCompleted` also carries the structured tool result `details`, which a host
+uses to maintain derived UI such as a todo widget without parsing rendered
+output. A root display failure before `RunFinished` is an internal error for
+that run; during a tool round it pairs the current and unstarted calls with
+`canceled`. `ReasoningDelta` and `ResponseCompleted.Reasoning` carry thinking
+text that is never logged.
 
 `ResponseCompleted.Turn` and the `Cumulative*` fields include the completed
 response and earlier turns; a later turn may change them, so they are progress,
@@ -928,7 +964,10 @@ messages, assistant markdown source, tool calls/results paired by call ID
 `final` does not duplicate the assistant text. Unknown events/fields are
 ignored; malformed known payloads are errors. A host may use the same function
 for a child log read without taking the child's session lock so a running child
-stays viewable; a torn final line is ignored.
+stays viewable; a torn final line is ignored. The facade exposes the same read
+as `Transcript(ctx, stateDir, sessionID)` for a root, child, or fork session,
+and as `Agent.Transcript` for the live root, so a facade-only host renders a
+merged view without importing a component package.
 
 The SDK defines no `Host` interface, key bindings, terminal protocol, or
 rendering safety layer. Those are host responsibilities; acode owns the shipped
@@ -1499,6 +1538,10 @@ it on every turn. Compaction never mutates the log.
   shared non-blocking `flock`. The lock is the session log file itself, not a
   separate lock file. Locking is advisory and local-filesystem only. A busy
   session is a config error naming the trace path.
+- **Observation is not durable:** a display or per-child observation sink sees
+  events only; it appends nothing, changes no payload, and leaves the schema at
+  `2`. A streaming child records `stream` on `run_start` and `streamed` on
+  `model_response`, which are ordinary recorded values.
 - **Truth:** the log is the durable record; the context window is a projection.
   The log contains enough information to rebuild every model input except the
   exact provider wire format. With `Config.LogModelRequests`, an additional

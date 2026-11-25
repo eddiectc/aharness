@@ -426,6 +426,22 @@ func (a *Agent) State() (State, error) {
 	return stateFromSnapshot(snapshot), nil
 }
 
+// Transcript reads this agent's display transcript. It reads a byte snapshot of
+// the session log, without taking the session lock or reading the in-memory
+// event slice, so it is safe while a run is active. A torn final line is
+// ignored. It returns ErrClosed after Close.
+//
+// TranscriptItem.Text is markdown source; the host renders it.
+func (a *Agent) Transcript() ([]TranscriptItem, error) {
+	a.mu.Lock()
+	closed := a.closed
+	a.mu.Unlock()
+	if closed {
+		return nil, ErrClosed
+	}
+	return readTranscript(a.host.StateDir(), a.ID())
+}
+
 // Close cancels an active run, drains it, and closes the store, workspace, and
 // work directory. It is idempotent.
 func (a *Agent) Close() error {

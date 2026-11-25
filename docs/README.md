@@ -16,10 +16,13 @@ configuration docs in its own repository.
    inform a plan. Not a contract. Lives in `docs/research/`.
 
 Naming: plans use `<topic>-build.md`; research uses `<topic>-research.md`. A
-plan is `proposed`, `implemented`, `superseded`, or a historical record. Once
-implemented, a plan is frozen except for status, deviations, and verification
-notes. Research is a frozen snapshot; add a `Superseded by:` line instead of
-rewriting its conclusions.
+plan is `proposed`, `implemented`, `superseded`, or a historical record. A plan
+is not a reference document: it records intent, and the current reference
+carries the shipped truth. It stays **editable** for its whole life — update
+status, decisions, deviations, and verification as the work lands, and correct
+a claim the code has outgrown instead of leaving it to mislead the next reader.
+Research is a dated snapshot of evidence; add a `Superseded by:` line rather
+than rewriting its conclusions.
 
 ## Precedence
 
@@ -29,8 +32,9 @@ rewriting its conclusions.
   [limits.md](limits.md), and [testing-strategy.md](testing-strategy.md).
 - A dated plan or research document records intent and evidence; it never
   overrides the current reference. Where they disagree, the reference wins.
-  Plans and research are frozen: later behavior changes update the reference,
-  never the dated record.
+  Losing precedence is not immutability: a plan is edited while it is being
+  implemented and corrected afterwards, so no reader is told to leave a plan
+  standing when the code contradicts it.
 - [definition-of-done.md](definition-of-done.md) applies to every task,
   documentation change, and dated record.
 
@@ -59,6 +63,7 @@ rewriting its conclusions.
 | [plans/prompt-surface-build.md](plans/prompt-surface-build.md) | Implemented 2026-11-19 as v0.3.0 work; real-model probes pending |
 | [plans/prompt-transparency-build.md](plans/prompt-transparency-build.md) | Implemented and released 2026-11-22 as v0.5.0 (v0.4.2 was an accidental tag of the same source); real-session smoke pending |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
+| [plans/subagent-observation-build.md](plans/subagent-observation-build.md) | Implemented 2026-11-23; real-provider observation smoke pending |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
 | [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |
 | [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |

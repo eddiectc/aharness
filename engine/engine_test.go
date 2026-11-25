@@ -836,3 +836,109 @@ func TestBuildRunnerCreatesAndCloseRemovesWorkDir(t *testing.T) {
 		t.Fatalf("work dir still exists after Close: %v", err)
 	}
 }
+
+// delegateScriptModel calls the delegate tool once, then answers.
+type delegateScriptModel struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (m *delegateScriptModel) Complete(context.Context, model.Request) (model.Response, error) {
+	m.mu.Lock()
+	m.calls++
+	call := m.calls
+	m.mu.Unlock()
+	if call > 1 {
+		return model.Response{Text: "parent done", FinishReason: model.FinishStop,
+			Usage: model.Usage{InputTokens: 1, OutputTokens: 1, Reported: true}}, nil
+	}
+	return model.Response{
+		ToolCalls: []model.ToolCall{{
+			ID:        "delegate-1",
+			Name:      "delegate",
+			Arguments: json.RawMessage(`{"intent":"look","tasks":[{"agent":"reader","task":"read it"}]}`),
+		}},
+		FinishReason: model.FinishToolCalls,
+		Usage:        model.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+	}, nil
+}
+
+func TestBuildRunnerWiresChildObservation(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	spec.Grant = []string{"delegate", "read_file"}
+	spec.Definitions = []agent.AgentDefinition{{
+		Name:        "reader",
+		Description: "Test-only reader.",
+		Prompt:      "Read the assigned input.\n",
+		Tools:       []string{"read_file"},
+	}}
+	spec.NewChildCompleter = func(agent.AgentDefinition, agent.ModelResolution, string) model.Completer {
+		return engineModel{}
+	}
+	var (
+		mu            sync.Mutex
+		observations  []agent.ChildObservation
+		sinkEvents    int
+		operationHook int
+	)
+	spec.ObserveChild = func(observation agent.ChildObservation) agent.ChildSink {
+		mu.Lock()
+		observations = append(observations, observation)
+		mu.Unlock()
+		return func(agent.DisplayEvent) error {
+			mu.Lock()
+			sinkEvents++
+			mu.Unlock()
+			return nil
+		}
+	}
+	host, err := Open(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+
+	runOnce := func(run RunSpec) {
+		t.Helper()
+		run.NewCompleter = func(model.Dialect, string, string) model.Completer { return &delegateScriptModel{} }
+		runner, err := host.BuildRunner(run, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("BuildRunner: %v", err)
+		}
+		if _, err := runner.Run(context.Background(), agent.RunOptions{Task: "delegate", TaskSet: true}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+
+	runOnce(RunSpec{})
+	mu.Lock()
+	if len(observations) != 1 {
+		mu.Unlock()
+		t.Fatalf("registrations = %d, want one per child", len(observations))
+	}
+	observation := observations[0]
+	gotEvents := sinkEvents
+	mu.Unlock()
+	if observation.Agent != "reader" || observation.Session == "" || observation.CallID != "delegate-1" {
+		t.Fatalf("observation = %+v", observation)
+	}
+	if gotEvents == 0 {
+		t.Fatal("the child sink received no events")
+	}
+
+	// A per-run hook replaces the construction hook.
+	runOnce(RunSpec{ObserveChild: func(agent.ChildObservation) agent.ChildSink {
+		mu.Lock()
+		operationHook++
+		mu.Unlock()
+		return nil
+	}})
+	mu.Lock()
+	defer mu.Unlock()
+	if operationHook != 1 {
+		t.Fatalf("per-run registrations = %d, want 1", operationHook)
+	}
+	if len(observations) != 1 {
+		t.Fatalf("construction registrations = %d, want the per-run hook to win", len(observations))
+	}
+}

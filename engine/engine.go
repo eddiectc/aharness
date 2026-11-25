@@ -102,8 +102,11 @@ type Spec struct {
 	NewCompleter      func(dialect model.Dialect, baseURL, sessionID string) model.Completer
 	NewChildCompleter func(def agent.AgentDefinition, resolution agent.ModelResolution, sessionID string) model.Completer
 	NewRegistry       func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error)
-	CustomTools       []agent.CustomTool
-	CustomToolsSet    bool
+	// ObserveChild, when non-nil, registers one live display sink per delegated
+	// child. See agent.SpawnerOptions.Observe for the contract.
+	ObserveChild   func(agent.ChildObservation) agent.ChildSink
+	CustomTools    []agent.CustomTool
+	CustomToolsSet bool
 	// Grant is the tool-name grant. GrantSet distinguishes "inherit the
 	// recorded contract" (resume/fork) from an explicit value; the value itself
 	// preserves nil (all tools of the recorded version) versus empty (none).
@@ -155,9 +158,11 @@ type RunSpec struct {
 	NewCompleter      func(dialect model.Dialect, baseURL, sessionID string) model.Completer
 	ResolveModel      func(modelID, effort string) (agent.ModelResolution, error)
 	NewChildCompleter func(def agent.AgentDefinition, resolution agent.ModelResolution, sessionID string) model.Completer
-	MaxSubagents      *int
-	Stream            bool
-	Interactive       bool
+	// ObserveChild overrides Spec.ObserveChild for this run when non-nil.
+	ObserveChild func(agent.ChildObservation) agent.ChildSink
+	MaxSubagents *int
+	Stream       bool
+	Interactive  bool
 }
 
 // Host owns one durable session, its workspace, and the resolved contract.

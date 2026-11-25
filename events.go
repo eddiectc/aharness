@@ -462,6 +462,20 @@ func ViewEvent(ev Event) EventView {
 	}
 }
 
+// childEventSink converts one child's internal display events to the public
+// contract, stamped with that child's session identity. A child's delta events
+// carry no session field, so identity comes from the registration instead of
+// the event. Transport-level events that have no public form are skipped.
+func childEventSink(session string, sink func(Event) error) agent.ChildSink {
+	return func(ev agent.DisplayEvent) error {
+		pub, ok := eventFromInternal(ev, session, time.Now())
+		if !ok {
+			return nil
+		}
+		return sink(pub)
+	}
+}
+
 // eventFromInternal maps one internal display event to the public contract.
 // It reports false for transport-level events that are not public.
 func eventFromInternal(ev agent.DisplayEvent, session string, now time.Time) (Event, bool) {

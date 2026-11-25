@@ -245,6 +245,9 @@ constant:
 - Number of tool calls per response; bounded by the response cap.
 - Number of events per session; bounded by the turn, token, and time budgets
   only when those explicit budgets are set.
+- The child observation sink; it is synchronous, unbuffered, and per child, so a
+  blocking sink throttles that child's model stream and no other child. A host
+  that wants a bounded queue owns it.
 - Thinking effort values; bounded by the model's normalized catalog list (at
   most 16 values, 32 bytes each). No run budget is added.
 - Number of concurrent sessions; one process holds one active session and one
