@@ -24,6 +24,20 @@ type AgentDefinition struct {
 	MaxTurns       int
 }
 
+// ChildTarget identifies one delegated child before it starts. Its Session is
+// the child's own session ID, which Transcript and InspectSession accept once
+// the child's log exists.
+type ChildTarget struct {
+	CallID  string
+	Index   int
+	Agent   string
+	Session string
+	Intent  string
+	Model   string
+	Effort  string
+	Tools   []ToolName
+}
+
 // DelegationConfig enables the delegate tool and configures its definitions.
 type DelegationConfig struct {
 	// Agents is the runnable definition set. Nil or empty is a ConfigError;
@@ -35,6 +49,24 @@ type DelegationConfig struct {
 	// ResolveModel resolves a definition's non-empty Model/ThinkingEffort. Nil
 	// uses the parent model and rejects definitions that name another model.
 	ResolveModel func(ctx context.Context, modelID, effort string) (*ModelConfig, error)
+	// ObserveChild, when non-nil, registers a live observation sink for one
+	// delegated child. It is called once per child before that child's first
+	// event, and never for a task that fails before its run starts. The
+	// returned callback receives that child's own display events in that child's
+	// order, with EventMeta.Session set to the child session; a nil return
+	// observes nothing. It sees only events that have a public form, so an
+	// internal transport event such as ModelStarted is not delivered.
+	// Parent-level Subagent* events are not delivered to it and keep arriving on
+	// the run's own stream.
+	//
+	// Registering any observer enables streaming for delegated children, which
+	// makes a post-delta transport failure terminal instead of retried. Sinks
+	// for different children may run concurrently, and concurrently with the
+	// run's own event stream; a sink must not block.
+	//
+	// A returned error, or a panic, terminates that child with internal_error.
+	// Siblings and the run are unaffected.
+	ObserveChild func(ChildTarget) func(Event) error
 }
 
 // delegationSetup is the per-run bridge between public definitions and the
@@ -224,6 +256,45 @@ func (d *delegationSetup) internalChildCompleter() agent.ChildCompleterFunc {
 		return nil
 	}
 	return d.childCompleter
+}
+
+// internalObserve adapts the public per-child hook to the spawner's
+// registration. Identity is structural: the registration names the child
+// session, and every event the sink receives is converted with that session,
+// because the internal delta events carry none.
+func (d *delegationSetup) internalObserve() func(agent.ChildObservation) agent.ChildSink {
+	if d == nil || d.cfg == nil || d.cfg.ObserveChild == nil {
+		return nil
+	}
+	observe := d.cfg.ObserveChild
+	return func(observation agent.ChildObservation) agent.ChildSink {
+		sink := observe(ChildTarget{
+			CallID:  observation.CallID,
+			Index:   observation.Index,
+			Agent:   observation.Agent,
+			Session: observation.Session,
+			Intent:  observation.Intent,
+			Model:   observation.Model,
+			Effort:  observation.Effort,
+			Tools:   toolNames(observation.Tools),
+		})
+		if sink == nil {
+			return nil
+		}
+		return childEventSink(observation.Session, sink)
+	}
+}
+
+// toolNames copies a component grant into the public tool-name type.
+func toolNames(names []string) []ToolName {
+	if names == nil {
+		return nil
+	}
+	out := make([]ToolName, len(names))
+	for i, name := range names {
+		out[i] = ToolName(name)
+	}
+	return out
 }
 
 func validateEffort(effort string, spec ModelSpec) error {

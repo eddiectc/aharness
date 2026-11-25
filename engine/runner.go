@@ -58,6 +58,10 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 		if run.MaxSubagents != nil {
 			maxSubagents = *run.MaxSubagents
 		}
+		observeChild := h.spec.ObserveChild
+		if run.ObserveChild != nil {
+			observeChild = run.ObserveChild
+		}
 		spawner = agent.NewSpawner(agent.SpawnerOptions{
 			Config:            cfg,
 			Workspace:         h.workspace,
@@ -75,6 +79,7 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 			NewRegistry:   h.spec.NewRegistry,
 			Logger:        h.spec.Logger,
 			Display:       display,
+			Observe:       observeChild,
 			ParentSession: h.ID(),
 			ParentSeq:     h.store.LastSeq,
 			MaxSubagents:  internalMaxSubagents(maxSubagents),

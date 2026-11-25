@@ -22,13 +22,32 @@
 //
 // Display events are observation only. Root activity is reported as
 // TextDelta, ReasoningDelta, ToolStarted, ToolCompleted, Notice, and
-// MessageRecorded. A delegated child is reported only as SubagentStarted,
-// SubagentProgress, SubagentFinished, and SubagentMessageRecorded; its text,
-// arguments, and tool output stay in the child transcript. SubagentProgress is
-// throttled to at most one event per second per child, so its usage and cost
+// MessageRecorded. A delegated child is reported on the run's own stream as
+// SubagentStarted, SubagentProgress, SubagentFinished, and
+// SubagentMessageRecorded; those carry counters and names only. SubagentProgress
+// is throttled to at most one event per second per child, so its usage and cost
 // are cumulative-so-far, not final. ResponseCompleted's cumulative fields work
 // the same way: they include the completed response but a later turn may
 // change them.
+//
+// DelegationConfig.ObserveChild opts into a second, per-child stream. It is
+// called once per child that actually starts a run and returns a sink that
+// receives that child's own display events (text, thinking, tool call and
+// result, notices, and its own run start and finish) in that child's order,
+// each stamped with the child session. Ordering is promised per child only: the
+// host merges children into one view. Distinct child sinks, and a child sink
+// versus the run's own stream, may run concurrently, so a sink must be safe for
+// concurrent use and must not block. Registering an observer enables streaming
+// for delegated children, which makes a post-delta transport failure terminal
+// for that child instead of retried; an unobserved child keeps the counter-only
+// stream and the full retry budget. A sink error or panic terminates that child
+// as internal_error and leaves its siblings and the run untouched.
+//
+// Transcript reads the durable display transcript of any session under a state
+// directory, root, child, or fork, without taking the session lock, so a
+// running session stays readable; Agent.Transcript is the same read for this
+// agent's own session. A delegated child's transcript is read by its session ID
+// from ChildTarget.Session or SubagentStarted.ChildSession.
 //
 // The display callback is never invoked after the run returns. RunFinished is
 // the terminal event and is emitted once; if the final append or sync fails,

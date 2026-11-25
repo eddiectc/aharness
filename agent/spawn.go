@@ -53,10 +53,32 @@ type ToolOptionsFunc func(sessionID, workDir, tmpDir string) tools.Options
 // A factory must not install a spawn interface: delegation depth is one.
 type RegistryFunc func(ws *tools.Workspace, sessionID, workDir, tmpDir string) (*tools.Registry, error)
 
+// ChildObservation identifies one delegated child to an observation sink. It
+// is resolved parent-side before the child's first event, so the fields match
+// the child's own SubagentStarted event and the child's recorded session.
+type ChildObservation struct {
+	CallID  string
+	Index   int
+	Agent   string
+	Session string
+	Intent  string
+	Model   string
+	Effort  string
+	Tools   []string
+}
+
+// ChildSink receives one delegated child's display events in that child's
+// order, with the same sanitization the parent display receives. It is never
+// entered concurrently with itself; sinks for different children, and a child
+// sink versus the parent display, may run concurrently. It is called on the
+// child's own goroutine, so it must not block, call the runner, or write the
+// session log.
+type ChildSink func(DisplayEvent) error
+
 // SpawnerOptions configures one per-run spawner. The spawner is created with
 // the host's effective configuration and reused for every delegate call in the
 // run, so its child counters are per-run. A read-only fan-out calls Resolve,
-// NewCompleter, NewToolOptions, ParentSeq, and Now from several child
+// NewCompleter, NewToolOptions, ParentSeq, Now, and Observe from several child
 // goroutines, so each must be safe for concurrent use.
 type SpawnerOptions struct {
 	Config            Config
@@ -71,6 +93,16 @@ type SpawnerOptions struct {
 	// Display is the parent's display callback. Child progress is forwarded
 	// through it, serialized by the spawner.
 	Display func(DisplayEvent) error
+	// Observe, when non-nil, registers one live display sink per delegated
+	// child. It is called once per child, after the definition is resolved and
+	// before the child's first event, and never for a task that fails before
+	// its run starts. The returned sink may be nil, which observes nothing.
+	// Observe runs from child goroutines during read-only fan-out, so it must be
+	// safe for concurrent use. Registering an observer makes every delegated
+	// child stream, which turns a post-delta transport failure terminal instead
+	// of retried. A returned error or recovered panic terminates that child as
+	// internal_error; siblings and the parent are unaffected.
+	Observe func(ChildObservation) ChildSink
 	// ParentSession is the delegating session's ID. A continuation must record
 	// it as its parent_session.
 	ParentSession string
@@ -552,6 +584,12 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 	childCfg.SteeringSource = SourceSubagentSteer
 	childCfg.Display = nil
 	adapter := s.newChildDisplay(call, index, def.Name, sessionID, modelID, effort, childCfg.Tools, resolution.Pricing).withIntent(spec.Task)
+	if err := adapter.observe(); err != nil {
+		report = failedReport(spec, tools.CodeInternal, tools.SubagentInternalError, err.Error())
+		adapter.finished(report)
+		emitted = true
+		return report
+	}
 	if err := adapter.started(); err != nil {
 		report = failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
 		adapter.finished(report)
@@ -638,6 +676,13 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 		agentName = spec.Agent
 	}
 	adapter := s.newChildDisplay(call, index, agentName, spec.Session, state.Model, state.ThinkingEffort, childCfg.Tools, state.Pricing).withIntent(spec.Task)
+	if err := adapter.observe(); err != nil {
+		_ = store.Close()
+		report = failedReport(spec, tools.CodeInternal, tools.SubagentInternalError, err.Error())
+		adapter.finished(report)
+		emitted = true
+		return report
+	}
 	if err := adapter.started(); err != nil {
 		_ = store.Close()
 		report = failedReport(spec, tools.CodeInternal, tools.SubagentFailed, err.Error())
@@ -730,6 +775,14 @@ func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *sessio
 		report.Status = string(StopInternalError)
 		report.Code = tools.CodeInternal
 	}
+	if report.Text == "" && adapter.sinkErr != nil {
+		// An observation sink failure terminates that child as internal_error.
+		// The child log already records an error event; report the cause too, so
+		// the parent's SubagentFinished and delegate message name it instead of
+		// showing an empty report. The run's joined error repeats the same cause
+		// once per terminating display attempt, so the first one is used.
+		report.Text = adapter.sinkErr.Error()
+	}
 	if closeErr != nil {
 		report.Status = string(StopInternalError)
 		report.Code = tools.CodeInternal
@@ -779,7 +832,10 @@ func (s *Spawner) childConfig(def AgentDefinition, modelID, effort string, resol
 		Pricing:        resolution.Pricing,
 		ThinkingEffort: effort,
 		Interactive:    false,
-		Stream:         false,
+		// A child streams only when a host observes it: streaming costs the
+		// retry budget after the first assistant-text delta, and an unobserved
+		// child's partial text has no consumer.
+		Stream: s.opts.Observe != nil,
 	}
 }
 
@@ -820,7 +876,10 @@ func (s *Spawner) continuedConfig(state State, call tools.Call) Config {
 		Pricing:        state.Pricing,
 		ThinkingEffort: state.ThinkingEffort,
 		Interactive:    false,
-		Stream:         false,
+		// A child streams only when a host observes it: streaming costs the
+		// retry budget after the first assistant-text delta, and an unobserved
+		// child's partial text has no consumer.
+		Stream: s.opts.Observe != nil,
 	}
 }
 
@@ -1049,8 +1108,9 @@ func subagentReportError(report tools.SubagentReport) string {
 }
 
 // childDisplay is the display adapter for one child run. It forwards only
-// counters and names: child text, arguments, and tool output stay in the
-// child's own transcript.
+// counters and names to the parent display: child text, arguments, and tool
+// output stay in the child's own transcript unless the host registered an
+// observation sink for this child, which receives the child's own events.
 type childDisplay struct {
 	spawner       *Spawner
 	call          tools.Call
@@ -1071,6 +1131,11 @@ type childDisplay struct {
 	contextTokens int
 	lastTool      string
 	finishedSent  bool
+	// sink is this child's observation sink, nil when unobserved. Only the
+	// child's runner goroutine calls it.
+	sink ChildSink
+	// sinkErr is the first failure observed from this child's sink, if any.
+	sinkErr error
 }
 
 func (s *Spawner) newChildDisplay(call tools.Call, index int, agent, session, modelID, effort string, grant []string, pricing model.Pricing) *childDisplay {
@@ -1110,9 +1175,75 @@ func (d *childDisplay) withIntent(task string) *childDisplay {
 	return d
 }
 
-// display is the child runner's display callback. It accumulates counters and
-// emits at most one progress event per second per child.
+// observe registers this child's observation sink. It is called once per child
+// that actually starts a run, after the intent and before the start event, so a
+// host never receives a registration with no session behind it. A returned
+// error, or a panic in the host hook, terminates that child as internal_error.
+// The error is not marked errDisplay: it never passes through the runner, which
+// would otherwise double the marker on the report text.
+func (d *childDisplay) observe() (err error) {
+	observe := d.spawner.opts.Observe
+	if observe == nil {
+		return nil
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			d.sink = nil
+			err = fmt.Errorf("child observation hook panicked: %v", v)
+		}
+	}()
+	d.sink = observe(ChildObservation{
+		CallID:  d.call.ID,
+		Index:   d.index,
+		Agent:   d.agent,
+		Session: d.session,
+		Intent:  d.intent,
+		Model:   d.model,
+		Effort:  d.effort,
+		Tools:   append([]string(nil), d.tools...),
+	})
+	return nil
+}
+
+// forward delivers one event to this child's observation sink. It runs on the
+// child's own goroutine before the parent display, so per-child order is the
+// runner's order and no lock is needed; sinks for different children may run
+// concurrently. A returned error or panic is a display failure for this child
+// only. The returned error is not marked errDisplay: the runner's emit adds that
+// marker exactly once.
+func (d *childDisplay) forward(ev DisplayEvent) (err error) {
+	if d.sink == nil {
+		return nil
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			err = fmt.Errorf("child observation sink panicked: %v", v)
+			d.recordSinkError(err)
+		}
+	}()
+	if ferr := d.sink(ev); ferr != nil {
+		d.recordSinkError(ferr)
+		return ferr
+	}
+	return nil
+}
+
+// recordSinkError keeps the first sink failure for the child's report. The
+// terminating run repeats the same cause on its later display attempts, so only
+// the first one names the original failure.
+func (d *childDisplay) recordSinkError(err error) {
+	if d.sinkErr == nil {
+		d.sinkErr = err
+	}
+}
+
+// display is the child runner's display callback. It forwards the event to the
+// child's own sink, then accumulates counters and emits at most one progress
+// event per second per child to the parent display.
 func (d *childDisplay) display(ev DisplayEvent) error {
+	if err := d.forward(ev); err != nil {
+		return err
+	}
 	switch ev := ev.(type) {
 	case ResponseCompleted:
 		d.childTurns++

@@ -40,6 +40,10 @@ only for tests.
 - Delegation: child grants, depth one, read-only concurrent fan-out,
   `ConcurrencySafe`, child budgets/accounting, display ordering, and
   parent/child session metadata.
+- Child observation: one sink per child with the child's own event order and
+  session identity, the streaming gate and its buffered fallback, sibling
+  isolation when a sink fails or panics, no registration for a task that never
+  starts, and cross-child concurrency under `-race`.
 
 ### `engine`
 
@@ -47,8 +51,9 @@ only for tests.
   prompt/tool-contract validation, fork overrides, `session_start` recording,
   history copy, and lock behavior.
 - `Host`: per-run registry/spawner/runner construction, execution grants,
-  todo seeding, work-directory reset, `State`, `Close`, and lock-free
-  inspection/listing.
+  todo seeding, work-directory reset, `State`, `Close`, lock-free
+  inspection/listing, and per-run child-observation wiring (a `RunSpec` hook
+  wins over the construction hook).
 
 ### `model`
 
@@ -95,6 +100,10 @@ only for tests.
 - Construction validation, DTO copying, run/start behavior, event iteration
   and backpressure, result/error identity, custom tools, authorization, state,
   session inspection/listing, and model/catalog helpers.
+- Transcripts: the root, child, and fork read through one projection, a live
+  writer without the session lock, a torn final line, not-found and invalid-ID
+  identity, `Agent.Transcript` agreeing with the package reader, and a
+  reflection guard that `TranscriptItem` still mirrors `agent.HistoryItem`.
 - `testdata/external` builds a separate module against the public facade.
 
 ## 2. Integration tests
@@ -110,6 +119,9 @@ providers. No test contacts models.dev or a real provider.
   `ToolRequest.Path`, and resume schema matching.
 - Delegation: parent and child logs, grants, concurrent read-only fan-out,
   child steering, budgets, and folded usage/cost.
+- Child observation through the facade: events stamped with the child session,
+  incremental child text with a streaming model, and a merged multi-child view
+  whose sinks run concurrently under `-race`.
 - Web tools: fake SearXNG and Crawl4AI endpoints; search and fetch result
   pairing; no network beyond `httptest`.
 - Catalog: fake models.dev server with ETag/TTL/refresh/stale behavior.

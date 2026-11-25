@@ -6,6 +6,62 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
+## [Unreleased]
+
+This is a minor, additive release: a live per-child observation stream and a
+transcript reader for any session. The session schema stays `2`, existing logs
+need no migration, `prompt-v3` and the toolset version are unchanged, no event
+type changed, and the concurrency model is unchanged — delegation is still one
+blocking tool call at depth one.
+
+The real-provider observation smoke is pending: no provider token was available
+when this landed. It covers two definitions with `ObserveChild` set, asserting
+interleaved child text arrives before `SubagentFinished`, and a streamed child
+that fails mid-stream, asserting `provider_error` with partial text instead of a
+retry. The fake-provider tests cover both paths.
+
+### Added
+
+- `DelegationConfig.ObserveChild func(ChildTarget) func(Event) error` registers
+  a live display sink for one delegated child. It is called once per child that
+  starts a run, before that child's first event, with a `ChildTarget` naming the
+  child session, agent, intent, model, effort, and grant. The returned callback
+  receives that child's own `RunStarted`, text and thinking deltas,
+  `ResponseCompleted`, `ToolStarted`, `ToolCompleted`, `MessageRecorded`,
+  `Notice`, and `RunFinished`, each with `EventMeta.Session` set to the child
+  session. The facade forwards only events that have a public form, so internal
+  transport events such as `ModelStarted` are not delivered; retries stay
+  visible through `Notice`. Ordering is per child; merging children into one view
+  is the host's. Distinct child sinks, and a child sink
+  versus the run's own stream, may run concurrently. A returned error or a
+  panic terminates that child as `internal_error` with the cause in its report
+  and leaves its siblings and the run untouched. A task that fails before its
+  run starts registers no sink.
+- `Transcript(ctx, stateDir, sessionID) ([]TranscriptItem, error)` reads the
+  display transcript of any session — root, delegated child, or fork — from a
+  byte snapshot of the log, without the session lock, so a running session stays
+  readable and a torn final line is ignored. A missing log is
+  `ErrSessionNotFound` and an unusable ID is `ErrInvalidSessionID`.
+- `Agent.Transcript()` returns the same transcript for the current agent's
+  session and `ErrClosed` after `Close`.
+- `TranscriptItem` and `TranscriptKind` mirror `agent.HistoryItem` at the
+  facade boundary, so a facade-only host renders a merged view without importing
+  a component package.
+- At the component level: `agent.SpawnerOptions.Observe`, `agent.ChildSink`,
+  `agent.ChildObservation`, `engine.Spec.ObserveChild`, and
+  `engine.RunSpec.ObserveChild`.
+
+### Changed
+
+- A delegated child streams (`Config.Stream`) only when `ObserveChild` is
+  registered. An observed child uses `CompleteStream` when its adapter supports
+  it and emits one buffered `TextDelta` otherwise, and its `model_response`
+  records `streamed: true` when it streamed. This is opt-in, and it is the one
+  behavioral trade in the release: for an observed child, a transport failure
+  after the first assistant-text delta is terminal instead of retried, exactly
+  as for the root. An unobserved child keeps `Stream: false`, the full retry
+  budget, and the counter-only `Subagent*` roster events, which are unchanged.
+
 ## [v0.5.0] - 2026-11-22
 
 This release adds prompt and request transparency with no schema change. The
@@ -476,6 +532,7 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
+[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.5.0...HEAD
 [v0.5.0]: https://github.com/eddiectc/aharness/compare/v0.4.2...v0.5.0
 [v0.4.2]: https://github.com/eddiectc/aharness/compare/v0.4.1...v0.4.2
 [v0.4.1]: https://github.com/eddiectc/aharness/compare/v0.4.0...v0.4.1
