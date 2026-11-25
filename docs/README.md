@@ -16,10 +16,13 @@ configuration docs in its own repository.
    inform a plan. Not a contract. Lives in `docs/research/`.
 
 Naming: plans use `<topic>-build.md`; research uses `<topic>-research.md`. A
-plan is `proposed`, `implemented`, `superseded`, or a historical record. Once
-implemented, a plan is frozen except for status, deviations, and verification
-notes. Research is a frozen snapshot; add a `Superseded by:` line instead of
-rewriting its conclusions.
+plan is `proposed`, `implemented`, `superseded`, or a historical record. A plan
+is not a reference document: it records intent, and the current reference
+carries the shipped truth. It stays **editable** for its whole life — update
+status, decisions, deviations, and verification as the work lands, and correct
+a claim the code has outgrown instead of leaving it to mislead the next reader.
+Research is a dated snapshot of evidence; add a `Superseded by:` line rather
+than rewriting its conclusions.
 
 ## Precedence
 
@@ -29,8 +32,9 @@ rewriting its conclusions.
   [limits.md](limits.md), and [testing-strategy.md](testing-strategy.md).
 - A dated plan or research document records intent and evidence; it never
   overrides the current reference. Where they disagree, the reference wins.
-  Plans and research are frozen: later behavior changes update the reference,
-  never the dated record.
+  Losing precedence is not immutability: a plan is edited while it is being
+  implemented and corrected afterwards, so no reader is told to leave a plan
+  standing when the code contradicts it.
 - [definition-of-done.md](definition-of-done.md) applies to every task,
   documentation change, and dated record.
 

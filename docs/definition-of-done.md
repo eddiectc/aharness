@@ -18,8 +18,8 @@ current reference documents ([architecture](architecture.md),
 [limits](limits.md), [testing strategy](testing-strategy.md)) win on structure
 and runtime contracts. A dated plan or research document records intent and
 evidence; where one disagrees with the current reference, the reference wins.
-Plans and research are frozen: later behavior changes update the current
-reference, never the dated record.
+Precedence is not immutability: a plan under implementation is edited as the
+work lands, and a dated record is corrected when it turns out to be wrong.
 
 ## 1. Behavior and scope
 
@@ -80,8 +80,11 @@ reference, never the dated record.
 - [ ] **No stale authority.** A plan does not claim to be normative for
       behavior that ships; it records intent, milestones, deviations, and
       verification.
-- [ ] **Frozen records.** A dated plan or research document is not rewritten for
-      later behavior; the current reference carries the shipped truth.
+- [ ] **Dated records stay current.** A plan under implementation is updated as
+      the work lands — status, decisions, deviations, and verification — and a
+      claim that the code has outgrown is corrected or marked superseded. The
+      current reference still carries the shipped truth; the plan never becomes
+      the authority.
 - [ ] **User-facing surface.** A public API change updates the README feature
       description and examples.
 - [ ] **New interfaces.** New exported types, fields, methods, errors, and
