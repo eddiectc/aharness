@@ -145,11 +145,16 @@ type Spec struct {
 
 // RunSpec carries the per-run overrides that do not rewrite the session.
 type RunSpec struct {
-	Model             string
-	Dialect           string
-	BaseURL           string
-	Limits            agent.Limits
-	Pricing           model.Pricing
+	Model   string
+	Dialect string
+	BaseURL string
+	Limits  agent.Limits
+	Pricing model.Pricing
+	// ImageInput is the image-input capability of the model chosen for this
+	// run. It is applied only when Model is set, which is how a host switches
+	// models mid-session: the registry is built per run, and without this the
+	// construction-time capability would stay in force. Nil means unknown.
+	ImageInput        *bool
 	ThinkingEffort    *string
 	MaxTurns          int
 	MaxTotalTokens    int

@@ -143,6 +143,7 @@ Other event payloads:
 | `read_image` | Token estimate | `ceil(w/28) * ceil(h/28)` | A delivered 2048x976 image estimates to 2,590 tokens; the provider bills about 950. |
 | `read_image` | Determinism | required | The same source produces the same bytes and SHA-256, recorded in `details`. |
 | `read_image` | Text channel | caption only | The image travels in `tool_result.images`, never in `output`; `output` is one line naming the source and delivered dimensions. |
+| `read_image` | Capability gate | per run | An explicit `ModelSpec.ImageInput` false makes the tool return `unavailable` without reading the file; nil lets the provider decide. A mid-session `RunOptions.Model` switch re-resolves it for that run, and a delegated child follows its own resolved model. |
 | `edit_file` | Max resulting file size | 2 MiB | Existing and new files; larger is `too_large`. |
 | `edit_file` | New file mode | 0644 | Existing mode is preserved, including setuid/setgid/sticky bits. |
 | `edit_file` | Match rule | unique unless `replace_all` | Zero matches is `not_found`; multiple is `ambiguous`. |

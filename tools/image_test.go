@@ -205,6 +205,43 @@ func TestReadImageUnavailableWithoutModelSupport(t *testing.T) {
 	}
 }
 
+func TestSetImageInputOverridesForTheRun(t *testing.T) {
+	r, dir := newTestRegistry(t)
+	mustWriteFile(t, dir, "a.png", solidPNG(t, 8, 8))
+
+	// Construction-time gate rejects; a per-run override to unknown must let the
+	// tool run, which is what a mid-session switch to an unknown model means.
+	no := false
+	r.SetImageInput(&no)
+	if res := executeArgs(t, r, "read_image", map[string]any{"path": "a.png"}); res.Code != CodeUnavailable {
+		t.Fatalf("code = %s, want %s after SetImageInput(false)", res.Code, CodeUnavailable)
+	}
+	r.SetImageInput(nil)
+	if res := executeArgs(t, r, "read_image", map[string]any{"path": "a.png"}); !res.OK {
+		t.Fatalf("read_image failed after clearing the gate: code=%s error=%s", res.Code, res.Error)
+	}
+
+	// An explicit true keeps it enabled, and the override is copied so a caller
+	// mutating its own variable cannot change the registry underneath it.
+	yes := true
+	r.SetImageInput(&yes)
+	yes = false
+	if res := executeArgs(t, r, "read_image", map[string]any{"path": "a.png"}); !res.OK {
+		t.Errorf("registry observed a caller mutation of the capability pointer")
+	}
+}
+
+func TestImageInputOptionIsCopied(t *testing.T) {
+	no := false
+	r, dir := newTestRegistry(t)
+	mustWriteFile(t, dir, "a.png", solidPNG(t, 8, 8))
+	r.SetImageInput(&no)
+	no = true
+	if res := executeArgs(t, r, "read_image", map[string]any{"path": "a.png"}); res.OK {
+		t.Error("registry followed a mutation of the caller's capability value")
+	}
+}
+
 func TestReadImageGIFFirstFrame(t *testing.T) {
 	r, dir := newTestRegistry(t)
 	img := stdimage.NewPaletted(stdimage.Rect(0, 0, 32, 24), color.Palette{color.Black, color.White})

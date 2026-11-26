@@ -159,10 +159,11 @@ func (d *delegationSetup) resolve(modelID, effort string) (agent.ModelResolution
 			return agent.ModelResolution{}, err
 		}
 		return agent.ModelResolution{
-			Dialect: string(d.parent.Spec.Dialect),
-			BaseURL: d.parent.Spec.BaseURL,
-			Limits:  toInternalLimits(d.parentLimits),
-			Pricing: toInternalPricing(d.parent.Spec.Pricing),
+			Dialect:    string(d.parent.Spec.Dialect),
+			BaseURL:    d.parent.Spec.BaseURL,
+			Limits:     toInternalLimits(d.parentLimits),
+			Pricing:    toInternalPricing(d.parent.Spec.Pricing),
+			ImageInput: d.parent.Spec.ImageInput,
 		}, nil
 	}
 	if d.cfg.ResolveModel == nil {
@@ -177,10 +178,11 @@ func (d *delegationSetup) resolve(modelID, effort string) (agent.ModelResolution
 		return agent.ModelResolution{}, err
 	}
 	return agent.ModelResolution{
-		Dialect: string(resolved.Spec.Dialect),
-		BaseURL: resolved.Spec.BaseURL,
-		Limits:  toInternalLimits(limits),
-		Pricing: toInternalPricing(resolved.Spec.Pricing),
+		Dialect:    string(resolved.Spec.Dialect),
+		BaseURL:    resolved.Spec.BaseURL,
+		Limits:     toInternalLimits(limits),
+		Pricing:    toInternalPricing(resolved.Spec.Pricing),
+		ImageInput: resolved.Spec.ImageInput,
 	}, nil
 }
 

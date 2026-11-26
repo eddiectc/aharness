@@ -192,6 +192,7 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 		runSpec.BaseURL = effective.Spec.BaseURL
 		runSpec.Limits = toInternalLimits(limits)
 		runSpec.Pricing = toInternalPricing(effective.Spec.Pricing)
+		runSpec.ImageInput = effective.Spec.ImageInput
 	}
 	if delegation != nil {
 		runSpec.ResolveModel = delegation.internalResolver()
