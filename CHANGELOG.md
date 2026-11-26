@@ -6,6 +6,21 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
+## [Unreleased]
+
+## [v0.7.1] - 2026-11-26
+
+### Fixed
+
+- `tools.Names()` returned a trailing empty name and omitted `read_image`. It
+  allocated the current set's length but ranged over the frozen v2 declarations,
+  so the two lists disagreed after the v0.7.0 toolset bump. No SDK path calls
+  `Names()` and no test covered it, which is why the release gate stayed green;
+  `NamesFor` and `NamesWithout` were always correct, so the first-party acode
+  agent was unaffected. `Names()` now derives from `Schemas()`, so the two
+  cannot drift on a future version bump, and `TestNamesMatchesSchemas` pins
+  them together. `v0.7.0` is superseded.
+
 ## [v0.7.0] - 2026-11-26
 
 This is a minor release that adds one builtin tool, `read_image`, so a vision
@@ -590,7 +605,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
-[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.7.1...HEAD
+[v0.7.1]: https://github.com/eddiectc/aharness/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/eddiectc/aharness/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/eddiectc/aharness/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/eddiectc/aharness/compare/v0.4.2...v0.5.0
