@@ -47,6 +47,7 @@ func NewRegistry(ws *Workspace, opts Options) *Registry {
 	r := &Registry{ws: ws, opts: opts, search: newSearchClient(opts), web: newWebFetchTool(opts)}
 	r.fs = map[string]toolFunc{
 		"read_file":   r.executeRead,
+		"read_image":  r.executeReadImage,
 		"edit_file":   r.executeEdit,
 		"search":      r.executeSearch,
 		"run_command": r.executeRunCommand,
@@ -281,6 +282,10 @@ func errorResult(err error) Result {
 		return Failure(CodeNotFound, message)
 	case errors.Is(err, ErrBinaryFile):
 		return Failure(CodeBinaryFile, message)
+	case errors.Is(err, ErrInvalidImage):
+		return Failure(CodeInvalidImage, message)
+	case errors.Is(err, ErrNoImageSupport):
+		return Failure(CodeUnavailable, message)
 	case errors.Is(err, ErrTooLarge):
 		return Failure(CodeTooLarge, message)
 	case errors.Is(err, errSymlink):

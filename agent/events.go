@@ -181,7 +181,20 @@ type toolResultData struct {
 	DurationMS int64           `json:"duration_ms,omitzero"`
 	Truncated  bool            `json:"truncated,omitzero"`
 	TimedOut   bool            `json:"timed_out,omitzero"`
+	Images     []toolImageData `json:"images,omitempty"`
 	Details    json.RawMessage `json:"details,omitempty"`
+}
+
+// toolImageData is one image attached to a tool result. Data is standard base64
+// of the delivered bytes; the session line cap bounds it. The field is additive:
+// a reader that predates it ignores it and projects the text caption instead.
+type toolImageData struct {
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Bytes     int    `json:"bytes"`
+	SHA256    string `json:"sha256,omitempty"`
 }
 
 type compactionData struct {

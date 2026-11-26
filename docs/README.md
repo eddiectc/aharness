@@ -62,6 +62,7 @@ than rewriting its conclusions.
 | [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
 | [plans/prompt-surface-build.md](plans/prompt-surface-build.md) | Implemented 2026-11-19 as v0.3.0 work; real-model probes pending |
 | [plans/prompt-transparency-build.md](plans/prompt-transparency-build.md) | Implemented and released 2026-11-22 as v0.5.0 (v0.4.2 was an accidental tag of the same source); real-session smoke pending |
+| [plans/read-image-build.md](plans/read-image-build.md) | Implemented 2026-11-26; provider probe and resume smoke passed against a local LiteLLM proxy |
 | [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
 | [plans/subagent-observation-build.md](plans/subagent-observation-build.md) | Implemented and released 2026-11-25 as v0.6.0; real-provider observation smoke pending |
 | [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |

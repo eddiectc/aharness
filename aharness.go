@@ -195,6 +195,10 @@ func openAgent(ctx context.Context, cfg Config, mode engine.Mode, sessionID stri
 	if err != nil {
 		return nil, err
 	}
+	// read_image refuses early only when the resolved model is known to be
+	// text-only. Resume and fork resolve no catalog entry, so the pointer stays
+	// nil and the provider decides.
+	setup.options.ImageInput = modelCfg.Spec.ImageInput
 	if cfg.Tools != nil && cfg.Tools.Delegation != nil {
 		if err := validateDelegationDefinitions(cfg.Tools.Delegation, setup.enabled); err != nil {
 			return nil, err

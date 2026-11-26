@@ -6,6 +6,49 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
+## [Unreleased]
+
+This is a minor release that adds one builtin tool, `read_image`, so a vision
+model can read an image from the workspace. It is additive at the session
+schema level: the envelope stays `v=2` and the new payload member is omitted
+when empty. It does change recorded contracts, so read the notes.
+
+### Added
+
+- Builtin `read_image` tool (`intent`, `path`). It reads one workspace PNG,
+  JPEG, or GIF, normalizes it, and returns it to the model as an image part with
+  a one-line caption as the text result. Sources are capped at 2 MiB and
+  16,000,000 pixels (checked from the header before a full decode); delivered
+  images are capped at 2048 px on the longest edge, 2,000,000 pixels, and
+  512 KiB, with a box-filter downscale and a JPEG quality ladder. A source that
+  already fits passes through byte for byte. Output is deterministic and the
+  delivered SHA-256 is recorded in `details`.
+- `model.ImagePart` and `model.Message.Images` carry image input in the
+  canonical model. Both dialect adapters map a tool result's image into a
+  following `user` message, the shape every OpenAI-compatible server accepts.
+- `read_image` and `invalid_image` result codes: the tool reports a non-image as
+  `invalid_image` (with a `read_file` hint for text) and an over-budget source as
+  `too_large`.
+- `CatalogModel.ImageInput` and `ModelSpec.ImageInput *bool` report whether the
+  model accepts image input, decoded from models.dev `attachment` and
+  `modalities.input`. Nil means unknown. It never affects eligibility; an
+  explicit false makes `read_image` return `unavailable` without reading the
+  file.
+- `tools.Options.ImageInput *bool` carries that capability to the registry.
+- `read_image` is treated as read-only for delegated fan-out, so a child granted
+  only read tools still runs concurrently.
+
+### Changed
+
+- The toolset version is now `toolset-v3`; `toolset-v2` is frozen. A session
+  that recorded v0, v1, or v2 keeps its declarations and cannot be granted
+  `read_image`. Resuming such a session with a `read_image` grant is a
+  configuration error rather than a silent widening.
+- The projection estimates an image at `ceil(width/28) * ceil(height/28)` tokens
+  instead of counting its bytes, and elides an old image together with its text
+  stub, leaving an `[image <media> <w>x<h> elided]` note.
+- The `delegate` concurrent-fan-out set now includes `read_image`.
+
 ## [v0.6.0] - 2026-11-25
 
 This is a minor, additive release: a live per-child observation stream and a

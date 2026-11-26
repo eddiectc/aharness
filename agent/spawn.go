@@ -121,11 +121,12 @@ const maxConcurrentChildren = 4
 
 // isReadOnlyTool reports whether name is safe to run while sibling children
 // share the workspace. The set is deliberately explicit: web_search and
-// web_fetch reach the network but never write the workspace, while every other
-// tool either writes or carries per-child state that fan-out should not share.
+// web_fetch reach the network but never write the workspace, and read_image
+// only reads a file, while every other tool either writes or carries per-child
+// state that fan-out should not share.
 func isReadOnlyTool(name string) bool {
 	switch name {
-	case "read_file", "search", "web_search", "web_fetch":
+	case "read_file", "read_image", "search", "web_search", "web_fetch":
 		return true
 	default:
 		return false

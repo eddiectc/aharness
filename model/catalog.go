@@ -65,10 +65,15 @@ type CatalogModel struct {
 	InputLimit    int     `json:"input_limit,omitempty"`
 	OutputLimit   int     `json:"output_limit,omitempty"`
 	ToolCall      bool    `json:"tool_call"`
-	Status        string  `json:"status,omitempty"`
-	Deprecated    bool    `json:"deprecated,omitempty"`
-	Translated    bool    `json:"translated,omitempty"`
-	Unavailable   string  `json:"unavailable,omitempty"`
+	// ImageInput reports whether the model accepts image input. It is decoded
+	// from models.dev's attachment flag and input modalities. It never affects
+	// eligibility: a text-only model stays selectable, it simply cannot use the
+	// read_image tool.
+	ImageInput  bool   `json:"image_input"`
+	Status      string `json:"status,omitempty"`
+	Deprecated  bool   `json:"deprecated,omitempty"`
+	Translated  bool   `json:"translated,omitempty"`
+	Unavailable string `json:"unavailable,omitempty"`
 	// Reasoning reports whether the model supports reasoning. It stays
 	// meaningful even when ReasoningEfforts is empty: the model may reason
 	// without exposing an effort control.

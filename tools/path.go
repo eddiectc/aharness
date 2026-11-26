@@ -23,6 +23,12 @@ func FileArgumentPath(workspace, toolName string, args []byte) string {
 			return ""
 		}
 		target = a.Path
+	case "read_image":
+		var a readImageArgs
+		if err := jsonv2.Unmarshal(args, &a); err != nil {
+			return ""
+		}
+		target = a.Path
 	case "edit_file":
 		var a editFileArgs
 		if err := jsonv2.Unmarshal(args, &a); err != nil {

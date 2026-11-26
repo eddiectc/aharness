@@ -40,14 +40,37 @@ type ToolCall struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// ImagePart is one image attached to a canonical message. Data is the decoded
+// image bytes; each dialect adapter encodes it into its own wire form. Only
+// image/png and image/jpeg are accepted by the adapters; a tool that produces
+// any other media type must convert it first.
+type ImagePart struct {
+	MediaType string `json:"media_type"`
+	Data      []byte `json:"data"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+}
+
+// MediaTypePNG and MediaTypeJPEG are the only image media types the built-in
+// adapters forward. Providers advertise more, but the harness normalizes to
+// these two so one encoder path and one cap apply everywhere.
+const (
+	MediaTypePNG  = "image/png"
+	MediaTypeJPEG = "image/jpeg"
+)
+
 // Message is one canonical conversation message. Tool calls are carried only
-// on assistant messages; tool results carry ToolCallID and Name.
+// on assistant messages; tool results carry ToolCallID and Name. Images are
+// carried only on tool messages, ordered after Content; a dialect that cannot
+// place an image inside a tool result translates it into an adjacent user
+// message instead.
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       Role        `json:"role"`
+	Content    string      `json:"content,omitempty"`
+	Images     []ImagePart `json:"images,omitempty"`
+	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Name       string      `json:"name,omitempty"`
 }
 
 // ToolSchema is the canonical tool declaration sent to a provider.

@@ -57,39 +57,51 @@ func (r *Registry) executeRead(ctx context.Context, args json.RawMessage) Result
 	return r.readFile(a.Path, offset, limit)
 }
 
-func (r *Registry) readFile(path string, offset, limit int) Result {
+// readCappedFile resolves, checks, and reads one workspace-relative regular
+// file, returning at most limit bytes. Containment, symlink, and size policy
+// live here so every file tool applies one rule; the caller decides what the
+// bytes mean.
+func (r *Registry) readCappedFile(path string, limit int64) ([]byte, error) {
 	rel, err := r.workspaceRel(path)
 	if err != nil {
-		return errorResult(err)
+		return nil, err
 	}
 	if err := r.ws.checkResolved(rel); err != nil {
-		return errorResult(err)
+		return nil, err
 	}
 	info, err := r.ws.root.Stat(rel)
 	if err != nil {
-		return errorResult(fmt.Errorf("stat %s: %w", path, err))
+		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return errorResult(fmt.Errorf("%w: %s", errNotRegular, path))
+		return nil, fmt.Errorf("%w: %s", errNotRegular, path)
 	}
-	if info.Size() > maxReadFileBytes {
-		return errorResult(fmt.Errorf("%w: %s is %d bytes (limit %d)", ErrTooLarge, path, info.Size(), maxReadFileBytes))
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %s is %d bytes (limit %d)", ErrTooLarge, path, info.Size(), limit)
 	}
 
 	f, err := r.ws.root.Open(rel)
 	if err != nil {
-		return errorResult(fmt.Errorf("open %s: %w", path, err))
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	data, readErr := io.ReadAll(io.LimitReader(f, maxReadFileBytes+1))
+	data, readErr := io.ReadAll(io.LimitReader(f, limit+1))
 	closeErr := f.Close()
 	if readErr != nil {
-		return errorResult(fmt.Errorf("read %s: %w", path, readErr))
+		return nil, fmt.Errorf("read %s: %w", path, readErr)
 	}
 	if closeErr != nil {
-		return errorResult(fmt.Errorf("close %s: %w", path, closeErr))
+		return nil, fmt.Errorf("close %s: %w", path, closeErr)
 	}
-	if len(data) > maxReadFileBytes {
-		return errorResult(fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, path, maxReadFileBytes))
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, path, limit)
+	}
+	return data, nil
+}
+
+func (r *Registry) readFile(path string, offset, limit int) Result {
+	data, err := r.readCappedFile(path, maxReadFileBytes)
+	if err != nil {
+		return errorResult(err)
 	}
 	if bytes.IndexByte(data, 0) >= 0 || !utf8.Valid(data) {
 		return errorResult(fmt.Errorf("%w: %s", ErrBinaryFile, path))

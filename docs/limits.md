@@ -87,6 +87,7 @@ when that flag is set and against total usage, and they add no separate cap.
 | Session line | 4 MiB | Includes the JSON envelope and escaping. |
 | `model_response` payload | 1 MiB total canonical content | The executed response is fully recorded so resume can replay it. |
 | Tool result output/error | 64 KiB per field | Tool-specific caps below are usually smaller. |
+| Tool result image | 512 KiB decoded (~683 KiB base64) per entry, one entry per call | Carried in the additive `tool_result.images` member; the session line cap bounds the envelope. |
 | Model response usage | totals plus subsets | Input/output totals; cached, cache-write, and reasoning subsets; `reported` distinguishes an absent usage object from a present one. Subsets never change `Total()`. |
 | `Config.RequireUsage` | off | When set, a completed buffered response without provider usage is a `protocol_error` before any tool executes. Streaming already requires usage. Not inherited on resume/fork. |
 | Cost estimate | catalog micro-USD | Observational only. `$0.15` per 1M tokens is stored as `150000` micro-USD; per-response and run totals use integer arithmetic. Unpriced responses make the completeness flags false. |
@@ -132,6 +133,16 @@ Other event payloads:
 | `read_file` | Max file size | 2 MiB | Larger files are `too_large`. |
 | `read_file` | Result cap | 60 KiB | One contiguous line window; never head+tail. The header names the delivered range and a non-final page ends with `continue with offset=N`. A byte-capped page keeps whole lines; a single over-budget line gets a prefix marker with no continuation. |
 | `read_file` | Binary/non-UTF-8 | rejected | `binary_file`. |
+| `read_image` | Accepted source formats | PNG, JPEG, GIF | Detected from the bytes, never the extension. GIF yields its first frame and is re-encoded as JPEG. SVG, WebP, AVIF, HEIC, BMP, TIFF, and PDF are `invalid_image`. |
+| `read_image` | Max source size | 2 MiB | Same as `read_file`; larger is `too_large`. |
+| `read_image` | Max source pixels | 16,000,000 | Checked from the header before a full decode; this is the decompression-bomb guard. |
+| `read_image` | Delivered longest edge | 2,048 px | Downscale only; never upscale. |
+| `read_image` | Delivered pixels | 2,000,000 | Both delivered limits apply; the smaller scale wins. |
+| `read_image` | Delivered bytes | 512 KiB | JPEG quality ladder 85/75/65/55, then 0.75 size steps to a 256 px floor, then `too_large`. A PNG or JPEG already inside every limit passes through byte for byte. |
+| `read_image` | Images per call | 1 | No array argument. |
+| `read_image` | Token estimate | `ceil(w/28) * ceil(h/28)` | A delivered 2048x976 image estimates to 2,590 tokens; the provider bills about 950. |
+| `read_image` | Determinism | required | The same source produces the same bytes and SHA-256, recorded in `details`. |
+| `read_image` | Text channel | caption only | The image travels in `tool_result.images`, never in `output`; `output` is one line naming the source and delivered dimensions. |
 | `edit_file` | Max resulting file size | 2 MiB | Existing and new files; larger is `too_large`. |
 | `edit_file` | New file mode | 0644 | Existing mode is preserved, including setuid/setgid/sticky bits. |
 | `edit_file` | Match rule | unique unless `replace_all` | Zero matches is `not_found`; multiple is `ambiguous`. |
@@ -172,13 +183,13 @@ Other event payloads:
 | `run_command` | Environment | allowlist | `PATH`, `LANG`, `LC_ALL`, `TERM`, inherited `HOME`, harness `TMPDIR`; names ending in `_TOKEN`, `_SECRET`, `_KEY`, or `_PASSWORD` are denied. |
 | File tools | Per-call timeout | no separate cap | Bounded by any explicit run deadline and the file/result caps. |
 | `search` | Walk time | no separate cap | Bounded by any explicit run deadline and the result cap. |
-| Toolset version | `toolset-v2` for new sessions | `toolset-v0` and `toolset-v1` declarations are frozen for replay; `toolset-v2` adds `delegate` to v1. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, and an older session cannot delegate. |
+| Toolset version | `toolset-v3` for new sessions | `toolset-v0`, `toolset-v1`, and `toolset-v2` declarations are frozen for replay; `toolset-v3` adds `read_image` to v2. Per-role grants are recorded session data, not new versions. An unknown recorded version is a replay error, an older session cannot delegate, and a `toolset-v2` session cannot be granted `read_image`. |
 | Prompt version | `prompt-v3` for new sessions | `prompt-v0`, `prompt-v1`, and `prompt-v2` stay frozen for replay. The resolved `system_prompt` is recorded and capped at 32 KiB. Truncation is reported as `agent.State.PromptCapped` and `aharness.State.PromptCapped`; hosts must not match the marker, whose format is internal. |
 | Prompt identity | `aharness` default | 64 bytes of valid UTF-8, trimmed, with no control characters. Used in the parent and child identity lines; not recorded, so it is re-supplied like `UserAgent`. |
 | Prompt tag | unset | At most 64 bytes of printable ASCII matching `[A-Za-z0-9._:/-]+`; empty means unset. Recorded as optional `session_start.prompt_tag` beside `prompt_version`; attribution only, never a replay key, and it never changes rendering or caps. |
 | Prompt append | unset | Host text composed into the prompt and recorded as optional `session_start.appended_prompt` under the same 32 KiB prompt cap. Empty on logs written before the field and on delegated children. Provenance only, never a replay key, carried into every fresh child's prompt; after truncation it is not necessarily a suffix of `system_prompt`. |
 | `delegate` | Tasks per call | 4 | The schema sets `maxItems: 4`; a larger array is `invalid_args`. Results always appear in array order. |
-| `delegate` | Concurrent children per call | 4 | A call runs concurrently only when every task's effective grant is a subset of `read_file`, `search`, `web_search`, and `web_fetch`; any write-capable task forces the whole call sequential. The cap matches `maxItems`. |
+| `delegate` | Concurrent children per call | 4 | A call runs concurrently only when every task's effective grant is a subset of `read_file`, `read_image`, `search`, `web_search`, and `web_fetch`; any write-capable task forces the whole call sequential. The cap matches `maxItems`. |
 | `delegate` | Recorded execution mode | `concurrent` or `sequential` in `details` | `execution_reason` explains a sequential choice. A call that cannot reserve every fresh child under `DelegationConfig.MaxSubagents` runs sequentially so the rejected spawn is deterministic. |
 | `delegate` | `task` field | 16 KiB | A longer self-contained prompt is `invalid_args`; it is a delegation prompt, not a document. |
 | `delegate` | Child report | 16 KiB | Head-capped with `[truncated N bytes]`, marked once when instruction-shaped, and never rewritten. An empty report becomes `(no report)`. |

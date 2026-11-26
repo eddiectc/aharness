@@ -19,6 +19,7 @@ type ToolName string
 
 const (
 	ToolReadFile   ToolName = "read_file"
+	ToolReadImage  ToolName = "read_image"
 	ToolEditFile   ToolName = "edit_file"
 	ToolSearch     ToolName = "search"
 	ToolRunCommand ToolName = "run_command"
@@ -119,8 +120,9 @@ type ToolRequest struct {
 	Session string
 	Agent   string
 	// Path is the absolute, lexically cleaned target of a built-in file tool:
-	// read_file, edit_file, or search. It is resolved against the workspace and
-	// search defaults to the workspace root when its path is omitted. Path is
+	// read_file, read_image, edit_file, or search. It is resolved against the
+	// workspace and search defaults to the workspace root when its path is
+	// omitted. Path is
 	// empty for every other tool and when the arguments do not carry a usable
 	// path. It is not symlink-resolved, and run_command has no Path because its
 	// writes are not constrained by its cwd. The tools still perform their own
