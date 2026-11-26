@@ -6,7 +6,7 @@ All notable changes to this module are recorded here. The format follows
 minor version may contain a breaking change to the public surface; those
 changes are called out under **Changed** and **Removed**.
 
-## [Unreleased]
+## [v0.7.0] - 2026-11-26
 
 This is a minor release that adds one builtin tool, `read_image`, so a vision
 model can read an image from the workspace. It is additive at the session
@@ -48,6 +48,21 @@ when empty. It does change recorded contracts, so read the notes.
   instead of counting its bytes, and elides an old image together with its text
   stub, leaving an `[image <media> <w>x<h> elided]` note.
 - The `delegate` concurrent-fan-out set now includes `read_image`.
+
+**Migration:** no exported identifier was renamed or removed, so existing code
+compiles unchanged. Two recorded values moved:
+
+- New sessions record `toolset-v3` and are offered `read_image` by default. A
+  host that expects a fixed tool list, or that enumerates tools for its own UI,
+  must treat `read_image` as a new builtin and may remove it with
+  `ToolsConfig.Disable` (`ToolReadImage`).
+- A session recorded under `toolset-v0`–`v2` replays with its frozen
+  declarations and cannot be granted `read_image`; resuming one with that grant
+  is a configuration error. Continue those sessions as before, or fork them to
+  adopt v3.
+- `ModelSpec.ImageInput` is a new `*bool`. Leaving it nil keeps the previous
+  behavior: `read_image` runs and the provider decides. Set it to `false` only
+  to fail fast on a model known to be text-only.
 
 ## [v0.6.0] - 2026-11-25
 
@@ -575,7 +590,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
-[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.7.0...HEAD
+[v0.7.0]: https://github.com/eddiectc/aharness/compare/v0.6.0...v0.7.0
 [v0.6.0]: https://github.com/eddiectc/aharness/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/eddiectc/aharness/compare/v0.4.2...v0.5.0
 [v0.4.2]: https://github.com/eddiectc/aharness/compare/v0.4.1...v0.4.2
