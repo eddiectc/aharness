@@ -65,6 +65,24 @@ func (r *Registry) SetSpawning(sp Spawning) {
 	r.opts.Spawning = sp
 }
 
+// SetImageInput overrides the model image-input capability for this run. Nil
+// means unknown, so read_image runs and the provider decides; an explicit false
+// makes it return unavailable without reading the file. A host that switches
+// models mid-session calls this with the new model's capability, because the
+// registry is built per run and the construction-time value would otherwise
+// stay in force.
+func (r *Registry) SetImageInput(capability *bool) {
+	r.opts.ImageInput = cloneOptionalBool(capability)
+}
+
+func cloneOptionalBool(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	cloned := *v
+	return &cloned
+}
+
 // SetGrant narrows the registry to a tool-name allowlist. A nil grant keeps
 // every tool of the current toolset; a non-nil empty grant allows no tools. The
 // grant is enforced twice: Schemas returns only granted declarations, and

@@ -202,6 +202,21 @@ Image input:
 - The image bytes are base64 in a `data:` URL, so one image is about 1.37 times
   its declared size on the wire. The 512 KiB delivered cap bounds that.
 
+Image capability follows the model in use, not the construction call:
+
+- `Config.Model.Spec.ImageInput` sets the gate for a session's first run.
+  `RunOptions.Model` (facade) or `engine.RunSpec.ImageInput` (component) replaces
+  it for that run, because the registry is built per run. Switching to a model
+  whose capability is unknown clears the gate rather than keeping a stale
+  answer, so the provider decides.
+- A delegated child resolves its own model. `agent.ModelResolution.ImageInput`
+  carries that model's capability, and a child on a different model follows it;
+  a child that keeps the parent's model keeps the parent's gate.
+- Neither path records the capability in the log. It is a property of the model
+  a host selects at run time, like the base URL and limits that `run_start`
+  already records per run, and a session resumed with no explicit model leaves
+  the gate unknown.
+
 Normalization rules:
 
 - The canonical system prompt is the first message. Adapters place it in the
@@ -537,6 +552,7 @@ name, not assume the facade's shape:
 | Harness/build version | `Config` uses `Version()` internally | `engine.Spec.Version` ↔ `agent.Config.HarnessVersion` |
 | Per-run wall clock | `Config.RunTimeout` / `RunOptions.Timeout` | `engine.Spec.RunTimeout` / `RunSpec.RunTimeout` ↔ `agent.Config.SessionTimeout` |
 | Thinking effort | `Config.ThinkingEffort` (`*string`, tri-state) | `engine.Spec.ThinkingEffort` (`*string`) ↔ `agent.Config.ThinkingEffort` (`string`, empty means default) |
+| Image capability | `ModelSpec.ImageInput` (`*bool`, nil means unknown); `RunOptions.Model` re-resolves it per run | `engine.RunSpec.ImageInput` (`*bool`, applied when `Model` is set) ↔ `tools.Options.ImageInput` / `tools.Registry.SetImageInput` ↔ `agent.ModelResolution.ImageInput` for a child |
 | Host identity | `Config.UserAgent` | `engine.Spec.UserAgent` (required); `tools.Options.UserAgent` is filled from it |
 | Prompt identity | `Config.Identity` | `engine.Spec.Identity` ↔ `agent.Config.Identity`; defaults to `aharness`, 64 bytes with no control characters, not recorded |
 | Prompt tag | `Config.PromptTag` | `engine.Spec.PromptTag` ↔ `agent.Config.PromptTag` ↔ recorded `session_start.prompt_tag`; optional, at most 64 printable ASCII bytes matching `[A-Za-z0-9._:/-]+`, never a replay key |

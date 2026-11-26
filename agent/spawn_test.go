@@ -570,6 +570,44 @@ func TestSpawnerDisplayOrderAndThrottle(t *testing.T) {
 	}
 }
 
+// TestResolveAgentCarriesImageInput pins the child-model capability plumbing.
+// A child on a different model must report that model's capability so its
+// registry gate follows its own model, not the parent's.
+func TestResolveAgentCarriesImageInput(t *testing.T) {
+	no := false
+	yes := true
+	tests := []struct {
+		name     string
+		resolved *bool
+	}{
+		{name: "known text-only", resolved: &no},
+		{name: "known image", resolved: &yes},
+		{name: "unknown", resolved: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spawner := &Spawner{opts: SpawnerOptions{
+				Config: Config{Model: "parent-model"},
+				Resolve: func(string, string) (ModelResolution, error) {
+					return ModelResolution{Dialect: "custom", ImageInput: tc.resolved}, nil
+				},
+			}}
+			_, _, resolution, err := spawner.resolveAgent(AgentDefinition{Name: "helper", Model: "child-model"})
+			if err != nil {
+				t.Fatalf("resolveAgent: %v", err)
+			}
+			switch {
+			case tc.resolved == nil && resolution.ImageInput != nil:
+				t.Errorf("ImageInput = %v, want nil", *resolution.ImageInput)
+			case tc.resolved != nil && resolution.ImageInput == nil:
+				t.Errorf("ImageInput = nil, want %v", *tc.resolved)
+			case tc.resolved != nil && *resolution.ImageInput != *tc.resolved:
+				t.Errorf("ImageInput = %v, want %v", *resolution.ImageInput, *tc.resolved)
+			}
+		})
+	}
+}
+
 func TestSpawnerModelResolution(t *testing.T) {
 	stateDir := t.TempDir()
 	writeAgentFile(t, stateDir, "switcher.md", `name: switcher

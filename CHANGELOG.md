@@ -8,6 +8,19 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Fixed
+
+- The `read_image` capability gate now follows a model switch. The gate was read
+  once at `New`, so a host that switched models mid-session (a picker changing
+  `RunOptions.Model`) kept the old answer until a new session. Because the
+  registry is built per run, the capability now travels with the run:
+  `RunOptions.Model` re-resolves it into `engine.RunSpec.ImageInput`, which the
+  engine applies to that run's registry. Switching to a model whose capability
+  is unknown clears the gate instead of keeping a stale answer.
+- A delegated child on a different model now follows that model's capability
+  through `ModelResolution.ImageInput` instead of inheriting the parent's
+  construction-time value.
+
 ## [v0.7.1] - 2026-11-26
 
 ### Fixed

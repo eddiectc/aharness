@@ -25,6 +25,9 @@ type ModelResolution struct {
 	BaseURL string
 	Limits  Limits
 	Pricing model.Pricing
+	// ImageInput is the resolved model's image-input capability. Nil means
+	// unknown, and the child keeps the capability inherited from the parent.
+	ImageInput *bool
 }
 
 // ModelResolver resolves one agent model and optional effort through the model
@@ -597,7 +600,7 @@ func (s *Spawner) spawnOne(ctx context.Context, call tools.Call, index int, spec
 		emitted = true
 		return report
 	}
-	report = s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task), s.childCompleter(def, resolution, sessionID))
+	report = s.runChildSession(ctx, childCfg, adapter, sessionID, childRunOptions(spec.Task), s.childCompleter(def, resolution, sessionID), resolution.ImageInput)
 	adapter.finished(report)
 	emitted = true
 	return report
@@ -705,7 +708,7 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 		TaskSet:        true,
 		TaskFrom:       taskFromDelegate,
 		ResumedFromSeq: state.LastEventSeq,
-	}, s.childCompleter(completerDef, resolution, spec.Session))
+	}, s.childCompleter(completerDef, resolution, spec.Session), resolution.ImageInput)
 	adapter.finished(report)
 	emitted = true
 	return report
@@ -713,7 +716,7 @@ func (s *Spawner) continueChild(ctx context.Context, call tools.Call, index int,
 
 // runChildSession creates the child log, runs the child, and removes its work
 // directory.
-func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer) tools.SubagentReport {
+func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer, imageInput *bool) tools.SubagentReport {
 	store, err := session.Create(cfg.StateDir, sessionID)
 	if err != nil {
 		return failedReport(tools.SubagentSpec{Agent: cfg.Agent, Task: opts.Task},
@@ -725,13 +728,13 @@ func (s *Spawner) runChildSession(ctx context.Context, cfg Config, adapter *chil
 		return failedReport(tools.SubagentSpec{Agent: cfg.Agent, Task: opts.Task},
 			tools.CodeInternal, tools.SubagentFailed, fmt.Sprintf("record child session start: %v", err))
 	}
-	return s.runChildOnStore(ctx, cfg, store, adapter, sessionID, opts, completer)
+	return s.runChildOnStore(ctx, cfg, store, adapter, sessionID, opts, completer, imageInput)
 }
 
 // runChildOnStore runs one child over an open store, closes the store, and
 // maps the run result to a report. The store is synced and closed before the
 // report is returned, so a failed child stays resumable and inspectable.
-func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *session.Store, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer) tools.SubagentReport {
+func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *session.Store, adapter *childDisplay, sessionID string, opts RunOptions, completer model.Completer, imageInput *bool) tools.SubagentReport {
 	workDir, tmpDir := s.workPaths(sessionID)
 	if err := prepareChildWorkDir(workDir, tmpDir); err != nil {
 		_ = store.Close()
@@ -747,6 +750,11 @@ func (s *Spawner) runChildOnStore(ctx context.Context, cfg Config, store *sessio
 			tools.CodeInternal, tools.SubagentFailed, fmt.Sprintf("prepare child tool registry: %v", err))
 	}
 	registry.SetGrant(cfg.Tools)
+	// A child on a different model follows that model's capability; nil keeps
+	// the value inherited from the parent's options.
+	if imageInput != nil {
+		registry.SetImageInput(imageInput)
+	}
 	cfg.Display = adapter.display
 	cfg.SessionID = sessionID
 	runner := New(cfg, completer, registry, store)

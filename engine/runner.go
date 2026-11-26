@@ -40,6 +40,13 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 		rootGrant = effectiveGrant
 	}
 	cfg.Tools = cloneGrant(effectiveGrant)
+	// An explicit per-run model replaces the construction-time image
+	// capability. Children inherit this value so a child that keeps the
+	// parent's model keeps the parent's gate.
+	rootImageInput := h.spec.ToolOptions.ImageInput
+	if run.Model != "" {
+		rootImageInput = run.ImageInput
+	}
 	catalog, err := h.agentCatalog()
 	if err != nil {
 		return nil, nil, err
@@ -74,6 +81,7 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 				opts.WorkDir = workDir
 				opts.TmpDir = tmpDir
 				opts.Spawning = nil
+				opts.ImageInput = rootImageInput
 				return opts
 			},
 			NewRegistry:   h.spec.NewRegistry,
@@ -111,6 +119,7 @@ func (h *Host) BuildRunnerWithSpawner(run RunSpec, display func(agent.DisplayEve
 		return nil, nil, err
 	}
 	registry.SetGrant(cloneGrant(rootGrant))
+	registry.SetImageInput(rootImageInput)
 	registry.SeedTodo(agent.RestoreTodo(h.store.Events()))
 	completer := run.NewCompleter
 	if completer == nil {
