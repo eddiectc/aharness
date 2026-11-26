@@ -285,9 +285,12 @@ func Schemas() []model.ToolSchema {
 }
 
 // Names returns the tool names of the current toolset in declaration order.
+// It is derived from Schemas so the two cannot disagree when the current
+// toolset version changes.
 func Names() []string {
-	names := make([]string, len(v3Schemas))
-	for i, schema := range v2Schemas {
+	schemas := Schemas()
+	names := make([]string, len(schemas))
+	for i, schema := range schemas {
 		names[i] = schema.Name
 	}
 	return names

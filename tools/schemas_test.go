@@ -177,6 +177,36 @@ func TestEveryCurrentToolDeclaresAnIntent(t *testing.T) {
 	}
 }
 
+func TestNamesMatchesSchemas(t *testing.T) {
+	schemas := Schemas()
+	names := Names()
+
+	if len(names) != len(schemas) {
+		t.Fatalf("Names() length = %d, Schemas() length = %d", len(names), len(schemas))
+	}
+	for i, schema := range schemas {
+		if names[i] != schema.Name {
+			t.Errorf("Names()[%d] = %q, Schemas()[%d].Name = %q", i, names[i], i, schema.Name)
+		}
+	}
+	for i, name := range names {
+		if name == "" {
+			t.Errorf("Names()[%d] is empty; a version bump left a stale range", i)
+		}
+	}
+	// The current set must name every tool it declares, read_image included.
+	if !slices.Contains(names, NameReadImage) {
+		t.Errorf("Names() omits %q: %v", NameReadImage, names)
+	}
+	if !slices.Contains(names, NameDelegate) {
+		t.Errorf("Names() omits %q: %v", NameDelegate, names)
+	}
+	// Names is the name form of Schemas, not of a frozen set.
+	if got, want := names, NamesWithout(); !slices.Equal(got, want) {
+		t.Errorf("Names() = %v, NamesWithout() = %v", got, want)
+	}
+}
+
 func TestNamesForVersionAndExclusions(t *testing.T) {
 	for _, version := range []string{"toolset-v0", "toolset-v1", Version} {
 		got, err := NamesFor(version)
