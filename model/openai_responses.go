@@ -84,8 +84,9 @@ type responsesReasoning struct {
 }
 
 type responsesContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type responsesInputMessage struct {
@@ -105,6 +106,25 @@ type responsesFunctionCallOutputInput struct {
 	Type   string `json:"type"`
 	CallID string `json:"call_id"`
 	Output string `json:"output"`
+}
+
+// responsesParts builds a Responses content array: the text part first (omitted
+// when empty) followed by one input_image part per image.
+func responsesParts(textType, text string, images []ImagePart) []responsesContentPart {
+	parts := make([]responsesContentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, responsesContentPart{Type: textType, Text: text})
+	}
+	for _, img := range images {
+		url, err := imageDataURL(img)
+		if err != nil {
+			// A malformed part is a caller bug; drop the image rather than
+			// emitting a wire value the provider will reject wholesale.
+			continue
+		}
+		parts = append(parts, responsesContentPart{Type: "input_image", ImageURL: url})
+	}
+	return parts
 }
 
 type responsesTool struct {
@@ -281,11 +301,8 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 			}
 		case RoleUser:
 			payload.Input = append(payload.Input, responsesInputMessage{
-				Role: "user",
-				Content: []responsesContentPart{{
-					Type: "input_text",
-					Text: msg.Content,
-				}},
+				Role:    "user",
+				Content: responsesParts("input_text", msg.Content, msg.Images),
 			})
 		case RoleAssistant:
 			if msg.Content != "" || len(msg.ToolCalls) > 0 {
@@ -313,11 +330,22 @@ func (a *OpenAIResponses) payload(req Request) responsesRequest {
 				})
 			}
 		case RoleTool:
+			// The function output stays a plain string and the image follows in a
+			// user message, matching the Chat adapter. OpenAI documents an array
+			// of image parts for a function output, but that shape cannot be
+			// verified against a live Responses provider here, so the harness
+			// sends the form every server accepts.
 			payload.Input = append(payload.Input, responsesFunctionCallOutputInput{
 				Type:   "function_call_output",
 				CallID: msg.ToolCallID,
 				Output: msg.Content,
 			})
+			if len(msg.Images) > 0 {
+				payload.Input = append(payload.Input, responsesInputMessage{
+					Role:    "user",
+					Content: responsesParts("input_text", toolImageCaption(msg), msg.Images),
+				})
+			}
 		}
 	}
 	for _, tool := range req.Tools {

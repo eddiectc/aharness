@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -22,6 +23,9 @@ const (
 	tokensPerMessage  = 8
 	tokensPerTool     = 16
 	bytesPerTokenBits = 2 // ceil(bytes / 4)
+	// maxRecordedImageEdge bounds a recorded image dimension. The read_image
+	// tool delivers at most 2048 px, so anything larger is a corrupt log.
+	maxRecordedImageEdge = 8192
 )
 
 // Project rebuilds the canonical model input from the event log. It is a pure
@@ -144,16 +148,21 @@ func project(events []session.Event, limits Limits, available []CustomTool) (Pro
 				continue
 			}
 			content := formatToolResult(data)
+			images, err := projectImages(data)
+			if err != nil {
+				return Projection{}, fmt.Errorf("project: tool result %q: %w", callID, err)
+			}
 			call.paired = true
 			projected = append(projected, projectedMessage{
 				kind:          projectionTool,
 				assistantTurn: current.turn,
-				originalBytes: len(content),
+				originalBytes: len(content) + imageBytes(images),
 				msg: model.Message{
 					Role:       model.RoleTool,
 					Name:       cleanText(call.name),
 					ToolCallID: callID,
 					Content:    content,
+					Images:     images,
 				},
 			})
 		}
@@ -195,10 +204,11 @@ func project(events []session.Event, limits Limits, available []CustomTool) (Pro
 				continue
 			}
 			stub := elidedToolResult(messages[i].Name, meta[i].originalBytes)
-			if len(stub) >= len(messages[i].Content) {
+			if len(stub) >= len(messages[i].Content) && len(messages[i].Images) == 0 {
 				continue
 			}
-			messages[i].Content = stub
+			messages[i].Content = stubWithElidedImages(stub, messages[i].Images)
+			messages[i].Images = nil
 			elided++
 			estimated = estimateTokens(messages, len(schemas))
 		}
@@ -229,8 +239,37 @@ func estimateTokens(messages []model.Message, toolCount int) int {
 			n += len(call.ID) + len(call.Name) + len(call.Arguments)
 		}
 		tokens += ((n + (1 << bytesPerTokenBits) - 1) >> bytesPerTokenBits) + tokensPerMessage
+		for _, img := range msg.Images {
+			tokens += imageTokens(img.Width, img.Height)
+		}
 	}
 	return tokens + toolCount*tokensPerTool
+}
+
+// imageTokens estimates the input cost of one image from its dimensions. The
+// divisor is the provider's visual patch size: the opencode-go gateway bills a
+// 2048x976 image at roughly 950 tokens and saturates near 1000 past 2 MP, which
+// ceil(w/28)*ceil(h/28) tracks closely enough for a conservative budget.
+func imageTokens(width, height int) int {
+	if width <= 0 || height <= 0 {
+		return 1
+	}
+	return max(1, ((width+27)/28)*((height+27)/28))
+}
+
+// stubWithElidedImages appends an image marker to the elision stub so a later
+// turn knows a picture was there, even though the bytes are gone.
+func stubWithElidedImages(stub string, images []model.ImagePart) string {
+	if len(images) == 0 {
+		return stub
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimSuffix(stub, "]"))
+	for _, img := range images {
+		fmt.Fprintf(&b, "; image %s %dx%d elided", img.MediaType, img.Width, img.Height)
+	}
+	b.WriteString("]")
+	return b.String()
 }
 
 func elidedToolResult(name string, originalBytes int) string {
@@ -238,6 +277,55 @@ func elidedToolResult(name string, originalBytes int) string {
 		name = "tool"
 	}
 	return fmt.Sprintf("[elided tool result %q: %d bytes]", name, originalBytes)
+}
+
+// projectImages decodes recorded tool images into canonical parts. A malformed
+// or unrepresentable image is a corrupt log, not a silent text fallback: the
+// model would otherwise answer about a picture it never saw.
+func projectImages(data toolResultData) ([]model.ImagePart, error) {
+	if len(data.Images) == 0 {
+		return nil, nil
+	}
+	out := make([]model.ImagePart, 0, len(data.Images))
+	for _, img := range data.Images {
+		if img.MediaType != model.MediaTypePNG && img.MediaType != model.MediaTypeJPEG {
+			return nil, fmt.Errorf("unsupported media type %q", img.MediaType)
+		}
+		if img.Width <= 0 || img.Height <= 0 {
+			return nil, fmt.Errorf("invalid dimensions %dx%d", img.Width, img.Height)
+		}
+		// No delivered image approaches this: the tool caps at 2048 px. A larger
+		// value is a corrupt or hand-edited log, and letting it through would
+		// let one payload dominate the token estimate.
+		if img.Width > maxRecordedImageEdge || img.Height > maxRecordedImageEdge {
+			return nil, fmt.Errorf("dimensions %dx%d exceed %d px", img.Width, img.Height, maxRecordedImageEdge)
+		}
+		raw, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			return nil, fmt.Errorf("decode image data: %w", err)
+		}
+		if len(raw) == 0 {
+			return nil, fmt.Errorf("image data is empty")
+		}
+		if img.Bytes != 0 && img.Bytes != len(raw) {
+			return nil, fmt.Errorf("decoded %d bytes, recorded %d", len(raw), img.Bytes)
+		}
+		out = append(out, model.ImagePart{
+			MediaType: img.MediaType,
+			Data:      raw,
+			Width:     img.Width,
+			Height:    img.Height,
+		})
+	}
+	return out, nil
+}
+
+func imageBytes(images []model.ImagePart) int {
+	n := 0
+	for _, img := range images {
+		n += len(img.Data)
+	}
+	return n
 }
 
 func formatToolResult(data toolResultData) string {

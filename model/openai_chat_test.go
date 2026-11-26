@@ -1,13 +1,195 @@
 package model
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// tinyPNG is a 1x1 PNG; the wire tests only care that the bytes survive base64.
+var tinyPNG = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82")
+
+// captureChatPayload returns the decoded raw request body captured by a fake
+// provider that answers with a minimal completion.
+func captureChatPayload(t *testing.T, req Request) []byte {
+	t.Helper()
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := make([]byte, r.ContentLength)
+		if _, err := r.Body.Read(body); err != nil && err.Error() != "EOF" {
+			t.Errorf("read request body: %v", err)
+		}
+		captured = body
+		serveJSON(t, w, http.StatusOK, `{
+			"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+			"usage": {"prompt_tokens": 1, "completion_tokens": 1}
+		}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	adapter := NewOpenAIChat(srv.URL, "token", "session", "aharness/test", 0)
+	if _, err := adapter.Complete(t.Context(), req); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	return captured
+}
+
+func TestOpenAIChatToolImageWire(t *testing.T) {
+	wire := captureChatPayload(t, Request{
+		Model: "deepseek-v4.1-flash",
+		Messages: []Message{
+			{Role: RoleUser, Content: "look"},
+			{Role: RoleAssistant, Content: "", ToolCalls: []ToolCall{{
+				ID: "call_1", Name: "read_image", Arguments: json.RawMessage(`{"path":"a.png"}`),
+			}}},
+			{
+				Role:       RoleTool,
+				ToolCallID: "call_1",
+				Name:       "read_image",
+				Content:    "a.png: image/png 1x1 (0 KiB, passthrough)",
+				Images: []ImagePart{{
+					MediaType: MediaTypePNG, Data: tinyPNG, Width: 1, Height: 1,
+				}},
+			},
+		},
+	})
+
+	var got struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := jsonv2.Unmarshal(wire, &got); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(got.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4 (tool image follows in a user message)", len(got.Messages))
+	}
+	// A text-only message must still marshal content as a JSON string.
+	if s := string(got.Messages[0].Content); s != `"look"` {
+		t.Errorf("user content = %s, want a JSON string", s)
+	}
+	// The assistant tool-call message keeps the empty string member.
+	if s := string(got.Messages[1].Content); s != `""` {
+		t.Errorf("assistant content = %s, want an empty string", s)
+	}
+	// The tool message itself stays a plain string so gateways that reject
+	// image parts in a tool message still accept the request.
+	if s := string(got.Messages[2].Content); !strings.HasPrefix(s, `"a.png:`) {
+		t.Errorf("tool content = %s, want the caption as a JSON string", s)
+	}
+	if got.Messages[3].Role != "user" {
+		t.Errorf("messages[3].role = %q, want user", got.Messages[3].Role)
+	}
+
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := jsonv2.Unmarshal([]byte(got.Messages[3].Content), &parts); err != nil {
+		t.Fatalf("user content is not a parts array: %s", got.Messages[3].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("user parts = %d, want text then image", len(parts))
+	}
+	if parts[0].Type != "text" || !strings.Contains(parts[0].Text, "untrusted data") {
+		t.Errorf("parts[0] = %+v, want the untrusted-data caption", parts[0])
+	}
+	if parts[1].Type != "image_url" {
+		t.Errorf("parts[1].type = %q, want image_url", parts[1].Type)
+	}
+	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(tinyPNG)
+	if parts[1].ImageURL.URL != wantURL {
+		t.Errorf("image url does not round-trip the bytes")
+	}
+}
+
+func TestOpenAIChatRejectsUnsupportedImageType(t *testing.T) {
+	adapter := NewOpenAIChat("http://127.0.0.1:1", "token", "session", "aharness/test", 0)
+	_, err := adapter.Complete(t.Context(), Request{
+		Model: "m",
+		Messages: []Message{{
+			Role:    RoleTool,
+			Content: "x",
+			Images:  []ImagePart{{MediaType: "image/webp", Data: []byte("x"), Width: 1, Height: 1}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("Complete() accepted an unsupported image media type")
+	}
+}
+
+func TestOpenAIResponsesToolImageWire(t *testing.T) {
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := new(bytes.Buffer)
+		if _, err := buf.ReadFrom(r.Body); err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		captured = buf.Bytes()
+		serveJSON(t, w, http.StatusOK, `{
+			"status": "completed",
+			"output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
+			"usage": {"input_tokens": 1, "output_tokens": 1}
+		}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	adapter := NewOpenAIResponses(srv.URL, "token", "session", "aharness/test", 0)
+	if _, err := adapter.Complete(t.Context(), Request{
+		Model: "m",
+		Messages: []Message{{
+			Role:       RoleTool,
+			ToolCallID: "call_1",
+			Content:    "a.png: image/png 1x1",
+			Images:     []ImagePart{{MediaType: MediaTypePNG, Data: tinyPNG, Width: 1, Height: 1}},
+		}},
+	}); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	var got struct {
+		Input []struct {
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Output  string `json:"output"`
+			Content []struct {
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				ImageURL string `json:"image_url"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := jsonv2.Unmarshal(captured, &got); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(got.Input) != 2 {
+		t.Fatalf("input = %d entries, want function output then user image", len(got.Input))
+	}
+	if got.Input[0].Type != "function_call_output" || !strings.HasPrefix(got.Input[0].Output, "a.png:") {
+		t.Fatalf("input[0] = %+v, want a string function_call_output", got.Input[0])
+	}
+	if got.Input[1].Role != "user" {
+		t.Fatalf("input[1].role = %q, want user", got.Input[1].Role)
+	}
+	parts := got.Input[1].Content
+	if len(parts) != 2 || parts[0].Type != "input_text" || parts[1].Type != "input_image" {
+		t.Fatalf("content parts = %+v, want input_text then input_image", parts)
+	}
+	if !strings.HasPrefix(parts[1].ImageURL, "data:image/png;base64,") {
+		t.Errorf("image_url = %q, want a PNG data URL", parts[1].ImageURL)
+	}
+}
 
 type chatRequestWire struct {
 	Model    string            `json:"model"`

@@ -38,6 +38,11 @@ func TestSchemasMatchArgumentStructs(t *testing.T) {
 			sample: `{"intent":"read a","path":"a.txt","offset":2,"limit":10}`,
 		},
 		{
+			name:   "read_image",
+			args:   readImageArgs{},
+			sample: `{"intent":"look at the screenshot","path":"shot.png"}`,
+		},
+		{
 			name:   "edit_file",
 			args:   editFileArgs{},
 			sample: `{"intent":"edit a","path":"a.txt","old_string":"a","new_string":"b","replace_all":true}`,
@@ -124,6 +129,7 @@ func TestSchemaRequiredFields(t *testing.T) {
 		"web_fetch":   {"intent", "url"},
 		"todo":        {"intent"},
 		"delegate":    {"intent", "tasks"},
+		"read_image":  {"intent", "path"},
 	}
 	for _, s := range Schemas() {
 		var doc schemaDoc
@@ -214,8 +220,8 @@ func TestNamesForVersionAndExclusions(t *testing.T) {
 }
 
 func TestSchemasForToolsetVersions(t *testing.T) {
-	if Version != "toolset-v2" {
-		t.Fatalf("Version = %q, want toolset-v2", Version)
+	if Version != "toolset-v3" {
+		t.Fatalf("Version = %q, want toolset-v3", Version)
 	}
 	if !SupportsVersion("toolset-v0") || !SupportsVersion("toolset-v1") || !SupportsVersion("toolset-v2") {
 		t.Errorf("SupportsVersion rejects a replayable version")
@@ -239,11 +245,21 @@ func TestSchemasForToolsetVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemasFor(toolset-v2): %v", err)
 	}
-	if got := Schemas(); !reflect.DeepEqual(got, v2) {
-		t.Errorf("Schemas() does not return the v2 set")
+	v3, err := SchemasFor(Version)
+	if err != nil {
+		t.Fatalf("SchemasFor(%s): %v", Version, err)
+	}
+	if got := Schemas(); !reflect.DeepEqual(got, v3) {
+		t.Errorf("Schemas() does not return the current set")
 	}
 	if got, want := names(v2), names(v1)+",delegate"; got != want {
 		t.Errorf("toolset-v2 names = %q, want %q", got, want)
+	}
+	if got, want := names(v3), names(v2)+",read_image"; got != want {
+		t.Errorf("toolset-v3 names = %q, want %q", got, want)
+	}
+	if _, ok := schemaByName(v2, "read_image"); ok {
+		t.Errorf("toolset-v2 declares read_image; the frozen set must not grow")
 	}
 	if got, want := names(v0), "read_file,edit_file,search,run_command"; got != want {
 		t.Errorf("toolset-v0 names = %q, want the frozen %q", got, want)
@@ -341,6 +357,15 @@ func findSchema(t *testing.T, schemas []model.ToolSchema, name string) model.Too
 	}
 	t.Fatalf("schema %q is missing", name)
 	return model.ToolSchema{}
+}
+
+func schemaByName(schemas []model.ToolSchema, name string) (model.ToolSchema, bool) {
+	for _, schema := range schemas {
+		if schema.Name == name {
+			return schema, true
+		}
+	}
+	return model.ToolSchema{}, false
 }
 
 func names(schemas []model.ToolSchema) string {

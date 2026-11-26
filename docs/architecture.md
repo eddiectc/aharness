@@ -154,8 +154,8 @@ dialect is an adapter that maps its wire format into these types; the loop sees
 only the canonical model. The canonical model covers what the loop can act on:
 system and user text, assistant text, display-only thinking text, tool calls and
 results correlated by ID, one optional request-side control (the
-provider-neutral thinking effort), a normalized finish reason, token usage, and
-normalized errors.
+provider-neutral thinking effort), image parts on a tool result, a normalized
+finish reason, token usage, and normalized errors.
 
 Canonical does not mean lossless. Provider-specific material — encrypted
 reasoning items, reasoning identifiers, citations, safety metadata, cache
@@ -184,6 +184,23 @@ to 15 minutes and is selectable on the adapter. Provider error bodies are capped
 | `model.OpenAIChat` | Chat Completions wire format, nested function schemas, `tool_calls[].id`, `reasoning_content`/`reasoning` thinking text and tool-round continuation, prompt/completion usage. |
 | `model.OpenAIResponses` | Responses wire format, flat function tools, `function_call.call_id`, reasoning summaries and raw reasoning-item continuation, input/output usage, `store: false` full replay. |
 | Shared `model` HTTP helper | Request execution, auth/session headers, 1 MiB body cap, typed error decoding. |
+
+Image input:
+
+- `model.ImagePart` carries `media_type`, the decoded bytes, and the delivered
+  dimensions, and `model.Message.Images` holds at most one entry per tool
+  result. Only `image/png` and `image/jpeg` cross this boundary; the built-in
+  tool normalizes anything else. An adapter that is handed another media type
+  returns an error instead of forwarding a mislabeled payload.
+- A dialect that accepts image parts inside a tool result maps them in place. A
+  dialect that does not maps the tool result to its text form and emits one
+  adjacent `user` message carrying the caption and the image. Both built-in
+  adapters take the second path because image parts inside a tool message are
+  accepted by some gateways and silently dropped by others; the measured
+  behavior is recorded in
+  [plans/read-image-build.md](plans/read-image-build.md).
+- The image bytes are base64 in a `data:` URL, so one image is about 1.37 times
+  its declared size on the wire. The 512 KiB delivered cap bounds that.
 
 Normalization rules:
 
@@ -347,9 +364,11 @@ the adapter and are never exposed as deltas.
   redacted, and never logged whole.
 - The durable transcript keeps the executed response: the `model_response`
   payload is capped at 1 MiB total canonical content, and the session line cap
-  is 4 MiB so JSON escaping and envelope fields fit. Tool results remain at
-  64 KiB. This avoids a mismatch where a large response is executed but its
-  logged fields are truncated, which would break resume.
+  is 4 MiB so JSON escaping and envelope fields fit. A tool result's text stays
+  at 64 KiB; an image is a separate channel with its own 512 KiB encoded cap,
+  and its base64 plus envelope stays well inside one session line. This avoids a
+  mismatch where a large response is executed but its logged fields are
+  truncated, which would break resume.
 - A failed stream after deltas appends one `error` event with the partial byte
   count and capped partial text; no `model_response` is written and the partial
   text is not projected. An interactive interrupt appends `interrupt` instead.
@@ -479,6 +498,7 @@ tools/
   registry.go
   root.go        # os.Root wrapper and path policy
   read.go
+  image.go       # read_image: sanitizing decode, downscale, JPEG quality ladder
   edit.go
   search.go
   web_search.go  # SearXNG JSON client, base-URL validation, dedupe, sanitization
@@ -715,11 +735,11 @@ comment on a field narrows these rules but never widens them.
 | Session state | `State`: `ID`, `Workspace`, `StateDir`, `Model`, `AgentName`, `SystemPrompt`, `AppendedPrompt`, `PromptCapped`, `PromptTag`, `Tools`, `RootTools`, `CustomTools`, `ConcurrencySafe`, `ContractOverride`, `Limits`, `Turns`, `Usage`, `ContextTokens`, `SubagentTurns`, `SubagentUsage`, `SubagentCostMicroUSD`, `SubagentCostComplete`, `CostMicroUSD`, `CostComplete`, `ThinkingEffort`, `LastRunStatus`, `Pending`, `Parent`, `CreatedAt`, `UpdatedAt`, `TotalUsage`; `SessionInfo`: `ID`, `Workspace`, `Model`, `FirstMessage`, `CreatedAt`, `UpdatedAt`, `Turns`, `Status`, `Parent`; `Limits`: `MaxContextTokens`, `MaxOutputTokens`, `SafetyMargin`, `MaxInputTokens`, `CompactionTarget`; `PendingCall`: `CallID`, `Name`, `Turn`; `ParentRef`: `Session`, `Seq`, `CallID`; `ContractOverride`: `ParentSession`, `Prompt`, `Tools`; `TranscriptItem`: the same fields as `agent.HistoryItem` with `TranscriptKind`, `NoticeKind`, `StopReason`, and the public `Usage`; `Transcript(ctx, stateDir, sessionID) ([]TranscriptItem, error)` |
 | Events | `EventMeta`: `Time`, `Session`, embedded in each event; `RunStarted`: `RunID`, `Turn`, `ResumedFromSeq`, `Model`, `Dialect`, `ThinkingEffort`; `TextDelta` and `ReasoningDelta`: `Text`; `ResponseCompleted`: `Turn`, `Text`, `Reasoning`, `ToolCalls`, `FinishReason`, `Usage`, `Latency`, `Streamed`, `CumulativeTurns`, `CumulativeUsage`, `ContextTokens`, `CostMicroUSD`, `CostComplete`; `ToolStarted`: `Turn`, `Call`; `ToolCompleted`: `Turn`, `CallID`, `Name`, `OK`, `Code`, `Output`, `Error`, `ExitCode`, `Duration`, `TimedOut`, `Truncated`, `Details`; `MessageRecorded`: `Turn`, `ID`, `Source`, `Text`; `SubagentMessageRecorded`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ID`, `Source`, `Text`; `Notice`: `Turn`, `Kind`, `Text`; `SubagentStarted`: `Turn`, `CallID`, `Index`, `Agent`, `Intent`, `ChildSession`, `Model`, `Effort`, `Tools`; `SubagentProgress`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `LastTool`; `SubagentFinished`: `Turn`, `CallID`, `Index`, `Agent`, `ChildSession`, `Status`, `ChildTurns`, `ContextTokens`, `Usage`, `CostMicroUSD`, `CostComplete`, `Duration`, `Error`; `RunFinished`: `RunID`, `Result`, `Reason`, `Duration`; `EventView`: a flat JSON projection with `Kind`; `ViewEvent(Event) EventView`; `EventKind*` constants |
 | Models | `Model`: `Complete`; `StreamingModel`: `Complete`, `CompleteStream`; `StreamHandler`: `Text`, `Reasoning`; `Request`: `Model`, `Messages`, `Tools`, `MaxOutputTokens`, `ThinkingEffort`; `Response`: `Text`, `ToolCalls`, `FinishReason`, `Usage`, `Reasoning`, `Streamed`; `Message`: `Role`, `Content`, `ToolCalls`, `ToolCallID`, `Name`; `ToolCall`: `ID`, `Name`, `Arguments`, `Intent`, `Session`, `Agent` |
-| Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
-| Discovery | `OpenAIModelOptions`: `Spec`, `APIKey`, `UserAgent`, `HTTPClient`, `Timeout`; `DiscoverModelOptions`: `Catalog`, `Provider`, `Model`, `APIKey`, `BaseURL`, `HTTPClient`, `Timeout`; `CatalogConfig`: `URL`, `StateDir`, `HTTPClient`, `TTL`, `Timeout`, `UserAgent`, `Validate`; `CatalogModel`: `ID`, `Name`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `InputLimit`, `MaxOutputTokens`, `ToolCall`, `Reasoning`, `ThinkingEfforts`, `Deprecated`, `Status`, `Unavailable`, `Pricing`, `Validate`; `Catalog`: `Lookup`, `Price`, `Usable`, `SortedModels`; `CatalogListing`: `Provider`, `FetchedAt`, `Models`, `Warnings`; helpers `ValidateCatalogURL`, `ValidateBaseURL`, `CatalogOptions.Validate` |
+| Model identity | `ModelSpec`: `ID`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `MaxOutputTokens`, `InputLimit`, `ThinkingEfforts`, `Pricing`, `ImageInput`; `ModelConfig`: `Spec`, `Completer`, `NewCompleter`; `Pricing`: `Available`, `Currency`, `Unit`, `InputMicroUSD`, `OutputMicroUSD`, `CacheReadMicroUSD`, `CacheWriteMicroUSD`, `Source`, `FetchedAt`; `Usage`: `InputTokens`, `OutputTokens`, `CachedInputTokens`, `CacheWriteInputTokens`, `ReasoningOutputTokens`, `Reported` |
+| Discovery | `OpenAIModelOptions`: `Spec`, `APIKey`, `UserAgent`, `HTTPClient`, `Timeout`; `DiscoverModelOptions`: `Catalog`, `Provider`, `Model`, `APIKey`, `BaseURL`, `HTTPClient`, `Timeout`; `CatalogConfig`: `URL`, `StateDir`, `HTTPClient`, `TTL`, `Timeout`, `UserAgent`, `Validate`; `CatalogModel`: `ID`, `Name`, `Provider`, `Dialect`, `BaseURL`, `ContextWindow`, `InputLimit`, `MaxOutputTokens`, `ToolCall`, `Reasoning`, `ThinkingEfforts`, `ImageInput`, `Deprecated`, `Status`, `Unavailable`, `Pricing`, `Validate`; `Catalog`: `Lookup`, `Price`, `Usable`, `SortedModels`; `CatalogListing`: `Provider`, `FetchedAt`, `Models`, `Warnings`; helpers `ValidateCatalogURL`, `ValidateBaseURL`, `CatalogOptions.Validate` |
 | Tools | `Tool`: `Name`, `Description`, `InputSchema`, `Run`, `ConcurrencySafe`; `ToolResult`: `OK`, `Code`, `Output`, `Error`, `ExitCode`, `TimedOut`, `Truncated`, `Details`; `ToolSchema`: `Name`, `Description`, `Parameters`; `ToolsConfig`: `Disable`, `RootGrant`, `Extra`, `WebSearch`, `WebFetch`, `Delegation`; `ToolRequest`: `Tool`, `Call`, `Intent`, `Turn`, `Session`, `Agent`, `Path`; `Deny`: `Reason`; `WebSearchConfig`: `BaseURL`, `Timeout`; `WebFetchConfig`: `Provider`, `Endpoint`, `Key`, `Timeout`, `UserAgent`; helpers `TextResult`, `ErrorResult`, `Name*`, `NamesFor`, `ParseDelegateArgs`, `ParseTodoDetails`, `IntentLine` |
 | Delegation | `AgentDefinition`: `Name`, `Description`, `Prompt`, `Tools`, `Model`, `ThinkingEffort`, `MaxTurns`; `DelegationConfig`: `Agents`, `MaxSubagents`, `ResolveModel`, `ObserveChild`; `ChildTarget`: `CallID`, `Index`, `Agent`, `Session`, `Intent`, `Model`, `Effort`, `Tools` |
-| Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the seven built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`, `Failure`; `Subagent*` status constants; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI`; `EventKind*`; `TranscriptKind`: `TranscriptRun`, `TranscriptUser`, `TranscriptAssistant`, `TranscriptTool`, `TranscriptNotice` |
+| Enumerations | `Role`: `RoleSystem`, `RoleUser`, `RoleAssistant`, `RoleTool`; `FinishReason`: `FinishStop`, `FinishLength`, `FinishToolCalls`, `FinishContentFilter`, `FinishOther`; `StopReason`: `StopCompleted`, `StopMaxTurns`, `StopTokenLimit`, `StopTimeLimit`, `StopProviderError`, `StopProtocolError`, `StopStuck`, `StopInterrupted`, `StopInternalError`; `Dialect`: `DialectChat`, `DialectResponses`, `DialectCustom`; `ToolName`: the eight built-in names plus `ToolDelegate`; `NoticeKind`: `NoticeRetry`, `NoticeCompaction`, `NoticeLimit`, `NoticeInterrupt`, `NoticeRepair`, `NoticeWarning`, `NoticeError`, `Failure`; `Subagent*` status constants; `WebFetchProvider`: `WebFetchBuiltin`, `WebFetchCrawl4AI`; `EventKind*`; `TranscriptKind`: `TranscriptRun`, `TranscriptUser`, `TranscriptAssistant`, `TranscriptTool`, `TranscriptNotice` |
 | Errors and versions | Sentinels `ErrClosed`, `ErrBusy`, `ErrEmptyTask`, `ErrIteratorConsumed`, `ErrSessionNotFound`, `ErrSessionLocked`, `ErrInvalidSessionID`, `ErrModelRequired`, `ErrToolConflict`, `ErrToolMismatch`, `ErrSteeringFull`, `ErrNoSuchChild`, `ErrAuth`, `ErrModelUnavailable`; `ConfigError`: `Field`, `Value`, `Detail`; `ProviderError`: `StatusCode`, `Retryable`, `Err`; `SchemaVersion`, `Version()` |
 
 Behavioral rules that the field lists do not show:
@@ -1037,8 +1057,8 @@ TUI, `-ui-json` protocol, sanitizer, and image handling.
    ordinary tool call: `delegate` runs its tasks each in its own child store and
    returns one consolidated result whose `details` record the per-task turns,
    usage, and cost plus the call's execution mode. A call whose every task holds
-   a grant within `read_file`, `search`, `web_search`, and `web_fetch` runs its
-   tasks concurrently under a cap of four; any other call keeps array order and
+   a grant within `read_file`, `read_image`, `search`, `web_search`, and
+   `web_fetch` runs its tasks concurrently under a cap of four; any other call keeps array order and
    runs sequentially. The runner folds those totals into the
    run's subagent counters before the next turn, so `checkLimits` evaluates
    parent plus child tokens. A failure is still a result
@@ -1300,6 +1320,7 @@ func (w *Workspace) rel(p string) (string, error) {
 | Tool | Inputs | Behavior and limits |
 |---|---|---|
 | `read_file` | `intent`, `path`, `offset` (1-based, default 1), `limit` (default 2000, max 4000) | Returns one contiguous numbered line window plus a `lines X–Y of Z` header describing the lines actually delivered; line counting splits on `\n` (a trailing newline adds no line, an empty file has zero lines), and bytes are preserved. When `B < Z`, the result ends with `continue with offset=B+1`. A byte-capped page keeps whole lines and sets `truncated`; a single line that cannot fit is delivered as a rune-safe prefix with `[line N truncated at X bytes]` and no misleading continuation. Result cap 60 KiB, chosen so the rendered result and marker stay under the 64 KiB tool-result field cap. Rejects binary/non-UTF-8 files and files over 2 MiB. |
+| `read_image` | `intent`, `path` | Reads one workspace image and returns it to the model as an image part plus a one-line caption. The media type comes from the bytes, never the extension: PNG, JPEG, and GIF (first frame) are accepted; everything else is `invalid_image`, and a text type adds a `read_file` hint. A source within 2048 px on its longest edge, 2,000,000 pixels, and 512 KiB is forwarded byte for byte; otherwise it is downscaled with a box filter, composited over white when it has alpha, and re-encoded as JPEG through a 85/75/65/55 quality ladder with 0.75 size steps down to a 256 px floor. Source caps are 2 MiB and 16,000,000 pixels, checked from the header before a full decode, so a decompression bomb is `too_large` rather than an allocation. Output is deterministic: the same source produces the same bytes and the same SHA-256, which is recorded in `details` beside the source and delivered dimensions and the transform (`passthrough`, `recompressed`, or `downscaled`). Image contents are untrusted data. Returns `unavailable` without reading the file when the resolved model is known to reject image input. |
 | `edit_file` | `intent`, `path`, `old_string`, `new_string`, `replace_all` (default false) | Requires a unique exact byte match unless `replace_all`; zero or multiple matches are actionable errors; `old_string == new_string` is an error. Rejects a symlink anywhere in the path. Writes atomically via an `O_EXCL` temp file in the same directory plus rename; preserves mode with fchmod; preserves bytes, including CRLF. Creates a file only when it does not exist and `old_string` is empty, using mode 0644 and requiring the parent directory to exist; an existing file with an empty `old_string` is an error. Rejects an edit whose resulting file would exceed 2 MiB. Returns a short diff summary. |
 | `todo` | `intent`, `items` (optional array; each item is `content` plus `status` = `pending`, `in_progress`, or `completed`) | Maintains one in-memory checklist for multi-step work, seeded at run start from the last successful `todo` result in the session log. A present `items` replaces the whole list, an empty list clears it, and an omitted `items` reads it; the full list is returned after every call and the same items are recorded in `details` so a later run can restore them without parsing the rendered text. A host may render the current list in a persistent capped widget, updated from those details and restored on resume, fork, and session switch. At most 50 items, at most 500 bytes per normalized item, and at most one `in_progress` item; violations are `invalid_args`. Content is sanitized to valid UTF-8 with controls replaced and whitespace collapsed to one line. Rendering is `[ ]`, `[~]`, and `[x]` with per-status counts. The list is harness state, not a workspace file; it is not a durable event of its own and does not survive a log without the recorded `details`. |
 | `delegate` | `intent`, `tasks` (1–4 items; each is `agent`, a self-contained `task`, and an optional child `session`) | Runs each task in its own child session under `<state>/sessions`, recording `parent_session`, `parent_seq`, and `parent_call_id`. A child is a normal run: fresh store, own `run_start`/`run_end`, exactly one `final`, recorded prompt, recorded tool grant, resolved model/effort, inherited workspace. A call whose every task's effective grant is a subset of `read_file`, `search`, `web_search`, and `web_fetch` runs its tasks concurrently under a cap of four; any other call keeps array order and runs sequentially, and `details` records `execution` (`concurrent` or `sequential`) plus an `execution_reason` when sequential. The consolidated result has one `[task N agent=… status=… session=…]` section per task in array order and a `details` table with agent, intent, model, effort, turns, context tokens, usage, cost, and report size. `OK` is true when at least one task produced a report. Precedence: `invalid_args`/`not_found` before any task runs (unknown agent, bad or duplicate `session`, over-cap `task`), else `canceled`, else `subagent_limit`, else the failure code when every task failed, else `ok`. A child cannot call `delegate`: the tool is absent from its schemas and its registry grant rejects the call with `unknown_tool`. Depth is one. The report is sanitized, marked once when it matches an instruction-shaped pattern, and capped at 16 KiB; `details` is capped at 4 KiB. |
@@ -1313,13 +1334,15 @@ func (w *Workspace) rel(p string) (string, error) {
 measure before adding it.
 
 Tool descriptions are versioned prompt material. New sessions record
-`toolset-v2`. The sets are frozen per version: `toolset-v0` (four tools),
+`toolset-v3`. The sets are frozen per version: `toolset-v0` (four tools),
 `toolset-v1` (`web_search`, `web_fetch`, `todo`, and the shared `intent`
-argument added under the earlier no-backward-compatibility decision), and
-`toolset-v2` (v1 plus `delegate`). Adding `delegate` is the one bump this plan
-pays for; per-role tool grants are recorded session data (`session_start.tools`)
-rather than new versions, so a child narrows its recorded set without creating
-a version per role. `tools.SchemasFor(version)` selects the set,
+argument added under the earlier no-backward-compatibility decision),
+`toolset-v2` (v1 plus `delegate`), and `toolset-v3` (v2 plus `read_image`).
+Each bump pays for exactly one new tool; per-role tool grants are recorded
+session data (`session_start.tools`) rather than new versions, so a child
+narrows its recorded set without creating a version per role. A session that
+recorded an older version keeps its frozen descriptions and cannot call a tool
+the version does not define. `tools.SchemasFor(version)` selects the set,
 `tools.Filter` narrows it to the recorded grant in recorded order,
 `agent.Project` carries the result in `Projection.Schemas`, and the runner sends
 that set. An unknown version or a granted name the version does not define is a
@@ -1412,7 +1435,8 @@ it on every turn. Compaction never mutates the log.
 4. Every assistant tool call is followed by its matching tool result. Tool-call
    IDs are never dropped, and a result is never emitted without its call.
 5. Older tool-result bodies may be replaced by a one-line stub; the call ID,
-   tool name, and original byte count remain.
+   tool name, and original byte count remain. An elided image result keeps a
+   `; image <media> <w>x<h> elided` note in the stub and drops its bytes.
 6. The projection fits the configured input budget; the input cap does not
    reserve or subtract an output budget.
 7. If the projection cannot fit after compaction, the run stops with
@@ -1425,13 +1449,18 @@ it on every turn. Compaction never mutates the log.
 9. The system prompt is the text recorded in `session_start`. A log that
    predates the recorded prompt renders the frozen template for its recorded
    version, so replay never depends on the current agent files.
+10. Image parts are carried only by tool messages, are excluded from the
+    byte-based estimate in favor of a per-image patch estimate, and are dropped
+    from the retained window's predecessors before any text is elided.
 
 ### 6.2 Budget policy
 
 - Before each call, estimate input tokens from the projected messages and tool
   schemas. Use a conservative `ceil(bytes/4)` estimate plus 8 tokens per message
-  and 16 tokens per tool schema; treat provider-reported usage as authoritative
-  for totals after each response. These constants are part of the projection
+  and 16 tokens per tool schema; an image part estimates as
+  `ceil(width/28) * ceil(height/28)` and its bytes are not counted, because
+  base64 would overstate the cost by an order of magnitude. Treat
+  provider-reported usage as authoritative for totals after each response. These constants are part of the projection
   contract and are covered by tests.
 - The per-call limit is `min(model.limit.input, context - safety_margin)` when
   the catalog supplies an input ceiling, otherwise `context - safety_margin`,
@@ -1558,7 +1587,7 @@ it on every turn. Compaction never mutates the log.
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage with cached/cache-write/reasoning subsets and `reported`, optional `cost_micro_usd`, latency, attempt, `streamed`; 1 MiB total canonical content. |
 | `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |
-| `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag. |
+| `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag, and optional `images` entries (`media_type`, base64 `data`, `width`, `height`, `bytes`, `sha256`). `read_image` is the only producer. The member is additive: a reader that predates it ignores it and projects the caption instead. |
 | `compaction` | as needed | Before/after token estimate, elided result count, policy. |
 | `limit` | as needed | Limit kind, configured value, observed value. |
 | `interrupt` | as needed | Operation (`model`/`tool`), call ID/name for a tool, capped partial text, reason. |
@@ -1586,6 +1615,13 @@ default, falling back to `session_start` before any run. A fork writes a new
 events' historical values unchanged. Old v2 logs without the field reconstruct
 as empty and resume with the provider default; the schema version stays 2 and
 old readers ignore the added field.
+
+`tool_result.images` follows the same additive rule: it is omitted when a result
+carries no image, the schema version stays 2, and a reader that predates it
+ignores the member and projects the text caption. A session that recorded
+`toolset-v3` still cannot be resumed by a binary that predates it, because the
+recorded toolset version is rejected first; the graceful path is `Inspect` and
+`Transcript`, which never decode images.
 
 The log is for debugging and resume, not a tamper-proof audit trail. A shell
 running as the same user can reach the state directory. Separating the log from

@@ -82,10 +82,48 @@ type chatStreamOptions struct {
 
 type chatMessage struct {
 	Role             string         `json:"role"`
-	Content          string         `json:"content"`
+	Content          chatContent    `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
+}
+
+// chatContent is the Chat wire content member, which OpenAI accepts either as a
+// plain string or as an array of typed parts. A message with no images marshals
+// as a string, so the wire bytes for text-only requests are unchanged; a
+// message with images marshals as an array with the text part first.
+type chatContent struct {
+	Text   string
+	Images []ImagePart
+}
+
+// MarshalJSONTo implements json.MarshalerTo.
+func (c chatContent) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if len(c.Images) == 0 {
+		return enc.WriteToken(jsontext.String(c.Text))
+	}
+	parts := make([]chatContentPart, 0, len(c.Images)+1)
+	if c.Text != "" {
+		parts = append(parts, chatContentPart{Type: "text", Text: c.Text})
+	}
+	for _, img := range c.Images {
+		url, err := imageDataURL(img)
+		if err != nil {
+			return err
+		}
+		parts = append(parts, chatContentPart{Type: "image_url", ImageURL: &chatImageURL{URL: url}})
+	}
+	return jsonv2.MarshalEncode(enc, parts)
+}
+
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 type chatToolCall struct {
@@ -265,8 +303,21 @@ func (a *OpenAIChat) payload(req Request) chatRequest {
 	for _, msg := range req.Messages {
 		wire := chatMessage{
 			Role:       string(msg.Role),
-			Content:    msg.Content,
+			Content:    chatContent{Text: msg.Content, Images: msg.Images},
 			ToolCallID: msg.ToolCallID,
+		}
+		if msg.Role == RoleTool && len(msg.Images) > 0 {
+			// A tool message carries the text result; the image follows in a user
+			// message. Image parts inside a tool message are accepted by some
+			// gateways and silently dropped by others, so the harness uses the
+			// shape every OpenAI-compatible server understands.
+			wire.Content = chatContent{Text: msg.Content}
+			payload.Messages = append(payload.Messages, wire)
+			payload.Messages = append(payload.Messages, chatMessage{
+				Role:    "user",
+				Content: chatContent{Text: toolImageCaption(msg), Images: msg.Images},
+			})
+			continue
 		}
 		if msg.Role == RoleAssistant {
 			// DeepSeek-compatible endpoints require the reasoning_content of

@@ -12,8 +12,9 @@ import (
 	"github.com/eddiectc/aharness/model"
 )
 
-// Version is the current toolset/prompt version.
-const Version = "toolset-v2"
+// Version is the current toolset/prompt version. toolset-v3 adds read_image to
+// the frozen v2 set; v0, v1, and v2 stay replayable.
+const Version = "toolset-v3"
 
 // Code is a stable, model-visible tool result code.
 type Code string
@@ -28,13 +29,17 @@ const (
 	CodeGitProtected     Code = "git_protected"
 	CodeBinaryFile       Code = "binary_file"
 	CodeTooLarge         Code = "too_large"
-	CodeTimeout          Code = "timeout"
-	CodeCanceled         Code = "canceled"
-	CodePanic            Code = "panic"
-	CodeSpawnFailed      Code = "spawn_failed"
-	CodeUnavailable      Code = "unavailable"
-	CodeHTTPError        Code = "http_error"
-	CodeFetchFailed      Code = "fetch_failed"
+	// CodeInvalidImage reports a file that is not a decodable image, or an image
+	// whose header is corrupt. It is distinct from binary_file so the model can
+	// tell "read_file rejects non-UTF-8" from "this is not a usable image".
+	CodeInvalidImage Code = "invalid_image"
+	CodeTimeout      Code = "timeout"
+	CodeCanceled     Code = "canceled"
+	CodePanic        Code = "panic"
+	CodeSpawnFailed  Code = "spawn_failed"
+	CodeUnavailable  Code = "unavailable"
+	CodeHTTPError    Code = "http_error"
+	CodeFetchFailed  Code = "fetch_failed"
 	// CodeBlockedAddress rejects a URL or redirect that resolves to a
 	// non-global unicast or special-purpose address.
 	CodeBlockedAddress Code = "blocked_address"
@@ -81,6 +86,22 @@ type Result struct {
 	Truncated  bool            `json:"truncated,omitempty"`
 	DurationMS int64           `json:"duration_ms,omitempty"`
 	Details    json.RawMessage `json:"details,omitempty"`
+	// Images carries image attachments for the model. Only the built-in
+	// read_image populates it; Output remains the human-readable summary so a
+	// host that does not render images still shows something useful.
+	Images []Image `json:"-"`
+}
+
+// Image is one normalized image attachment returned by a tool. Data is the
+// encoded bytes in MediaType, which is one of model.MediaTypePNG or
+// model.MediaTypeJPEG. SHA256 is the hex digest of Data, recorded so a session
+// log can be checked for a truncated or substituted image.
+type Image struct {
+	MediaType string
+	Data      []byte
+	Width     int
+	Height    int
+	SHA256    string
 }
 
 // Success returns a successful result with output.
@@ -100,6 +121,8 @@ var (
 	ErrEditNotFound     = errors.New("edit target not found")
 	ErrBinaryFile       = errors.New("binary or non-utf8 file")
 	ErrTooLarge         = errors.New("file too large")
+	ErrInvalidImage     = errors.New("invalid or unsupported image")
+	ErrNoImageSupport   = errors.New("the configured model does not accept image input")
 )
 
 // Options configures harness-owned tool resources. TmpDir is the per-run
@@ -138,7 +161,12 @@ type Options struct {
 	WebFetchKey       string
 	WebClient         *http.Client
 	WebAllowLoopback  bool
-	Spawning          Spawning
+	// ImageInput reports whether the configured model accepts image input. Nil
+	// means unknown, which is the resume/fork default: the tool runs and lets the
+	// provider decide. An explicit false makes read_image return unavailable
+	// without reading the file.
+	ImageInput *bool
+	Spawning   Spawning
 }
 
 // Schema returns the canonical declaration for one tool.

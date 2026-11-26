@@ -133,6 +133,50 @@ func TestPromptTagValidatedBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestResumeRejectsReadImageOnFrozenToolset(t *testing.T) {
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	id := session.NewID()
+	store, err := session.Create(stateDir, id)
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	start := map[string]any{
+		"prompt_version":  agent.PromptVersion,
+		"toolset_version": "toolset-v2",
+		"workspace":       workspace,
+		"state_dir":       stateDir,
+		"provider":        "test",
+		"dialect":         "custom",
+		"model":           "engine-model",
+		"tools":           []string{"read_file", "read_image"},
+		"limits":          agent.Limits{MaxContextTokens: 10_000, MaxOutputTokens: 100, SafetyMargin: 1000, MaxInputTokens: 9000, CompactionTarget: 9000},
+	}
+	ev, err := session.NewEvent(session.TypeSessionStart, 0, "", start)
+	if err != nil {
+		t.Fatalf("build session_start: %v", err)
+	}
+	if err := store.Append(ev); err != nil {
+		t.Fatalf("append session_start: %v", err)
+	}
+	if err := store.Sync(); err != nil {
+		t.Fatalf("sync session_start: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	spec := baseSpec(t, ModeResume)
+	spec.StateDir = stateDir
+	spec.Workspace = workspace
+	spec.SessionID = id
+	if _, err := Open(context.Background(), spec); err == nil {
+		t.Fatal("Open resumed a toolset-v2 session granted read_image")
+	} else if !strings.Contains(err.Error(), "read_image") {
+		t.Errorf("error = %v, want it to name read_image", err)
+	}
+}
+
 func TestForkInstructionsAppendToRenderedPromptForLegacyLog(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()

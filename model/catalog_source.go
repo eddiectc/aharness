@@ -438,6 +438,7 @@ type modelsDevModel struct {
 	Name             string                 `json:"name"`
 	Type             string                 `json:"type"`
 	ToolCall         bool                   `json:"tool_call"`
+	Attachment       bool                   `json:"attachment"`
 	Status           string                 `json:"status"`
 	Provider         modelsDevModelProvider `json:"provider"`
 	Limit            modelsDevLimit         `json:"limit"`
@@ -476,6 +477,7 @@ type modelsDevLimit struct {
 }
 
 type modelsDevModalities struct {
+	Input  []string `json:"input"`
 	Output []string `json:"output"`
 }
 
@@ -541,6 +543,18 @@ func diagnosticValue(value string) string {
 	return value[:maxBytes] + "..."
 }
 
+// hasImageModality reports whether a modality list names image input. models.dev
+// uses the bare "image" token; a compatible source may list concrete types such
+// as "image/png", so both forms count.
+func hasImageModality(modalities []string) bool {
+	for _, m := range modalities {
+		if m == "image" || strings.HasPrefix(m, "image/") {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM, providerAPI string) CatalogModel {
 	model := CatalogModel{
 		ID:         id,
@@ -549,6 +563,7 @@ func normalizeCatalogModel(provider, id string, raw modelsDevModel, providerNPM,
 		Status:     raw.Status,
 		Deprecated: raw.Status == "deprecated",
 		ToolCall:   raw.ToolCall,
+		ImageInput: raw.Attachment || hasImageModality(raw.Modalities.Input),
 	}
 	if model.Name == "" {
 		model.Name = id

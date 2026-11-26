@@ -22,7 +22,7 @@ func TestRegistrySchemas(t *testing.T) {
 	for _, schema := range got {
 		names = append(names, schema.Name)
 	}
-	wantNames := []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch", "todo", "delegate"}
+	wantNames := []string{"read_file", "edit_file", "search", "run_command", "web_search", "web_fetch", "todo", "delegate", "read_image"}
 	if strings.Join(names, ",") != strings.Join(wantNames, ",") {
 		t.Errorf("schema names = %v, want %v", names, wantNames)
 	}
@@ -156,8 +156,8 @@ func TestRegistrySchemasExecuteUnknownNames(t *testing.T) {
 
 func TestSchemasReturnsModelSchemas(t *testing.T) {
 	schemas := Schemas()
-	if len(schemas) != 8 {
-		t.Fatalf("Schemas() length = %d, want 8", len(schemas))
+	if len(schemas) != 9 {
+		t.Fatalf("Schemas() length = %d, want 9", len(schemas))
 	}
 	for _, schema := range schemas {
 		if schema.Name == "" || schema.Description == "" || len(schema.Parameters) == 0 {

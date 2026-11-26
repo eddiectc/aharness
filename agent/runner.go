@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -1386,8 +1387,36 @@ func toolResultEvent(call model.ToolCall, result tools.Result, duration time.Dur
 		DurationMS: durationMS,
 		Truncated:  result.Truncated,
 		TimedOut:   result.TimedOut,
+		Images:     loggableImages(result.Images),
 		Details:    details,
 	}
+}
+
+// loggableImages encodes tool images for the session log. An image that cannot
+// be recorded is dropped rather than written as a broken payload: the text
+// caption still tells the model what the tool returned.
+func loggableImages(images []tools.Image) []toolImageData {
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]toolImageData, 0, len(images))
+	for _, img := range images {
+		if len(img.Data) == 0 || img.Width <= 0 || img.Height <= 0 {
+			continue
+		}
+		if img.MediaType != model.MediaTypePNG && img.MediaType != model.MediaTypeJPEG {
+			continue
+		}
+		out = append(out, toolImageData{
+			MediaType: img.MediaType,
+			Data:      base64.StdEncoding.EncodeToString(img.Data),
+			Width:     img.Width,
+			Height:    img.Height,
+			Bytes:     len(img.Data),
+			SHA256:    img.SHA256,
+		})
+	}
+	return out
 }
 
 func toolCompletedEvent(turn int, call model.ToolCall, payload toolResultData) ToolCompleted {

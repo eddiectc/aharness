@@ -167,6 +167,11 @@ type ModelSpec struct {
 	InputLimit      int
 	ThinkingEfforts []string
 	Pricing         Pricing
+	// ImageInput reports whether the model accepts image input. Nil means
+	// unknown, which is what resume and fork inherit: the read_image tool then
+	// runs and the provider decides. Set it false to make read_image return an
+	// actionable unavailable result without reading the file.
+	ImageInput *bool
 }
 
 // ModelConfig pairs a model implementation with its recorded identity.
@@ -376,6 +381,7 @@ func DiscoverModel(ctx context.Context, opts DiscoverModelOptions) (*ModelConfig
 		InputLimit:      entry.InputLimit,
 		ThinkingEfforts: append([]string(nil), entry.ReasoningEfforts...),
 		Pricing:         fromInternalPricing(entry.Pricing(catalog.Source, catalog.FetchedAt)),
+		ImageInput:      boolPtr(entry.ImageInput),
 	}
 	return OpenAIModel(OpenAIModelOptions{
 		Spec:       spec,
@@ -399,10 +405,13 @@ type CatalogModel struct {
 	ToolCall        bool
 	Reasoning       bool
 	ThinkingEfforts []string
-	Deprecated      bool
-	Status          string
-	Unavailable     string
-	Pricing         Pricing
+	// ImageInput reports whether the model accepts image input. It is display
+	// metadata for a picker; it never affects eligibility.
+	ImageInput  bool
+	Deprecated  bool
+	Status      string
+	Unavailable string
+	Pricing     Pricing
 }
 
 // CatalogListing is one provider's catalog snapshot.
@@ -446,6 +455,7 @@ func ListModels(ctx context.Context, cfg CatalogConfig, provider string) (Catalo
 			ToolCall:        entry.ToolCall,
 			Reasoning:       entry.Reasoning,
 			ThinkingEfforts: append([]string(nil), entry.ReasoningEfforts...),
+			ImageInput:      entry.ImageInput,
 			Deprecated:      entry.Deprecated,
 			Status:          entry.Status,
 			Unavailable:     entry.Unavailable,
@@ -454,6 +464,10 @@ func ListModels(ctx context.Context, cfg CatalogConfig, provider string) (Catalo
 	}
 	return listing, nil
 }
+
+// boolPtr returns a pointer to v. It expresses "capability known" in a
+// ModelSpec, where nil means unknown rather than false.
+func boolPtr(v bool) *bool { return &v }
 
 // builtinModelAdapter exposes an internal dialect adapter through the public
 // Model contract.

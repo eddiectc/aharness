@@ -179,17 +179,20 @@ replacement must keep the invariants that
 
 ### Tools and policy
 
-Seven builtin tools are available behind one validated registry with `os.Root`
-workspace containment: `read_file`, `edit_file`, `search`, `run_command`,
-`web_search`, `web_fetch`, and `todo`. `delegate` is added when delegation is
-configured. They are the same tools the first-party acode agent uses.
+Eight builtin tools are available behind one validated registry with `os.Root`
+workspace containment: `read_file`, `read_image`, `edit_file`, `search`,
+`run_command`, `web_search`, `web_fetch`, and `todo`. `delegate` is added when
+delegation is configured. They are the same tools the first-party acode agent
+uses.
 
 `read_file` returns a contiguous numbered line window (`offset`/`limit`, 2,000
-lines by default), `edit_file` applies a unique exact-byte replacement
-atomically unless `replace_all` is set, `search` runs a Go RE2 regex over
-workspace-relative paths with an optional glob, and `run_command` runs
-`/bin/sh -c` under a timeout with captured output. Caps and edge behavior are
-in [limits.md](docs/limits.md) and
+lines by default), `read_image` returns a workspace PNG, JPEG, or GIF to a
+vision model as an image part (downscaled to 2048 px and 512 KiB, with a
+one-line caption as its text), `edit_file` applies a unique exact-byte
+replacement atomically unless `replace_all` is set, `search` runs a Go RE2
+regex over workspace-relative paths with an optional glob, and `run_command`
+runs `/bin/sh -c` under a timeout with captured output. Caps and edge behavior
+are in [limits.md](docs/limits.md) and
 [architecture.md](docs/architecture.md#5-tools).
 
 `ToolsConfig.Disable` removes a builtin tool and `ToolsConfig.Extra` registers
