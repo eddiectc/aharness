@@ -47,6 +47,7 @@ than rewriting its conclusions.
 | [architecture.md](architecture.md) | SDK structure, component packages, loop and tool contracts, session log, and the public facade |
 | [coding-standard.md](coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [definition-of-done.md](definition-of-done.md) | Normative completion checklist for every change |
+| [writing-standard.md](writing-standard.md) | Normative prose, comment, commit, issue, and pull-request rules |
 | [limits.md](limits.md) | The single source for SDK caps, limits, and timeouts |
 | [testing-strategy.md](testing-strategy.md) | Unit, integration, fuzz, and manual smoke layers |
 | [ci-release.md](ci-release.md) | CI triggers, DoD gates, and the tag/release process |

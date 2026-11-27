@@ -7,7 +7,10 @@ layers. Do not add those layers here.
 
 The Go coding standard is [docs/coding-standard.md](docs/coding-standard.md).
 Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
-are defined there, and it wins over other docs on Go practice. System
+are defined there, and it wins over other docs on Go practice. Prose, code
+comments, commit messages, and GitHub issues follow
+[docs/writing-standard.md](docs/writing-standard.md); read it before writing
+any of them. System
 structure, tool behavior, the public two-level API, and the SDK runtime
 contracts live in [docs/architecture.md](docs/architecture.md); the testing
 strategy lives in [docs/testing-strategy.md](docs/testing-strategy.md); caps and

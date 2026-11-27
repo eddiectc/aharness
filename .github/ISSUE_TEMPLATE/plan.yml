@@ -1,0 +1,47 @@
+name: Plan
+description: One initiative with milestones, tracked as sub-issues.
+title: "plan: "
+type: Task
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The issue is the work record, not the reference. Shipped truth lands in
+        code and `docs/`. Keep this body short and editable.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What is true after this lands that is not true now?
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: What this plan deliberately does not do.
+    validations:
+      required: true
+  - type: textarea
+    id: deltas
+    attributes:
+      label: Contract deltas
+      description: Public API, session schema, prompt, tool grant, projection, concurrency. "None" is a valid answer.
+    validations:
+      required: true
+  - type: textarea
+    id: milestones
+    attributes:
+      label: Milestones
+      description: One sub-issue per line. Open children with `gh issue create --parent N`.
+      value: |
+        - [ ] M0
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: The command, smoke, or probe that proves each milestone.
+    validations:
+      required: true
