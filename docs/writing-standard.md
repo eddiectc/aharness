@@ -98,7 +98,7 @@ Rules:
 - Headings are sentence case, unique, and stable; they are link anchors.
 - Repository targets use relative links; external sources use absolute URLs.
   Link the owner directly, not a page that links to it. `make docs-check`
-  verifies that local targets exist.
+  verifies that local targets and heading anchors resolve.
 - A current reference is true at `HEAD`. A `Date:` in its header records the
   last substantive review, not a freshness guarantee; new reference documents
   omit it. A dated record (issue, plan, research) carries `Date` and `Status`

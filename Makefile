@@ -46,6 +46,10 @@ dod: docs-check fmt-check vet lint test build vuln
 	@echo "cases, real-provider smokes, and the public API surface."
 	@echo "See docs/definition-of-done.md."
 
+# docs-check fails on a relative link whose file is missing and on a #fragment
+# that no heading on the target page produces. The heading slug follows
+# GitHub: lowercase, drop everything but letters, digits, space, hyphen, and
+# underscore, then turn spaces into hyphens.
 docs-check:
 	@status=0; \
 	for f in README.md AGENTS.md $$(find docs -type f -name '*.md' | sort); do \
@@ -55,11 +59,26 @@ docs-check:
 	  grep -oE '!?\[[^]]*\]\([^)]+\)' | \
 	  sed -E 's/^!?\[[^]]*\]\(//; s/\)$$//' | \
 	  while IFS= read -r link; do \
-	    case "$$link" in http://*|https://*|mailto:*|'#'*) continue;; esac; \
-	    target=$${link%%#*}; target=$${target%% *}; \
-	    [ -z "$$target" ] && continue; \
-	    if [ ! -e "$$dir/$$target" ]; then \
+	    case "$$link" in http://*|https://*|mailto:*) continue;; esac; \
+	    anchor=; \
+	    case "$$link" in \
+	      '#'*) target="$$f"; path="$$f"; anchor=$${link#'#'};; \
+	      *'#'*) target=$${link%%#*}; target=$${target%% *}; path="$$dir/$$target"; anchor=$${link#*#};; \
+	      *) target=$${link%% *}; path="$$dir/$$target";; \
+	    esac; \
+	    anchor=$${anchor%% *}; \
+	    if [ -z "$$target" ] || [ ! -e "$$path" ]; then \
 	      echo "$$f: broken link: $$link"; exit 1; \
+	    fi; \
+	    if [ -n "$$anchor" ]; then \
+	      if ! awk '/^[[:space:]]*(```|~~~)/{fence=!fence; next} !fence' "$$path" | \
+	        grep -E '^#{1,6}[[:space:]]' | \
+	        sed -E 's/^#{1,6}[[:space:]]+//; s/[[:space:]]+$$//' | \
+	        tr 'A-Z' 'a-z' | \
+	        sed -E 's/[^a-z0-9 _-]//g; s/ /-/g' | \
+	        grep -qxF "$$anchor"; then \
+	        echo "$$f: broken anchor: $$link (no such heading in $$path)"; exit 1; \
+	      fi; \
 	    fi; \
 	  done || status=1; \
 	done; \
