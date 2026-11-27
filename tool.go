@@ -108,6 +108,17 @@ type WebFetchConfig struct {
 	Key       string
 	Timeout   time.Duration
 	UserAgent string
+	// AllowedOrigins lists exact http(s) origins the builtin fetcher may reach
+	// even when they resolve to loopback, private, or shared address space,
+	// for example "http://127.0.0.1:8888". Each entry is scheme://host[:port];
+	// a path, query, fragment, or userinfo is a ConfigError, and a duplicate is
+	// collapsed. The list is host configuration: the model and fetched content
+	// can never widen it. Loopback and private destinations are refused
+	// without it, and metadata, link-local, unspecified, multicast,
+	// documentation, benchmarking, reserved, IPv4-mapped, and NAT64-wrapped
+	// addresses stay refused even with it. The Crawl4AI provider fetches
+	// subresources itself and rejects a non-empty list.
+	AllowedOrigins []string
 }
 
 // ToolRequest is the policy input for one tool execution. It is available for
@@ -247,6 +258,14 @@ func resolveToolSetup(cfg *ToolsConfig, userAgent string, delegation bool) (*too
 		if err := tools.ValidateWebFetchConfig(provider, endpoint, cfg.WebFetch.Key); err != nil {
 			return nil, &ConfigError{Field: "Tools.WebFetch", Detail: err.Error()}
 		}
+		origins, err := tools.ParseWebAllowedOrigins(cfg.WebFetch.AllowedOrigins)
+		if err != nil {
+			return nil, &ConfigError{Field: "Tools.WebFetch.AllowedOrigins", Detail: err.Error()}
+		}
+		if err := tools.ValidateWebFetchAllowedOrigins(provider, origins); err != nil {
+			return nil, &ConfigError{Field: "Tools.WebFetch.AllowedOrigins", Detail: err.Error()}
+		}
+		setup.options.WebAllowedOrigins = origins
 		setup.options.WebFetchProvider = provider
 		setup.options.WebFetchURL = endpoint
 		setup.options.WebFetchKey = cfg.WebFetch.Key

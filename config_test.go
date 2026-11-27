@@ -146,6 +146,24 @@ func TestConfigValidation(t *testing.T) {
 					Name: "a", Description: "d", Prompt: "p", Tools: []aharness.ToolName{"delegate"},
 				}}}}},
 		},
+		{
+			name: "allowed origin with crawl4ai",
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
+				Tools: &aharness.ToolsConfig{WebFetch: &aharness.WebFetchConfig{
+					Provider:       aharness.WebFetchCrawl4AI,
+					Endpoint:       "http://127.0.0.1:11235",
+					AllowedOrigins: []string{"http://127.0.0.1:8888"},
+				}}},
+			wantDetail: "cannot enforce a per-resource origin list",
+		},
+		{
+			name: "invalid allowed origin",
+			cfg: aharness.Config{Workspace: t.TempDir(), StateDir: t.TempDir(), UserAgent: "test", Model: model,
+				Tools: &aharness.ToolsConfig{WebFetch: &aharness.WebFetchConfig{
+					AllowedOrigins: []string{"https://example.com/path"},
+				}}},
+			wantDetail: "only scheme, host, and port are allowed",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

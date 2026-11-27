@@ -530,18 +530,26 @@ type builtinFetcher struct {
 	userAgent     string
 	timeout       time.Duration
 	allowLoopback bool
+	// allowedOrigins holds normalized scheme://host:port entries. A blocked
+	// address is permitted only for a request whose origin is in this set.
+	allowedOrigins map[string]bool
 }
 
 // newBuiltinFetcher constructs the dedicated web client. It never uses
 // http.DefaultClient, never reads proxy environment variables, never disables
 // TLS verification, and keeps no cookie jar.
-func newBuiltinFetcher(opts Options, timeout time.Duration) *builtinFetcher {
+func newBuiltinFetcher(opts Options, timeout time.Duration, allowedOrigins []string) *builtinFetcher {
 	connectTimeout := min(10*time.Second, timeout)
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		allowed[origin] = true
+	}
 	f := &builtinFetcher{
-		dialer:        &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second},
-		userAgent:     webFetchUserAgent(opts),
-		timeout:       timeout,
-		allowLoopback: opts.WebAllowLoopback,
+		dialer:         &net.Dialer{Timeout: connectTimeout, KeepAlive: 30 * time.Second},
+		userAgent:      webFetchUserAgent(opts),
+		timeout:        timeout,
+		allowLoopback:  opts.WebAllowLoopback,
+		allowedOrigins: allowed,
 	}
 	var client *http.Client
 	if opts.WebClient != nil {
@@ -576,7 +584,7 @@ func newBuiltinFetcher(opts Options, timeout time.Duration) *builtinFetcher {
 // Fetch implements fetcher. Redirects are followed manually so every hop can
 // be revalidated and cross-host or downgrade redirects can be returned as data.
 func (f *builtinFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResult, error) {
-	if err := f.checkHost(ctx, target.Hostname()); err != nil {
+	if err := f.checkHost(ctx, target, f.allowedOrigin(target)); err != nil {
 		return fetchResult{}, err
 	}
 	current := target
@@ -604,7 +612,7 @@ func (f *builtinFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResul
 
 // request sends one GET with the builtin headers and no credentials.
 func (f *builtinFetcher) request(ctx context.Context, target *url.URL) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	req, err := http.NewRequestWithContext(withWebAllowedOrigin(ctx, f.allowedOrigin(target)), http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, webErrorf(CodeFetchFailed, "web_fetch: build request for %s: %v", target, err)
 	}
@@ -624,7 +632,7 @@ func (f *builtinFetcher) request(ctx context.Context, target *url.URL) (*http.Re
 func (f *builtinFetcher) requestError(ctx context.Context, target *url.URL, err error) error {
 	var blocked *blockedAddressError
 	if errors.As(err, &blocked) {
-		return webErrorf(CodeBlockedAddress, "web_fetch: %s resolves to a blocked address", blocked.host)
+		return webErrorf(CodeBlockedAddress, "%s", blocked.message())
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
@@ -668,7 +676,7 @@ func (f *builtinFetcher) redirect(ctx context.Context, from *url.URL, resp *http
 		}, nil
 	}
 	// Guard the next hop before dialing; the dialer checks again.
-	if err := f.checkHost(ctx, validated.Hostname()); err != nil {
+	if err := f.checkHost(ctx, validated, f.allowedOrigin(validated)); err != nil {
 		return nil, fetchResult{}, err
 	}
 	return validated, fetchResult{}, nil
@@ -777,7 +785,12 @@ func webPort(u *url.URL) string {
 	if port := u.Port(); port != "" {
 		return port
 	}
-	switch u.Scheme {
+	return defaultWebPort(u.Scheme)
+}
+
+// defaultWebPort returns the scheme's default port.
+func defaultWebPort(scheme string) string {
+	switch strings.ToLower(scheme) {
 	case "https":
 		return "443"
 	case "http":
@@ -809,22 +822,23 @@ func unsupportedMediaType(contentType string, raw []byte) string {
 	return "unknown"
 }
 
-// checkHost resolves a host and refuses it when any address is blocked.
-func (f *builtinFetcher) checkHost(ctx context.Context, host string) error {
+// checkHost resolves a fetch target and refuses it when any address is blocked.
+// An allowed origin relaxes only the loopback/private set.
+func (f *builtinFetcher) checkHost(ctx context.Context, target *url.URL, allowed bool) error {
+	host := target.Hostname()
 	addrs, err := f.resolve(ctx, host)
 	if err != nil {
 		return webErrorf(CodeFetchFailed, "web_fetch: resolve %s: %v", host, err)
 	}
-	for _, addr := range addrs {
-		if f.blocked(addr) {
-			return webErrorf(CodeBlockedAddress, "web_fetch: %s resolves to a blocked address", host)
-		}
+	if refused, configurable := f.classifyBlocked(addrs, allowed); refused {
+		return webErrorf(CodeBlockedAddress, "%s", blockedAddressMessage(host, configurable))
 	}
 	return nil
 }
 
 // dialContext resolves, checks every address, and dials a checked address so a
-// rebinding resolver cannot swap in a blocked destination.
+// rebinding resolver cannot swap in a blocked destination. The request context
+// carries whether its origin is allowed.
 func (f *builtinFetcher) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -834,10 +848,8 @@ func (f *builtinFetcher) dialContext(ctx context.Context, network, address strin
 	if err != nil {
 		return nil, err
 	}
-	for _, addr := range addrs {
-		if f.blocked(addr) {
-			return nil, &blockedAddressError{host: host}
-		}
+	if refused, configurable := f.classifyBlocked(addrs, webAllowedOrigin(ctx)); refused {
+		return nil, &blockedAddressError{host: host, configurable: configurable}
 	}
 	var lastErr error
 	for _, addr := range addrs {
@@ -868,41 +880,95 @@ func (f *builtinFetcher) resolve(ctx context.Context, host string) ([]netip.Addr
 	return addrs, nil
 }
 
-// blocked reports whether an address is outside the allowed public unicast
-// set. The test-only loopback seam allows loopback literals and nothing else.
-func (f *builtinFetcher) blocked(addr netip.Addr) bool {
+// classifyBlocked reports whether any resolved address is refused without an
+// allowed origin, or, for an allowed origin, whether any is always refused. The
+// configurable result is true only when every refused address is a
+// loopback/private one, so the error can name the allowlist safely.
+func (f *builtinFetcher) classifyBlocked(addrs []netip.Addr, allowed bool) (refused, configurable bool) {
+	configurable = true
+	for _, addr := range addrs {
+		if !f.blocked(addr, allowed) {
+			continue
+		}
+		refused = true
+		if isAlwaysBlockedWebAddr(addr) {
+			configurable = false
+		}
+	}
+	return refused, refused && configurable
+}
+
+// allowedOrigin reports whether a fetch target's origin is in the operator
+// allowlist.
+func (f *builtinFetcher) allowedOrigin(u *url.URL) bool {
+	if len(f.allowedOrigins) == 0 {
+		return false
+	}
+	return f.allowedOrigins[webOrigin(u)]
+}
+
+// webAllowedOriginKey carries one request's origin decision into the dialer.
+type webAllowedOriginKey struct{}
+
+func withWebAllowedOrigin(ctx context.Context, allowed bool) context.Context {
+	return context.WithValue(ctx, webAllowedOriginKey{}, allowed)
+}
+
+func webAllowedOrigin(ctx context.Context) bool {
+	allowed, _ := ctx.Value(webAllowedOriginKey{}).(bool)
+	return allowed
+}
+
+// blocked reports whether an address is outside the allowed public unicast set
+// for this request. The test-only loopback seam allows loopback literals and
+// nothing else.
+func (f *builtinFetcher) blocked(addr netip.Addr, allowed bool) bool {
 	if f.allowLoopback {
 		if unmap := addr.Unmap(); unmap.IsLoopback() {
 			return false
 		}
 	}
-	return isBlockedWebAddr(addr)
+	if isAlwaysBlockedWebAddr(addr) {
+		return true
+	}
+	return !allowed && isConfigurableBlockedWebAddr(addr)
 }
 
 // blockedAddressError reports a hostname whose resolution is refused. It stays
 // typed so the tool can return blocked_address instead of fetch_failed.
 type blockedAddressError struct {
 	host string
+	// configurable reports that only loopback/private addresses refused the
+	// host, so the message can name the allowlist.
+	configurable bool
 }
 
 // Error implements error.
-func (e *blockedAddressError) Error() string {
-	return fmt.Sprintf("%s resolves to a blocked address", e.host)
+func (e *blockedAddressError) Error() string { return e.message() }
+
+func (e *blockedAddressError) message() string {
+	return blockedAddressMessage(e.host, e.configurable)
 }
 
-// blockedWebPrefixes are the IANA special-purpose ranges that are not globally
-// routable unicast destinations.
-var blockedWebPrefixes = []netip.Prefix{
+// blockedAddressMessage is the model-visible refusal. The allowlist hint is
+// configuration guidance for the operator reading the transcript; the model
+// cannot change it.
+func blockedAddressMessage(host string, configurable bool) string {
+	if configurable {
+		return fmt.Sprintf("web_fetch: %s resolves to a loopback or private address; add its origin to the host's web fetch allowed origins to permit it", host)
+	}
+	return fmt.Sprintf("web_fetch: %s resolves to a blocked address", host)
+}
+
+// alwaysBlockedWebPrefixes are refused even for an allowed origin: unspecified,
+// link-local, metadata, multicast, documentation, benchmarking, reserved, and
+// protocol-assignment ranges.
+var alwaysBlockedWebPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"),
-	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("169.254.0.0/16"),
-	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.0.0.0/24"),
 	netip.MustParsePrefix("192.0.2.0/24"),
 	netip.MustParsePrefix("192.88.99.0/24"),
-	netip.MustParsePrefix("192.168.0.0/16"),
 	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
@@ -917,33 +983,73 @@ var blockedWebPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2002::/16"),
 	netip.MustParsePrefix("3fff::/20"),
 	netip.MustParsePrefix("5f00::/16"),
-	netip.MustParsePrefix("fc00::/7"),
 	netip.MustParsePrefix("fe80::/10"),
 	netip.MustParsePrefix("ff00::/8"),
+}
+
+// configurableBlockedWebPrefixes are refused by default and permitted for an
+// allowed origin: private and shared address space. Loopback is handled by
+// IsLoopback so both address families share one rule.
+var configurableBlockedWebPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"),
 }
 
 // nat64Prefix embeds an IPv4 destination in an IPv6 address.
 var nat64Prefix = netip.MustParsePrefix("64:ff9b::/96")
 
-// isBlockedWebAddr reports whether addr is not a globally routable unicast
-// address. IPv4-mapped and NAT64 addresses are checked through the embedded
-// IPv4 address.
-func isBlockedWebAddr(addr netip.Addr) bool {
+// isAlwaysBlockedWebAddr reports whether addr is refused even for an allowed
+// origin. IPv4-mapped and NAT64 addresses are checked through the embedded
+// IPv4 address, so a wrapped destination keeps its classification.
+func isAlwaysBlockedWebAddr(addr netip.Addr) bool {
 	if !addr.IsValid() {
 		return true
 	}
 	addr = addr.Unmap()
 	if addr.Is6() && nat64Prefix.Contains(addr) {
 		embedded := addr.As16()
-		return isBlockedWebAddr(netip.AddrFrom4([4]byte{embedded[12], embedded[13], embedded[14], embedded[15]}))
+		return isAlwaysBlockedWebAddr(netip.AddrFrom4([4]byte{embedded[12], embedded[13], embedded[14], embedded[15]}))
+	}
+	if addr.IsLoopback() {
+		return false
 	}
 	if !addr.IsGlobalUnicast() {
 		return true
 	}
-	for _, prefix := range blockedWebPrefixes {
+	for _, prefix := range alwaysBlockedWebPrefixes {
 		if prefix.Contains(addr) {
 			return true
 		}
 	}
 	return false
+}
+
+// isConfigurableBlockedWebAddr reports whether addr is one an allowed origin may
+// reach: loopback, private, or shared address space.
+func isConfigurableBlockedWebAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.Is6() && nat64Prefix.Contains(addr) {
+		embedded := addr.As16()
+		return isConfigurableBlockedWebAddr(netip.AddrFrom4([4]byte{embedded[12], embedded[13], embedded[14], embedded[15]}))
+	}
+	if addr.IsLoopback() {
+		return true
+	}
+	for _, prefix := range configurableBlockedWebPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// isBlockedWebAddr reports whether addr is refused without an allowed origin.
+func isBlockedWebAddr(addr netip.Addr) bool {
+	return isAlwaysBlockedWebAddr(addr) || isConfigurableBlockedWebAddr(addr)
 }
