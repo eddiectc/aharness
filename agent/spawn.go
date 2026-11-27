@@ -137,9 +137,9 @@ func isReadOnlyTool(name string) bool {
 }
 
 // Spawner runs delegated tasks as child sessions. A call whose every task
-// holds a read-only grant executes its tasks concurrently under
-// maxConcurrentChildren; any other call executes in array order. The parent run
-// is suspended for the whole call either way.
+// holds a read-only or concurrency-safe grant executes its tasks concurrently
+// under maxConcurrentChildren; any other call executes in array order. The
+// parent run is suspended for the whole call either way.
 type Spawner struct {
 	opts SpawnerOptions
 
@@ -318,8 +318,8 @@ func (s *Spawner) Spawn(ctx context.Context, call tools.Call, specs []tools.Suba
 
 // executionMode reports whether the call's tasks may run concurrently and why
 // not when they may not. Every task must have a recorded or declared grant made
-// only of read-only tools; an unreadable continuation grant is not classified
-// optimistically.
+// only of read-only or concurrency-safe tools; an unreadable continuation grant
+// is not classified optimistically.
 func (s *Spawner) executionMode(specs []tools.SubagentSpec) (string, string) {
 	for i, spec := range specs {
 		grant, name, ok := s.taskGrant(spec)

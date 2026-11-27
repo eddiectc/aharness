@@ -6,10 +6,10 @@ import (
 )
 
 // FileArgumentPath returns the absolute lexical target path of a built-in file
-// tool call. It recognizes read_file, edit_file, and search; search defaults to
-// the workspace root when path is omitted. A relative path is joined to
-// workspace. The result is cleaned but not symlink-resolved: the tool still
-// performs the authoritative containment and symlink checks.
+// tool call. It recognizes read_file, read_image, edit_file, and search; search
+// defaults to the workspace root when path is omitted. A relative path is
+// joined to workspace. The result is cleaned but not symlink-resolved: the tool
+// still performs the authoritative containment and symlink checks.
 //
 // An unrecognized tool, malformed arguments, or a missing or empty path yields
 // "". The helper is for policy input, not argument validation: callers must not

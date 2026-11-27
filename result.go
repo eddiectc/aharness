@@ -28,7 +28,8 @@ const (
 // than completion, a budget stop, or a host interrupt.
 func (s StopReason) Failure() bool { return agent.StopReason(s).Failure() }
 
-// Label returns a short human-readable status.
+// Label returns a short human-readable status. Failure and Label let a host
+// present one typed status instead of keeping a per-host table.
 func (s StopReason) Label() string { return agent.StopReason(s).Label() }
 
 // Failure reports whether a notice should use failure styling.

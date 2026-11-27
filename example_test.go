@@ -80,8 +80,9 @@ func (m *exampleScriptedModel) Complete(_ context.Context, _ aharness.Request) (
 	return resp, nil
 }
 
-// Example_delegation shows the required host-supplied definition set. The
-// parent model delegates one task to the read-only explorer, then answers.
+// Example_delegation shows the required host-supplied definition set, and is
+// the starting template for a host's own agents. The parent model delegates one
+// task to the read-only explorer, then answers.
 func Example_delegation() {
 	workspace, err := os.MkdirTemp("", "aharness-workspace-")
 	if err != nil {
