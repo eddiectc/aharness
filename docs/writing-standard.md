@@ -244,7 +244,6 @@ to an oversized artifact while its issue is open.
 | `architecture.md` size | #27 |
 | Go files over 1,000 lines | #28 |
 | `README.md` and `limits.md` size, duplicate tables | #29 |
-| Private vulnerability reporting | #30 |
 
 ## Sources
 
