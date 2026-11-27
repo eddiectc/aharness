@@ -134,6 +134,6 @@
 // tool overrides, records contract_override, and copies history under the new
 // contract without rewriting the parent log.
 //
-// See docs/architecture.md for the loop, tool, projection, session, and public
-// facade contracts.
+// See docs/architecture.md and its area pages for the loop, tool, projection,
+// session, and public facade contracts.
 package aharness

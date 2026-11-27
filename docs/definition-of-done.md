@@ -36,7 +36,7 @@ work lands, and a dated record is corrected when it turns out to be wrong.
       handler, terminal I/O, or `os.Exit`; those belong to acode.
 - [ ] **Recorded contracts.** A public-library change passes the compatibility
       rules in
-      [architecture §3.2.1](architecture.md#321-public-library-facade). A
+      [architecture §3.2.1](architecture/facade.md#321-public-library-facade). A
       change that alters the session schema, prompt, tool grant, projection, or
       concurrency model is a different product, not an extension. No new
       provider matrix, graph/workflow orchestration, memory/RAG, pluggable

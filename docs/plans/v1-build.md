@@ -9,7 +9,7 @@
   noted in §1.2. **Deviation:** the assumption that Responses needs no
   reasoning-item continuation no longer holds. Both adapters now retain
   provider-native continuation material in memory for tool rounds; see
-  [architecture §2.2 and §2.4](../architecture.md#22-canonical-model-and-dialect-adapters).
+  [architecture §2.2 and §2.4](../architecture/provider.md#22-canonical-model-and-dialect-adapters).
 - **Source:** [v0 build plan](v0-build.md); v0 is complete, including both
   dialect smoke runs.
 - **Research:** [Bare-Minimum Agent Harness](../research/agent-harness-minimum.md). v1

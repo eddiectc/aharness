@@ -163,7 +163,7 @@ type Response struct {
 // Completer is the provider-facing contract. Both dialect adapters implement
 // it; the agent loop sees only canonical types. An adapter that serves a
 // reasoning model owns any provider-native continuation material; see
-// continuation.go and docs/architecture.md §2.4.
+// continuation.go and docs/architecture/provider.md §2.4.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }

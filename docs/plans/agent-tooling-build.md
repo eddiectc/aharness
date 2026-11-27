@@ -718,7 +718,7 @@ The implementation follows §1–§10 with these recorded choices:
 - **Todo tool added later (2026-11-14).** The decision-summary and §1.3
   exclusion of `todo` describe this plan's original scope. The shipped
   `toolset-v1` set now includes `todo`; see
-  [architecture §5](../architecture.md#5-tools). The measurement conclusions
+  [architecture §5](../architecture/tools.md#5-tools). The measurement conclusions
   here are unchanged.
 - **Eval tooling removed (2026-11-14).** `cmd/aharness-eval` and the top-level
   `eval/` tree were deleted. They were dev-only, sat outside the runtime
@@ -755,7 +755,7 @@ The implementation follows §1–§10 with these recorded choices:
   ID-only Responses items are not replayable and stay display-only. The display
   copy remains capped at 64 KiB and the continuation copy is never logged.
   Future native adapters follow the same pattern; see
-  [architecture §2.4](../architecture.md#24-continuation-for-a-new-dialect).
+  [architecture §2.4](../architecture/provider.md#24-continuation-for-a-new-dialect).
 - **Eval baseline.** Superseded by the removal note above. The 30-task suite
   and driver were complete and tested with fake arms; `eval/baseline.json`
   honestly recorded `status=unmeasured` with the credential reason. No solve

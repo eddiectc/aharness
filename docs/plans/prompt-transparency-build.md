@@ -82,7 +82,7 @@ blind:
 Facade `Agent.State()` (`aharness.go:413`) and `InspectSession`
 (`result.go:169-177`) both end in `stateFromSnapshot`, so the facade mirror is a
 one-line change plus a doc comment. It
-is not optional: [architecture.md §3.2.1](../architecture.md#321-public-library-facade)
+is not optional: [architecture.md §3.2.1](../architecture/facade.md#321-public-library-facade)
 calls the root package "the stable API most callers should use", and
 [definition-of-done.md](../definition-of-done.md) §3 requires new exported
 fields to be documented where embedders see them.
