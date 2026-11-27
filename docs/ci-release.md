@@ -177,8 +177,8 @@ then re-run the failed `release` workflow. Never move or delete the tag
 (§2.4).
 
 Record any pending manual smoke (hosted-endpoint loop, adapter, tool, or
-session-schema changes) in the release notes or the tracking issue; never
-describe an unrun smoke as verified, per the
+session-schema changes) in the release notes or the plan issue; never describe
+an unrun smoke as verified, per the
 [definition of done](definition-of-done.md) §2 and the
 [testing strategy](testing-strategy.md) §4.
 

@@ -49,8 +49,8 @@ cost (arXiv 2602.11988); long inputs degrade even simple tasks (Context Rot,
 
 Work in progress lives in GitHub issues; `.issues/`, `docs/plans/`, and
 `docs/research/` are retired and MUST NOT be recreated. A plan is a Task issue
-(§8) and the [documentation map](README.md) governs where a reference document
-goes.
+(§8), the [documentation map](README.md) governs where a reference document
+goes, and `make docs-check` fails if `docs/plans` or `docs/research` exists.
 
 Delete a document when its fact moves or dies. Git keeps the history;
 [`CHANGELOG.md`](../CHANGELOG.md) is the only user-facing history file.
@@ -100,8 +100,7 @@ Rules:
   verifies that local targets and heading anchors resolve.
 - A current reference is true at `HEAD`. A `Date:` in its header records the
   last substantive review, not a freshness guarantee; new reference documents
-  omit it. A work record in an issue carries `Date` and `Status` and is never
-  normative.
+  omit it. A work record in an issue is never normative.
 - No screenshots, diagrams, or Mermaid: not greppable, not diffable, not
   readable in a terminal.
 - Delete, do not archive. Do not keep "historical" copies.

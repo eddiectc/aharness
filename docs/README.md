@@ -1,11 +1,11 @@
 # aharness documentation map
 
-This directory holds the current reference for the SDK. Plans, research, and
-the decisions behind one change are work records in GitHub issues, not
-committed documents. The root [README](../README.md) is the SDK entry point and
-describes the shipped surface. The first-party coding agent,
-[acode](https://github.com/eddiectc/acode), keeps its CLI, TUI, commands, and
-configuration docs in its own repository.
+This directory holds the current reference for the SDK. Plans and research are
+work records in GitHub issues, not committed documents; a decision that binds
+only one change lives in the commit body. The root [README](../README.md) is
+the SDK entry point and describes the shipped surface. The first-party coding
+agent, [acode](https://github.com/eddiectc/acode), keeps its CLI, TUI, commands,
+and configuration docs in its own repository.
 
 ## Where a document belongs
 
@@ -58,11 +58,11 @@ of leaving it to mislead the next reader.
 
 `docs/plans/` (16 files) and `docs/research/` (5 files) were removed on
 2026-11-27 by #25 and its sub-issues #26–#29. Every open item moved to #26,
-and the text stays in git:
+and the deletion commit is `f0e54f3`:
 
 ```sh
-git log --diff-filter=D --format=%H -- docs/plans/subagent-build.md
-git show <deletion-commit>^:docs/plans/subagent-build.md
+git ls-tree -r --name-only f0e54f3^ docs/plans docs/research
+git show f0e54f3^:docs/plans/subagent-build.md
 ```
 
 ## Link check

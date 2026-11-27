@@ -69,8 +69,8 @@ and heading anchors in these pages are checked by `make docs-check`.
   owns every cap, timeout, and default value.
 - [definition-of-done.md](definition-of-done.md) gates every change, and
   [testing-strategy.md](testing-strategy.md) owns the test layers.
-- A plan or research issue records intent and evidence and never overrides
-  these pages.
+- A plan issue records intent and evidence and never overrides these pages; a
+  record the code has outgrown is corrected, not preserved.
 
 ## Recorded boundary
 

@@ -52,7 +52,13 @@ dod: docs-check fmt-check vet lint test build vuln
 # underscore, then turn spaces into hyphens. Heading text must be unique;
 # GitHub appends -1 to a duplicate, and no reference file has one.
 docs-check:
-	@status=0; \
+	@for d in docs/plans docs/research; do \
+	  if [ -e "$$d" ]; then \
+	    echo "$$d: retired directory recreated; work records live in issues" >&2; \
+	    exit 1; \
+	  fi; \
+	done; \
+	status=0; \
 	for f in README.md AGENTS.md $$(find docs -type f -name '*.md' | sort); do \
 	  dir=$$(dirname "$$f"); \
 	  if [ $$(awk '/^[[:space:]]*(```|~~~)/{n++} END{print n%2}' "$$f") -ne 0 ]; then \
