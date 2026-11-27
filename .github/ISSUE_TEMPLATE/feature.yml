@@ -1,0 +1,50 @@
+name: Feature request
+description: A problem the SDK should solve.
+title: "feat: "
+labels: ["enhancement"]
+type: Feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution. Check the recorded boundary in
+        `docs/architecture.md` section 3.2.1: a request that changes a recorded
+        contract is a different product, not an extension.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today, and what does it cost? Show the host code.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: The smallest change that solves it. Name the package and the symbol.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, stdlib options, and why they fall short.
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract impact
+      options:
+        - label: Adds or changes a public API
+        - label: Changes the session schema
+        - label: Changes prompt text or tool grants
+        - label: Changes concurrency or projection behavior
+        - label: None of these
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable conditions, one per line.
+      value: |
+        - [ ]
+    validations:
+      required: true

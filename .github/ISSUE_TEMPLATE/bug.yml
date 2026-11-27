@@ -1,0 +1,53 @@
+name: Bug report
+description: Behavior differs from the documented contract.
+title: "bug: "
+labels: ["bug"]
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One problem per issue. Cite the code, the command, and the output.
+        Do not paste tokens, headers, or full logs.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Expected and actual, one or two sentences each.
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: A command that fails from a clean checkout, plus the smallest input. Say if it is not reproducible.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The module version, tag, or `git rev-parse --short HEAD`.
+      placeholder: v0.8.0 / e54ac6d
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Go version, OS and architecture, and the provider and model for a model-path bug.
+      value: |
+        - Go:
+        - OS/arch:
+        - Provider/model:
+      render: markdown
+  - type: textarea
+    id: location
+    attributes:
+      label: Suspected location
+      description: Files and lines you checked, and what you ruled out.
+      placeholder: agent/runner.go:412
