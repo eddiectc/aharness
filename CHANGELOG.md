@@ -8,6 +8,14 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-11-27
+
+This is a minor release with two additive public-surface changes and one fix.
+Nothing is removed or renamed, the session schema stays `2`, the toolset stays
+`toolset-v3` because no builtin is added, the prompt template is unchanged, and
+`go.mod` is unchanged. A host that adopts neither addition behaves exactly as
+it did on v0.7.2.
+
 ### Added
 
 - `agent.LoadAgentsWithTools` and `agent.ParseAgentDefinitionWithTools` accept
@@ -663,7 +671,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
-[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/eddiectc/aharness/compare/v0.7.2...v0.8.0
 [v0.7.2]: https://github.com/eddiectc/aharness/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/eddiectc/aharness/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/eddiectc/aharness/compare/v0.6.0...v0.7.0
