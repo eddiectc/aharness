@@ -173,7 +173,8 @@ Other event payloads:
 | `web_fetch` | Provider response | 16 MiB | Crawl4AI envelope; stream-decoded while skipping unused fields. `results[0].html` is capped at 2 MiB. |
 | `web_fetch` | Provider error body | 4 KiB | Read once for a non-2xx status. The sanitized detail is capped at 400 characters and names a JSON `detail`/`error`/`error_message`/`message` member when present, otherwise the text body. |
 | `web_fetch` | Compression | gzip | Go's transparent gzip handling. An unsupported content encoding is `unsupported_content_type`. |
-| `web_fetch` | Address guard | builtin | Every resolved address must be globally routable unicast; any blocked address refuses the URL. The check repeats at dial time and on every hop. |
+| `web_fetch` | Address guard | builtin | Every resolved address is checked at dial time and on every hop. Loopback, private, and shared addresses (including IPv4-mapped and NAT64-wrapped forms) refuse the URL unless its exact origin is allowed; metadata, link-local, unspecified, multicast, documentation, benchmarking, reserved, and protocol-assignment addresses are always refused. |
+| `web_fetch` | Allowed origins | 16 entries, 256 bytes each, builtin only | `WebFetchConfig.AllowedOrigins`; each entry is `scheme://host[:port]` with the default port filled and duplicates collapsed. A path, query, fragment, userinfo, control character, or non-http(s) scheme is a configuration error. The Crawl4AI provider rejects a non-empty list. |
 | `web_fetch` | Redirect result | data | A stopped redirect returns success with `redirect: true`, `redirect_url`, and the 3xx status; the model decides whether to fetch it. |
 | `web_fetch` | Requests per call | 1 | No automatic retry against the builtin path after a provider failure. |
 | `run_command` | Default timeout | 120 seconds | Per call. |

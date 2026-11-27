@@ -201,6 +201,12 @@ resume must supply the same schemas and `ConcurrencySafe` declarations.
 `ToolsConfig.RootGrant` narrows what the root is offered and may call without
 changing the session grant, so a narrow orchestrator can delegate to broader
 analysts; children are still intersected with the session grant.
+`WebFetchConfig.AllowedOrigins` lists exact `scheme://host:port` origins the
+builtin fetcher may reach when they resolve to loopback, private, or shared
+address space, so a host can permit a local development server without a global
+"allow private" switch. The list is host configuration; the model and fetched
+content can never widen it, metadata addresses stay refused, and the Crawl4AI
+provider rejects it.
 `Config.Authorize` runs before every tool execution, including delegated
 children. Returning `&aharness.Deny{}` (or another non-cancellation error)
 produces a model-visible `permission_denied` result.

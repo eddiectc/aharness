@@ -179,10 +179,17 @@ func newWebFetcher(opts Options, timeout time.Duration) fetcher {
 	if err := ValidateWebFetchConfig(provider, endpoint, opts.WebFetchKey); err != nil {
 		return failingFetcher{err: &webError{code: CodeUnavailable, msg: err.Error()}}
 	}
+	allowedOrigins, err := ParseWebAllowedOrigins(opts.WebAllowedOrigins)
+	if err != nil {
+		return failingFetcher{err: &webError{code: CodeUnavailable, msg: err.Error()}}
+	}
+	if err := ValidateWebFetchAllowedOrigins(provider, allowedOrigins); err != nil {
+		return failingFetcher{err: &webError{code: CodeUnavailable, msg: err.Error()}}
+	}
 	if provider == WebFetchProviderCrawl4AI {
 		return newCrawl4AIFetcher(opts, endpoint, timeout)
 	}
-	return newBuiltinFetcher(opts, timeout)
+	return newBuiltinFetcher(opts, timeout, allowedOrigins)
 }
 
 // failingFetcher reports a construction failure without touching the network.

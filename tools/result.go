@@ -146,6 +146,16 @@ var (
 // reachable. It is not a flag, environment variable, or config key, and
 // production wiring never sets it.
 //
+// WebAllowedOrigins is the operator-owned counterpart of that seam: exact
+// scheme://host:port origins that may resolve to loopback, private, or shared
+// address space. Use ParseWebAllowedOrigins to normalize and
+// ValidateWebFetchAllowedOrigins to check the provider. Metadata, link-local,
+// unspecified, multicast, documentation, benchmarking, reserved, IPv4-mapped,
+// and NAT64-wrapped addresses stay blocked even for an allowed origin, and the
+// values must come from host configuration, never from model input or fetched
+// content. The builtin provider enforces the list on every hop; the Crawl4AI
+// provider rejects it.
+//
 // Spawning runs delegated `delegate` tasks. A nil value keeps the tool
 // registered and returns an actionable unavailable result.
 type Options struct {
@@ -159,6 +169,7 @@ type Options struct {
 	WebFetchProvider  string
 	WebFetchURL       string
 	WebFetchKey       string
+	WebAllowedOrigins []string
 	WebClient         *http.Client
 	WebAllowLoopback  bool
 	// ImageInput reports whether the configured model accepts image input. Nil

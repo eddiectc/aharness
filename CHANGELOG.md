@@ -20,6 +20,22 @@ changes are called out under **Changed** and **Removed**.
   behavior. A custom name that fails the tool-name grammar is dropped with a
   warning, and the definition that names it fails validation with an actionable
   error.
+- `WebFetchConfig.AllowedOrigins` (facade) and `tools.Options.WebAllowedOrigins`
+  let a host permit exact `scheme://host:port` origins that resolve to loopback,
+  private, or shared address space, so `web_fetch` can reach a local development
+  server without a global "allow private" switch. The builtin fetcher checks the
+  list on the target and every followed redirect hop and again at dial time;
+  metadata, link-local, unspecified, multicast, documentation, benchmarking,
+  reserved, IPv4-mapped, and NAT64-wrapped addresses stay refused even for an
+  allowed origin, and the values come only from host configuration, never from
+  model input or fetched content. The Crawl4AI provider fetches subresources
+  itself and rejects a non-empty list; `CRAWL4AI_ALLOW_INTERNAL_URLS` stays
+  `false`. `tools.ParseWebAllowedOrigins` and
+  `tools.ValidateWebFetchAllowedOrigins` are the component-level helpers. The
+  refusal message for a merely configurable address now names the allowlist.
+  Recorded in
+  [plans/web-fetch-allowed-origins-build.md](docs/plans/web-fetch-allowed-origins-build.md),
+  which supersedes the private-target non-goal of the web-fetch plan.
 
 ### Fixed
 

@@ -129,6 +129,10 @@
 - Private/intranet fetch, a user-facing `-web-allow-private` escape hatch, or
   cloud-metadata access. Cloud-metadata addresses are always blocked; the only
   loopback allowance is the internal test-only option in §4.2.
+  **Superseded 2026-11-27 for the builtin fetcher** by
+  [web-fetch-allowed-origins-build.md](web-fetch-allowed-origins-build.md): an
+  operator origin allowlist may name loopback/private origins; metadata
+  addresses remain always blocked and the provider flag stays false.
 - Automatic retries, backoff, circuit breaking, or a multi-hop crawl. The model
   sees the error.
 - New session events, session schema version, `-ui-json` protocol version, TUI
@@ -593,6 +597,11 @@ The web client is separate from the provider adapter's client. It must:
   matching.
 - Allow `http` and `https` for fetch targets, with the address guard refusing
   loopback/private destinations. No production flag bypasses the guard.
+  **Superseded 2026-11-27 for the builtin fetcher** by
+  [web-fetch-allowed-origins-build.md](web-fetch-allowed-origins-build.md): an
+  exact operator origin allowlist replaces the "no production path" rule, and
+  metadata/link-local addresses stay refused. The provider keeps
+  `CRAWL4AI_ALLOW_INTERNAL_URLS=false`.
 - Send no credentials, cookies, referrer, or `Authorization` header.
 - Connect directly. Do not read `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` in v1;
   a trusted-proxy mode is a separate policy decision because it moves the
