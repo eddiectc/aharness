@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -227,4 +228,70 @@ func exactOutput(size int) string {
 		output[i] = 'x'
 	}
 	return string(output)
+}
+
+// concurrencyRecorder records how many completions overlap in time.
+type concurrencyRecorder struct {
+	mu        sync.Mutex
+	active    int
+	maxActive int
+	started   int
+}
+
+func (r *concurrencyRecorder) begin() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.active++
+	r.started++
+	if r.active > r.maxActive {
+		r.maxActive = r.active
+	}
+}
+
+func (r *concurrencyRecorder) end() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.active--
+}
+
+func (r *concurrencyRecorder) maxConcurrent() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.maxActive
+}
+
+func (r *concurrencyRecorder) startedCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.started
+}
+
+// recorderCompleter blocks on a barrier or the context, so a test can prove
+// that several children were in flight at once.
+type recorderCompleter struct {
+	rec            *concurrencyRecorder
+	barrier        <-chan struct{}
+	blockOnContext bool
+	text           string
+}
+
+func (c *recorderCompleter) Complete(ctx context.Context, _ model.Request) (model.Response, error) {
+	c.rec.begin()
+	defer c.rec.end()
+	if c.blockOnContext {
+		<-ctx.Done()
+		return model.Response{}, ctx.Err()
+	}
+	if c.barrier != nil {
+		select {
+		case <-c.barrier:
+		case <-ctx.Done():
+			return model.Response{}, ctx.Err()
+		}
+	}
+	return model.Response{
+		Text:         c.text,
+		FinishReason: model.FinishStop,
+		Usage:        model.Usage{InputTokens: 1, OutputTokens: 1, Reported: true},
+	}, nil
 }
