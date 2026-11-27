@@ -52,7 +52,11 @@ errors.go       # sentinels and typed errors
 doc.go          # package documentation and boundary
 version.go      # Version()
 agent/
-  runner.go     # run lifecycle, loop, stop policy, repair, interrupts
+  runner.go     # run lifecycle, limits, steering, turn dispatch, stop policy
+  turn.go       # one model call, completion handling, overflow retry
+  tool_exec.go  # sequential tool execution, policy, panic guard, result events
+  session_log.go # event recording and the terminal result
+  session_start.go # once-per-session start event
   display.go    # display-only event contract
   history.go    # capped transcript reconstruction
   state.go      # durable state reconstruction and pending calls
@@ -60,11 +64,18 @@ agent/
   context.go    # projection, token estimate, compaction
   agents.go     # strict definition parser, host-base and user-file discovery, precedence
   prompt.go     # frozen prompt versions, environment block, catalog
-  spawn.go      # subagent spawner: child sessions, budgets, display, accounting
+  spawn.go      # subagent spawner: options, steering, child history
+  spawn_grants.go # grant narrowing, read-only fan-out, child budgets
+  spawn_child.go # child session lifecycle, configs, runner wiring
+  spawn_display.go # child display forwarding and observation sinks
   retry.go      # retry policy and streaming-aware model calls
   types.go
 engine/
-  engine.go     # Spec, Open/new/resume/fork, inheritance, contract overrides
+  engine.go     # Spec, Host, mode, config errors
+  open.go       # new-session creation and input validation
+  resume.go     # resume/fork resolution
+  inherit.go    # inheritance matrix, limit clamp, effort resolution
+  contract.go   # tool contract validation and grant equality
   runner.go     # per-run registry, spawner, and runner construction
   sessions.go   # lock-free Inspect/List snapshots
   workdir.go    # per-session work directory lifecycle
@@ -84,7 +95,12 @@ tools/
   edit.go
   search.go
   web_search.go  # SearXNG JSON client, base-URL validation, dedupe, sanitization
-  web_fetch.go   # provider dispatch, URL/address guard, redirects, paging, details
+  web_fetch.go   # tool construction, dispatch, target validation, fetch
+  web_fetch_transport.go # HTTP request, redirects, response reading, limits
+  web_fetch_addr.go # address guard and allowed-origin policy
+  web_origin.go  # allowed-origin parsing and validation
+  web_fetch_content.go # content classification and charset decoding
+  web_fetch_result.go # results, details, paging, error mapping
   web_fetch_provider.go  # fetcher interface, provider selection, endpoint validation
   web_fetch_crawl4ai.go  # Crawl4AI /crawl adapter and streaming decode
   web_extract.go # trafilatura extraction, DOM fallback, challenge detection, sanitization
