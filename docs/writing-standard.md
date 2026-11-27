@@ -107,7 +107,7 @@ Rules:
   readable in a terminal.
 - Delete, do not archive. Do not keep "historical" copies.
 
-[`README.md`](../README.md) (371 lines) still exceeds the cap. Do not grow it:
+[`README.md`](../README.md) must stay within its 250-line cap. Do not grow it:
 split the section you are changing, or put the fact in the smaller owner. The
 architecture reference is split by area for this reason; a new contract goes in
 the matching area page, not the [index](architecture.md).
@@ -243,7 +243,6 @@ to an oversized artifact while its issue is open.
 | Dated plans and research | #25 |
 | Outstanding real-provider and host smokes | #26 |
 | Go files over 1,000 lines | #28 |
-| `README.md` and `limits.md` size, duplicate tables | #29 |
 
 ## Sources
 

@@ -66,9 +66,10 @@ normative for §4.
    ordinary tool call: `delegate` runs its tasks each in its own child store and
    returns one consolidated result whose `details` record the per-task turns,
    usage, and cost plus the call's execution mode. A call whose every task holds
-   a grant within `read_file`, `read_image`, `search`, `web_search`, and
-   `web_fetch` runs its tasks concurrently under a cap of four; any other call keeps array order and
-   runs sequentially. The runner folds those totals into the
+   a read-only grant (`read_file`, `read_image`, `search`, `web_search`, and
+   `web_fetch`) or a custom tool declared `ConcurrencySafe` runs its tasks
+   concurrently under a cap of four; any other call keeps array order and runs
+   sequentially. The runner folds those totals into the
    run's subagent counters before the next turn, so `checkLimits` evaluates
    parent plus child tokens. A failure is still a result
    with the original call ID. A recovered panic is paired before the run stops
@@ -143,7 +144,7 @@ gets no catalog and no delegation guidance because it cannot delegate; a
 prompt-v2 or prompt-v3 child whose grant includes `todo` also gets the todo
 guidance, while v0 and v1 children keep their frozen rules. The recorded text is
 authoritative for projection, so editing an agent file never rewrites an
-existing session's prompt. New sessions record `prompt-v3` and `toolset-v2`.
+existing session's prompt. New sessions record `prompt-v3` and `toolset-v3`.
 
 The parent identity line is parameterized. `Identity` names the host product:
 the parent line reads `You are acode, a coding harness working in the workspace

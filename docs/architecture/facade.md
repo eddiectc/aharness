@@ -14,7 +14,8 @@ callers should use. The shipped surface, by area:
   `Resume`/`Fork` take the caller's model implementation and inherit the
   recorded identity when `ModelConfig.Spec.ID` is empty. `Resume` rejects prompt
   and tool-contract changes; `Fork` applies explicit prompt or tool overrides
-  and records `contract_override`.- Runs: blocking `Agent.Run(ctx, task, RunOptions) (Result, error)` and
+  and records `contract_override`.
+- Runs: blocking `Agent.Run(ctx, task, RunOptions) (Result, error)` and
   streaming `Agent.Start(...) *Run` with `Events() iter.Seq2[Event, error]`,
   `Interrupt`, `Cancel`, `Steer`, `SteerChild`, `Done`, `Result`, and `Close`.
   `Result.Status` is authoritative and `Result.Err` is the same cause returned
@@ -30,13 +31,14 @@ callers should use. The shipped surface, by area:
   `delegate` only with delegation), registers custom tools in a per-run
   registry, and records their schemas and `ConcurrencySafe` declarations.
 - Delegation: `AgentDefinition`, `DelegationConfig`. The definition set is
-  always the host's (`DelegationConfig.Agents` is required); the facade takes
-  definitions and a resolver, and it never reads `<state>/agents`. Discovery is
-  the host-facing `agent.LoadAgents(base, stateDir)` helper: it validates the
-  host's base entries (`SourceDefault`, empty `Path`) and merges
-  `<state>/agents/*.md` (`SourceUser`, file `Path`) in file-name order, with a
-  file replacing a base entry of the same name. A definition grant may name a
-  builtin tool of the current toolset; `agent.LoadAgentsWithTools` and
+  always the host's (`DelegationConfig.Agents` is required, and the SDK ships no
+  role definitions); the facade takes definitions and a resolver, and it never
+  reads `<state>/agents`. Discovery is the host-facing
+  `agent.LoadAgents(base, stateDir)` helper: it validates the host's base
+  entries (`SourceDefault`, empty `Path`) and merges `<state>/agents/*.md`
+  (`SourceUser`, file `Path`) in file-name order, with a file replacing a base
+  entry of the same name. A definition grant may name a builtin tool of the
+  current toolset; `agent.LoadAgentsWithTools` and
   `agent.ParseAgentDefinitionWithTools` also accept the host's registered custom
   tool names, so a discovered role can grant a host tool. A rejected custom name
   is dropped with a warning, and the definition that names it fails validation
@@ -118,9 +120,10 @@ Behavioral rules that the field lists do not show:
 - `Pricing` is an observational snapshot and never a billing authority.
   `Pricing.WorstCase` is a conservative projection, not a billing guarantee;
   `Usage.Reported` distinguishes provider-reported totals from estimates.
-- `ToolsConfig.RootGrant` narrows only the root's schemas and dispatch. The
-  session grant (`session_start.tools`) remains the authority for child
-  intersection; `session_start.root_tools` records the root grant, and nil
+- `ToolsConfig.RootGrant` narrows only the root's schemas and dispatch, so a
+  narrow orchestrator can delegate to broader analysts without widening the
+  session. The session grant (`session_start.tools`) remains the authority for
+  child intersection; `session_start.root_tools` records the root grant, and nil
   means the session grant.
 - `Transcript` and `Agent.Transcript` read a byte snapshot of the log without
   the session lock or the in-memory event slice, so both tolerate a live writer
@@ -144,12 +147,12 @@ Behavioral rules that the field lists do not show:
   root). `Session` is the unique identity because one definition may run more
   than once. Both fields are empty on model request, response, and event DTOs.
 - `ToolRequest.Path` is the absolute, lexically cleaned target of `read_file`,
-  `edit_file`, or `search`; a relative argument is joined to the workspace and
-  `search` defaults to the workspace root. It is empty for every other tool and
-  when the arguments carry no usable path. It is not symlink-resolved, and
-  `run_command` has no `Path` because its writes are not constrained by `cwd`.
-  The built-in tools still perform containment and symlink checks; `Path` is
-  policy input, not validation.
+  `read_image`, `edit_file`, or `search`; a relative argument is joined to the
+  workspace and `search` defaults to the workspace root. It is empty for every
+  other tool and when the arguments carry no usable path. It is not
+  symlink-resolved, and `run_command` has no `Path` because its writes are not
+  constrained by `cwd`. The built-in tools still perform containment and symlink
+  checks; `Path` is policy input, not validation.
 - `Tool.ConcurrencySafe` remains a static, recorded grant-level declaration.
   The spawner chooses concurrent or sequential execution from the child grant
   before any child tool call exists, so an argument-dependent predicate could
