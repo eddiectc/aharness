@@ -41,9 +41,8 @@ it did on v0.7.2.
   `false`. `tools.ParseWebAllowedOrigins` and
   `tools.ValidateWebFetchAllowedOrigins` are the component-level helpers. The
   refusal message for a merely configurable address now names the allowlist.
-  Recorded in
-  [plans/web-fetch-allowed-origins-build.md](docs/plans/web-fetch-allowed-origins-build.md),
-  which supersedes the private-target non-goal of the web-fetch plan.
+  The live-provider run is recorded in
+  [#26](https://github.com/eddiectc/aharness/issues/26).
 
 ### Fixed
 
@@ -209,9 +208,9 @@ unchanged, and tool grants, tool schemas, and the toolset version are unchanged.
 
 It supersedes `v0.4.2`, which published the same source without this record; see
 that entry below. A consumer already on `v0.4.2` sees no code change, and one on
-`v0.4.1` gains the readers. The optional real-session smoke in
-[the plan](docs/plans/prompt-transparency-build.md) §7.7 has not run: it needs an
-existing acode session log and remains a maintainer check.
+`v0.4.1` gains the readers. The optional real-session smoke had not run when
+this tag was cut: it needs an existing acode session log. Its outcome is
+recorded in [#26](https://github.com/eddiectc/aharness/issues/26).
 
 ### Added
 
@@ -272,10 +271,10 @@ pre-1.0 and the change set is both additive and breaking: component hosts lose
 stays `2`, existing logs need no migration, `prompt-v3` is unchanged, and tool
 grants, tool schemas, and the toolset version are unchanged.
 
-The build plan's fresh-acode session check had not run when this tag was cut:
-acode is a separate repository. The exact pending check is recorded in
-[the plan](docs/plans/workspace-instructions-build.md) §7.4; the release does
-not claim it was verified.
+The fresh-acode session check had not run when this tag was cut: acode is a
+separate repository. Its outcome is recorded in
+[#26](https://github.com/eddiectc/aharness/issues/26); the release does not
+claim it was verified.
 
 ### Added
 
@@ -338,10 +337,9 @@ used the bundled role set; every item under **Changed** or **Removed** carries a
 `2`, existing logs need no migration, and tool grants, tool schemas, and the
 toolset version are unchanged.
 
-The real-model component probes required by the build plan had not run when
-this tag was cut. The exact pending checks are recorded in
-[the plan](docs/plans/prompt-surface-build.md) §12; do not read this release as
-probe-verified.
+The real-model component probes had not run when this tag was cut. Their
+outcome is recorded in [#26](https://github.com/eddiectc/aharness/issues/26);
+do not read this release as probe-verified.
 
 ### Added
 
