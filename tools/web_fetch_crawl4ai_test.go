@@ -216,6 +216,94 @@ func TestCrawl4AIErrors(t *testing.T) {
 	}
 }
 
+func TestCrawl4AIProviderErrorDetail(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		want    []string
+		notWant []string
+	}{
+		{
+			name:   "json detail names the refused origin",
+			status: http.StatusBadRequest,
+			body:   `{"detail":"URL blocked (SSRF protection): http://localhost:8888 is not allowed"}`,
+			want:   []string{"HTTP 400", "URL blocked (SSRF protection)", "http://localhost:8888"},
+		},
+		{
+			name:   "plain text body",
+			status: http.StatusBadGateway,
+			body:   "upstream renderer unavailable",
+			want:   []string{"HTTP 502", "upstream renderer unavailable"},
+		},
+		{
+			name:    "unknown json members are not dumped",
+			status:  http.StatusBadRequest,
+			body:    `{"foo":"bar"}`,
+			want:    []string{"HTTP 400"},
+			notWant: []string{"foo", "bar"},
+		},
+		{
+			name:    "truncated json is not dumped",
+			status:  http.StatusBadRequest,
+			body:    `{"detail":"blocked"`,
+			want:    []string{"HTTP 400"},
+			notWant: []string{"detail", "blocked"},
+		},
+		{
+			name:   "empty body keeps the status",
+			status: http.StatusBadRequest,
+			body:   "",
+			want:   []string{"HTTP 400"},
+		},
+		{
+			name:    "control characters are stripped",
+			status:  http.StatusBadRequest,
+			body:    "refused \x1b[31mhere\x1b[0m\x00",
+			want:    []string{"refused", "here"},
+			notWant: []string{"\x1b", "\x00"},
+		},
+		{
+			name:   "auth hint keeps the provider detail",
+			status: http.StatusUnauthorized,
+			body:   `{"detail":"bad token"}`,
+			want:   []string{"rejected", "bad token"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := crawl4AIProvider(t, tc.status, tc.body, nil)
+			res := crawl4AIRegistry(server.URL).Execute(context.Background(), "web_fetch",
+				json.RawMessage(`{"url":"https://example.com/"}`))
+			if res.Code != CodeFetchFailed {
+				t.Fatalf("code = %s (%s), want %s", res.Code, res.Error, CodeFetchFailed)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(res.Error, want) {
+					t.Errorf("error = %q, want %q", res.Error, want)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(res.Error, notWant) {
+					t.Errorf("error = %q, must not contain %q", res.Error, notWant)
+				}
+			}
+		})
+	}
+}
+
+func TestCrawl4AIProviderErrorDetailIsBounded(t *testing.T) {
+	server := crawl4AIProvider(t, http.StatusBadRequest, strings.Repeat("x", 64<<10), nil)
+	res := crawl4AIRegistry(server.URL).Execute(context.Background(), "web_fetch",
+		json.RawMessage(`{"url":"https://example.com/"}`))
+	if res.Code != CodeFetchFailed {
+		t.Fatalf("code = %s (%s), want %s", res.Code, res.Error, CodeFetchFailed)
+	}
+	if got := strings.Count(res.Error, "x"); got != 400 {
+		t.Errorf("detail runes = %d, want 400", got)
+	}
+}
+
 func TestCrawl4AIUnreachableDoesNotFallBack(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := server.URL

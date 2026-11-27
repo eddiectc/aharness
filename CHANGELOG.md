@@ -8,6 +8,20 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Fixed
+
+- A non-2xx `web_fetch` provider response now carries the provider's own error
+  detail instead of a bare status. The previous message,
+  `provider 127.0.0.1:51235 returned HTTP 400 Bad Request`, discarded the body,
+  so a provider-side refusal (for example Crawl4AI's SSRF guard naming the
+  blocked target) was indistinguishable from a broken provider and cost several
+  tool calls to diagnose. The body is now read once under a 4 KiB cap, sanitized
+  and capped at 400 characters, and appended to the existing message; a JSON
+  `detail`, `error`, `error_message`, or `message` member is preferred, plain
+  text is used otherwise, and an absent, unknown-member, or truncated JSON body
+  keeps the status-only message. The result code stays `fetch_failed`; the SDK
+  does not classify provider prose into a typed cause.
+
 ## [v0.7.2] - 2026-11-26
 
 ### Fixed
