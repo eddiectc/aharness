@@ -60,7 +60,7 @@ Delete a document when its fact moves or dies. Git keeps the history;
 
 | Fact | Home |
 |---|---|
-| Public API, loop, session schema, tool contract | The matching [architecture area page](architecture.md), or the doc comment |
+| Public API, loop, session schema, tool contract | The matching page under `docs/architecture/`, or the doc comment |
 | Cap, timeout, or default | [`limits.md`](limits.md) owns the published value; name the code constant beside it |
 | Go practice | [`coding-standard.md`](coding-standard.md) |
 | Completion gate | [`definition-of-done.md`](definition-of-done.md) |

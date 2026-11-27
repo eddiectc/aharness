@@ -1,7 +1,7 @@
 # 3. Packages and contracts
 
 Part of the [SDK architecture](../architecture.md) reference; this page is
-normative for §3.1, §3.2, and §3.3.
+normative for §3.1, §3.2, and §3.3 except §3.2.1.
 
 ## 3.1 Package layout
 

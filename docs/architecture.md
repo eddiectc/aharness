@@ -50,9 +50,8 @@ all presentation, configuration, signals, and process exit.
 
 Each area is one page and is normative for its sections. The section numbers,
 heading text, and anchor of every heading are unchanged by the split, so
-`§3.2.1` and `#321-public-library-facade` still name the same heading.
-`make docs-check` verifies every local link and heading anchor in this
-directory.
+`§3.2.1` and `#321-public-library-facade` still name the same heading. Links
+and heading anchors in these pages are checked by `make docs-check`.
 
 | Section | Page | Read it for |
 |---|---|---|

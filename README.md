@@ -31,7 +31,7 @@ form of the loop: durable sessions, builtin and caller tools, model adapters,
 delegation, events, and typed results. It is headless: it adds no environment, config-file,
 working-directory, TTY, or signal layer, and imports no CLI or TUI code. The
 recorded contracts, including the public facade surface, are in
-[architecture.md](docs/architecture/facade.md#321-public-library-facade).
+[architecture.md §3.2.1](docs/architecture/facade.md#321-public-library-facade).
 
 This module requires Go 1.27.4 or later. Add it to an existing module; it ships
 no binary and needs no separate installation:
@@ -193,7 +193,7 @@ replacement atomically unless `replace_all` is set, `search` runs a Go RE2
 regex over workspace-relative paths with an optional glob, and `run_command`
 runs `/bin/sh -c` under a timeout with captured output. Caps and edge behavior
 are in [limits.md](docs/limits.md) and
-[architecture.md](docs/architecture/tools.md#5-tools).
+[architecture.md §5](docs/architecture/tools.md#5-tools).
 
 `ToolsConfig.Disable` removes a builtin tool and `ToolsConfig.Extra` registers
 caller tools. Caller tools are recorded in `session_start.custom_tools`; a

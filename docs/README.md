@@ -87,8 +87,9 @@ than rewriting its conclusions.
 
 ## Link check
 
-`make docs-check` verifies that relative links and image targets in repository
-Markdown files resolve, and that a `#fragment` matches a heading on the target
-page using GitHub's slug rules (lowercase, punctuation dropped, spaces as
-hyphens). Code fences are ignored so examples are not treated as links.
-`make dod` runs this check as part of the full automated definition-of-done set.
+`make docs-check` verifies that relative links and image targets in `README.md`,
+`AGENTS.md`, and `docs/**/*.md` resolve, and that a `#fragment` matches a
+heading on the target page using GitHub's slug rules (lowercase, punctuation
+dropped, underscores kept, spaces as hyphens). Only inline links are read, and
+code fences are ignored so examples are not links. `make dod` runs this check
+as part of the full automated definition-of-done set.
