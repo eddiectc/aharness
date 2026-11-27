@@ -16,8 +16,8 @@ its area pages under `docs/architecture/`; the testing strategy lives in
 [docs/testing-strategy.md](docs/testing-strategy.md); caps and numbers live in
 [docs/limits.md](docs/limits.md). Every change verifies against the
 project-wide [docs/definition-of-done.md](docs/definition-of-done.md). The
-[documentation map](docs/README.md) explains where current reference, dated
-plans, and research live.
+[documentation map](docs/README.md) is the index of the current reference;
+plans and research live in GitHub issues, never in the tree.
 
 Non-negotiables:
 

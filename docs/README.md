@@ -1,28 +1,28 @@
 # aharness documentation map
 
-This directory separates current reference from dated plans and research. The
-root [README](../README.md) is the SDK entry point; it describes the shipped
-surface and does not index plans or research. The first-party coding agent,
-[acode](https://github.com/eddiectc/acode), keeps its CLI, TUI, commands, and
-configuration docs in its own repository.
+This directory holds the current reference for the SDK. Plans and research are
+work records in GitHub issues, not committed documents; a decision that binds
+only one change lives in the commit body. The root [README](../README.md) is
+the SDK entry point and describes the shipped surface. The first-party coding
+agent, [acode](https://github.com/eddiectc/acode), keeps its CLI, TUI, commands,
+and configuration docs in its own repository.
 
 ## Where a document belongs
 
 1. **Current reference** — describes behavior that must be true on `main`
    today. Lives in `docs/`. Update it in the same change as the code.
-2. **Build plan** — a dated record of one initiative: scope, contract deltas,
-   milestones, decisions, deviations, and verification. Lives in `docs/plans/`.
-3. **Research** — dated evidence, source synthesis, and recommendations that
-   inform a plan. Not a contract. Lives in `docs/research/`.
+2. **Work record** — a plan with milestones, its deviations, and its
+   verification, or the evidence behind one decision. Lives in a GitHub issue
+   ([writing standard §8](writing-standard.md#8-plans-as-issues)) and is never
+   committed. `.issues/`, `docs/plans/`, and `docs/research/` are retired and
+   MUST NOT be recreated.
+3. **Research** — dated sources and measured results belong in the issue that
+   needed them, or inline where the reference uses the finding.
 
-Naming: plans use `<topic>-build.md`; research uses `<topic>-research.md`. A
-plan is `proposed`, `implemented`, `superseded`, or a historical record. A plan
-is not a reference document: it records intent, and the current reference
-carries the shipped truth. It stays **editable** for its whole life — update
-status, decisions, deviations, and verification as the work lands, and correct
-a claim the code has outgrown instead of leaving it to mislead the next reader.
-Research is a dated snapshot of evidence; add a `Superseded by:` line rather
-than rewriting its conclusions.
+A work record carries intent; the current reference carries the shipped truth.
+An issue stays editable for its whole life: tick milestones and record
+deviations as the work lands, and correct a claim the code has outgrown instead
+of leaving it to mislead the next reader.
 
 ## Precedence
 
@@ -31,13 +31,13 @@ than rewriting its conclusions.
   limits, and shipped SDK surface: [architecture.md](architecture.md) and its
   area pages under [architecture/](architecture/), [limits.md](limits.md), and
   [testing-strategy.md](testing-strategy.md).
-- A dated plan or research document records intent and evidence; it never
-  overrides the current reference. Where they disagree, the reference wins.
-  Losing precedence is not immutability: a plan is edited while it is being
-  implemented and corrected afterwards, so no reader is told to leave a plan
-  standing when the code contradicts it.
-- [definition-of-done.md](definition-of-done.md) applies to every task,
-  documentation change, and dated record.
+- A work record in an issue records intent and evidence; it never overrides the
+  current reference. Where they disagree, the reference wins. Losing precedence
+  is not immutability: an issue or pull request that a later change contradicts
+  is corrected or closed, so no reader is told to leave a record standing when
+  the code has outgrown it.
+- [definition-of-done.md](definition-of-done.md) applies to every task, fix,
+  feature, refactor, and documentation change.
 
 ## Index
 
@@ -54,36 +54,16 @@ than rewriting its conclusions.
 | [ci-release.md](ci-release.md) | CI triggers, DoD gates, and the tag/release process |
 | [../CHANGELOG.md](../CHANGELOG.md) | Released versions and the public-surface changes in each |
 
-### Build plans
+## Deleted records
 
-| Document | Status |
-|---|---|
-| [plans/agent-tooling-build.md](plans/agent-tooling-build.md) | Implemented M0–M3; real-provider smoke pending; eval tooling removed 2026-11-14 |
-| [plans/go-library-build.md](plans/go-library-build.md) | Implemented M0–M6 and M8 docs; real-provider library smoke pending |
-| [plans/limits-removal-build.md](plans/limits-removal-build.md) | Implemented 2026-11-11 |
-| [plans/model-discovery-build.md](plans/model-discovery-build.md) | Implemented 2026-11-11 |
-| [plans/prompt-surface-build.md](plans/prompt-surface-build.md) | Implemented 2026-11-19 as v0.3.0 work; real-model probes pending |
-| [plans/prompt-transparency-build.md](plans/prompt-transparency-build.md) | Implemented and released 2026-11-22 as v0.5.0 (v0.4.2 was an accidental tag of the same source); real-session smoke pending |
-| [plans/read-image-build.md](plans/read-image-build.md) | Implemented 2026-11-26; provider probe and resume smoke passed against a local LiteLLM proxy |
-| [plans/subagent-build.md](plans/subagent-build.md) | Implemented 2026-11-15 (milestones 1–4); real-provider smoke pending |
-| [plans/subagent-observation-build.md](plans/subagent-observation-build.md) | Implemented and released 2026-11-25 as v0.6.0; real-provider observation smoke pending |
-| [plans/thinking-effort-build.md](plans/thinking-effort-build.md) | Implemented 2026-11-11; real-provider smoke pending |
-| [plans/v0-build.md](plans/v0-build.md) | Historical; v0 complete |
-| [plans/v1-build.md](plans/v1-build.md) | Implemented; real-provider streamed smoke pending |
-| [plans/web-fetch-build.md](plans/web-fetch-build.md) | Implemented 2026-11-13; public-page and Crawl4AI smoke passed |
-| [plans/web-fetch-allowed-origins-build.md](plans/web-fetch-allowed-origins-build.md) | Implemented 2026-11-27; supersedes the web-fetch private-target non-goals for the builtin fetcher; no live-provider run |
-| [plans/web-search-build.md](plans/web-search-build.md) | Implemented 2026-11-13; manual SearXNG smoke passed |
-| [plans/workspace-instructions-build.md](plans/workspace-instructions-build.md) | Implemented and released 2026-11-19 as v0.4.0; fresh-acode check pending |
+`docs/plans/` (16 files) and `docs/research/` (5 files) were removed on
+2026-11-27 by #25 and its sub-issues #26–#29. Every open item moved to #26,
+and the deletion commit is `f0e54f3`:
 
-### Research
-
-| Document | Snapshot |
-|---|---|
-| [research/agent-harness-minimum.md](research/agent-harness-minimum.md) | 2026-11-09; minimum harness and primary sources |
-| [research/agent-tooling-research.md](research/agent-tooling-research.md) | 2026-11-11; tool set, limits, usage, and evaluation methodology |
-| [research/evaluation-research.md](research/evaluation-research.md) | 2026-11-15; private, harness-agnostic evaluation design, task sourcing, metrics, and experiment options |
-| [research/go-library-research.md](research/go-library-research.md) | 2026-11-16; comparable Go agent libraries and coding-harness SDK embedding APIs |
-| [research/subagent-research.md](research/subagent-research.md) | 2026-11-15; delegation and multi-agent features in Claude Code, Codex, OMP, and OpenCode, and which fit aharness |
+```sh
+git ls-tree -r --name-only f0e54f3^ docs/plans docs/research
+git show f0e54f3^:docs/plans/subagent-build.md
+```
 
 ## Link check
 
