@@ -59,7 +59,7 @@ docs-check:
 	  fi; \
 	done; \
 	status=0; \
-	for f in README.md AGENTS.md $$(find docs -type f -name '*.md' | sort); do \
+	for f in README.md AGENTS.md SECURITY.md $$(find docs -type f -name '*.md' | sort); do \
 	  dir=$$(dirname "$$f"); \
 	  if [ $$(awk '/^[[:space:]]*(```|~~~)/{n++} END{print n%2}' "$$f") -ne 0 ]; then \
 	    echo "$$f: unbalanced code fence"; exit 1; \

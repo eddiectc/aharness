@@ -2,7 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Security report
     url: https://github.com/eddiectc/aharness/security
-    about: Report a vulnerability privately. Do not open a public issue.
+    about: Report a vulnerability privately. Do not open a public issue; see SECURITY.md for scope.
   - name: acode (CLI, TUI, configuration)
     url: https://github.com/eddiectc/acode/issues
     about: Host-side bugs belong to acode, not the SDK.

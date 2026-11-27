@@ -65,6 +65,7 @@ Delete a document when its fact moves or dies. Git keeps the history;
 | Completion gate | [`definition-of-done.md`](definition-of-done.md) |
 | Branch, CI, tag, release | [`ci-release.md`](ci-release.md) |
 | Bug or feature request | GitHub issue form |
+| Security scope, supported versions, and reporting | [`SECURITY.md`](../SECURITY.md) |
 | Plan with milestones | §8: a Task issue with one sub-issue per milestone |
 | Decision for one change | Commit body; durable only if it binds later code |
 | Host-only concern | Link the [acode](https://github.com/eddiectc/acode) repository; do not document the host here |
@@ -81,6 +82,7 @@ two values eventually. Document placement itself is in the
 | `AGENTS.md` | 60 lines | read on every task |
 | `README.md` | 250 lines | first read for a host author |
 | `docs/README.md` | 100 lines | an index, not prose |
+| `SECURITY.md` | 100 lines | read once, by an outside reporter |
 | A current-reference document | 400 lines | one sitting, one task |
 | An issue body | 120 lines | one screen; split into sub-issues |
 | A commit body | 20 lines | read through `git log` and `blame` |
