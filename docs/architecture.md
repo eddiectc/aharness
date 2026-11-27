@@ -1256,6 +1256,47 @@ resume/fork for it.
 
 ## 5. Tools
 
+### 5.1 Where a tool belongs
+
+Adding a tool is a product decision with a versioned cost, so the question is
+not "do more than one host want it?" but "does the SDK have to know about it to
+keep its own guarantees?". A request usually belongs in exactly one of three
+homes:
+
+| Home | What belongs there | Test |
+|---|---|---|
+| Builtin (versioned toolset) | A tool whose result is part of the loop contract | Would the SDK have to change projection, result pairing, stop policy, model capability handling, or replay to support it? |
+| Mechanism (SDK API, host-supplied values, deny by default) | A policy the SDK must enforce uniformly | Would every host otherwise reimplement it, and would one get it wrong? |
+| Host tool (`ToolsConfig.Extra`) | A tool that needs an environment, a service, a dependency, approval, or product knowledge | Does it depend on how one host is deployed, or on domain semantics the loop does not have? |
+
+A builtin is expensive: its description and schema are prompt material in every
+session, it is attack surface in every deployment, and adding one changes the
+recorded toolset, so it needs a new frozen version beside the existing replay
+sets and a changelog entry. Two consumers asking for the same tool is a signal
+to look, never a reason to ship: duplicate a private wrapper or share it outside
+the SDK instead.
+
+The common shape is a split: the mechanism lives in the SDK with a strict
+default, and the host supplies the values. Workspace containment (`os.Root`)
+versus the host's chosen workspace directory is the existing example. The SDK
+never reads the host's configuration file or environment for those values, and
+content an agent fetches can never widen them.
+
+Concrete consequences:
+
+- Rendering, screenshots, browser control, accessibility trees, and page
+  geometry are host tools. They need a browser or a rendering service, a
+  dependency policy, an approval surface, and a host-owned scratch or
+  configuration location; `run_command` plus `read_image` already carry the
+  render-and-read path, and a custom tool returns the text measurements.
+- Domain tools (a quote lookup, a portfolio query, a report writer) are host
+  tools. Their declarations are recorded per session and can appear in a
+  delegated child's grant, so shipping them needs no SDK change.
+- A new builtin is justified only when the SDK's own contract changes with it,
+  for example a result channel that the projection, model capability handling,
+  and recording must understand.
+
+### 5.2 Shared rules and builtin contracts
 
 All tools share these rules:
 
