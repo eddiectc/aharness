@@ -17,7 +17,9 @@ type AgentDefinition struct {
 	Description string
 	Prompt      string
 	// Tools is the child's grant. An empty list means no tools; delegate is
-	// never valid because delegation depth is one.
+	// never valid because delegation depth is one. A name may be an enabled
+	// builtin or a custom tool registered through ToolsConfig.Extra; the child
+	// grant is intersected with the parent's authority.
 	Tools          []ToolName
 	Model          string
 	ThinkingEffort string
