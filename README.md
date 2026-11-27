@@ -310,6 +310,16 @@ model—is a different product, not an extension. The shipped facade is
 enumerated in [architecture.md
 §3.2.1](docs/architecture.md#321-public-library-facade).
 
+The tool surface follows the same rule. A builtin is added only when the SDK
+must understand the tool to keep the loop's guarantees: result pairing,
+projection, caps, model capability handling, and replay. A tool that needs an
+environment, a browser, a service, approval, or domain knowledge belongs to the
+host through `ToolsConfig.Extra`; a policy the SDK enforces with host-supplied
+values is an SDK mechanism with a strict default. Rendering, screenshots, and
+accessibility or geometry snapshots are host tools; a domain tool such as a
+quote lookup is a host tool too. The test and its consequences are in
+[architecture.md §5.1](docs/architecture.md#51-where-a-tool-belongs).
+
 ## Component packages
 
 The component packages are the SDK's lower-level contracts. They are documented
