@@ -10,12 +10,12 @@ Read it before editing Go code. It is normative: **MUST** / **SHOULD** / **MAY**
 are defined there, and it wins over other docs on Go practice. Prose, code
 comments, commit messages, and GitHub issues follow
 [docs/writing-standard.md](docs/writing-standard.md); read it before writing
-any of them. System
-structure, tool behavior, the public two-level API, and the SDK runtime
-contracts live in [docs/architecture.md](docs/architecture.md); the testing
-strategy lives in [docs/testing-strategy.md](docs/testing-strategy.md); caps and
-numbers live in [docs/limits.md](docs/limits.md). Every change verifies against
-the project-wide [docs/definition-of-done.md](docs/definition-of-done.md). The
+any of them. System structure, tool behavior, the public two-level API, and the
+SDK runtime contracts live in [docs/architecture.md](docs/architecture.md) and
+its area pages under `docs/architecture/`; the testing strategy lives in
+[docs/testing-strategy.md](docs/testing-strategy.md); caps and numbers live in
+[docs/limits.md](docs/limits.md). Every change verifies against the
+project-wide [docs/definition-of-done.md](docs/definition-of-done.md). The
 [documentation map](docs/README.md) explains where current reference, dated
 plans, and research live.
 
@@ -30,7 +30,7 @@ Non-negotiables:
   one-package-per-type. Do not add a CLI, TUI, config file, environment parser,
   signal handler, `os.Exit`, or terminal code; those belong to acode.
 - Keep the recorded boundary in
-  [architecture.md §3.2.1](docs/architecture.md#321-public-library-facade):
+  [architecture.md §3.2.1](docs/architecture/facade.md#321-public-library-facade):
   no provider matrix, graph/workflow orchestration, memory/RAG, session-store
   seam, background or nested delegation, in-run parallel tool execution,
   structured-output/report DTOs, prompt templating, or public TUI package. A

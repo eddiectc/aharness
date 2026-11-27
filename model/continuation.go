@@ -21,7 +21,7 @@ const (
 // continue a tool round keeps a bounded in-memory copy and attaches it to the
 // matching replayed assistant message. A new dialect adapter with reasoning
 // models MUST use this cache (or an equivalent bounded cache) and add the
-// two-round wire test described in docs/architecture.md §2.4.
+// two-round wire test described in docs/architecture/provider.md §2.4.
 //
 // The cache is keyed by the canonical assistant message (content plus tool-call
 // IDs), which is exactly what the runner projects from the recorded response.

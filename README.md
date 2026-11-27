@@ -31,7 +31,7 @@ form of the loop: durable sessions, builtin and caller tools, model adapters,
 delegation, events, and typed results. It is headless: it adds no environment, config-file,
 working-directory, TTY, or signal layer, and imports no CLI or TUI code. The
 recorded contracts, including the public facade surface, are in
-[architecture.md](docs/architecture.md#321-public-library-facade).
+[architecture.md §3.2.1](docs/architecture/facade.md#321-public-library-facade).
 
 This module requires Go 1.27.4 or later. Add it to an existing module; it ships
 no binary and needs no separate installation:
@@ -193,7 +193,7 @@ replacement atomically unless `replace_all` is set, `search` runs a Go RE2
 regex over workspace-relative paths with an optional glob, and `run_command`
 runs `/bin/sh -c` under a timeout with captured output. Caps and edge behavior
 are in [limits.md](docs/limits.md) and
-[architecture.md](docs/architecture.md#5-tools).
+[architecture.md §5](docs/architecture/tools.md#5-tools).
 
 `ToolsConfig.Disable` removes a builtin tool and `ToolsConfig.Extra` registers
 caller tools. Caller tools are recorded in `session_start.custom_tools`; a
@@ -314,7 +314,7 @@ templating, or public TUI package. A change that alters a recorded
 contract—session schema, prompt, tool grant, projection, or concurrency
 model—is a different product, not an extension. The shipped facade is
 enumerated in [architecture.md
-§3.2.1](docs/architecture.md#321-public-library-facade).
+§3.2.1](docs/architecture/facade.md#321-public-library-facade).
 
 The tool surface follows the same rule. A builtin is added only when the SDK
 must understand the tool to keep the loop's guarantees: result pairing,
@@ -324,12 +324,12 @@ host through `ToolsConfig.Extra`; a policy the SDK enforces with host-supplied
 values is an SDK mechanism with a strict default. Rendering, screenshots, and
 accessibility or geometry snapshots are host tools; a domain tool such as a
 quote lookup is a host tool too. The test and its consequences are in
-[architecture.md §5.1](docs/architecture.md#51-where-a-tool-belongs).
+[architecture.md §5.1](docs/architecture/tools.md#51-where-a-tool-belongs).
 
 ## Component packages
 
 The component packages are the SDK's lower-level contracts. They are documented
-in [architecture.md §3](docs/architecture.md#3-packages-and-contracts):
+in [architecture.md §3](docs/architecture/packages.md#3-packages-and-contracts):
 
 | Package | Use it for |
 |---|---|
@@ -346,7 +346,7 @@ The root facade copies DTOs at the boundary so component types can evolve.
 
 | Document | Defines |
 |---|---|
-| [architecture.md](docs/architecture.md) | SDK structure, component contracts, loop, tools, session log, and public facade |
+| [architecture.md](docs/architecture.md) | Index of the SDK architecture pages: structure, contracts, loop, tools, session, and facade |
 | [coding-standard.md](docs/coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [limits.md](docs/limits.md) | SDK caps, limits, and timeouts |
 | [testing-strategy.md](docs/testing-strategy.md) | Unit, integration, fuzz, and manual smoke layers |

@@ -8,8 +8,8 @@ body:
     attributes:
       value: |
         Describe the problem before the solution. Check the recorded boundary in
-        `docs/architecture.md` section 3.2.1: a request that changes a recorded
-        contract is a different product, not an extension.
+        `docs/architecture/facade.md` section 3.2.1: a request that changes a
+        recorded contract is a different product, not an extension.
   - type: textarea
     id: problem
     attributes:

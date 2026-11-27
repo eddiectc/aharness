@@ -60,7 +60,7 @@ Delete a document when its fact moves or dies. Git keeps the history;
 
 | Fact | Home |
 |---|---|
-| Public API, loop, session schema, tool contract | [`architecture.md`](architecture.md) or the doc comment |
+| Public API, loop, session schema, tool contract | The matching page under `docs/architecture/`, or the doc comment |
 | Cap, timeout, or default | [`limits.md`](limits.md) owns the published value; name the code constant beside it |
 | Go practice | [`coding-standard.md`](coding-standard.md) |
 | Completion gate | [`definition-of-done.md`](definition-of-done.md) |
@@ -98,7 +98,7 @@ Rules:
 - Headings are sentence case, unique, and stable; they are link anchors.
 - Repository targets use relative links; external sources use absolute URLs.
   Link the owner directly, not a page that links to it. `make docs-check`
-  verifies that local targets exist.
+  verifies that local targets and heading anchors resolve.
 - A current reference is true at `HEAD`. A `Date:` in its header records the
   last substantive review, not a freshness guarantee; new reference documents
   omit it. A dated record (issue, plan, research) carries `Date` and `Status`
@@ -107,9 +107,10 @@ Rules:
   readable in a terminal.
 - Delete, do not archive. Do not keep "historical" copies.
 
-[`architecture.md`](architecture.md) (1,748 lines) and
-[`README.md`](../README.md) (371 lines) exceed the cap. Do not grow them: split
-the section you are changing, or put the fact in the smaller owner.
+[`README.md`](../README.md) (371 lines) still exceeds the cap. Do not grow it:
+split the section you are changing, or put the fact in the smaller owner. The
+architecture reference is split by area for this reason; a new contract goes in
+the matching area page, not the [index](architecture.md).
 
 ## 5. Code comments
 
@@ -241,7 +242,6 @@ to an oversized artifact while its issue is open.
 |---|---|
 | Dated plans and research | #25 |
 | Outstanding real-provider and host smokes | #26 |
-| `architecture.md` size | #27 |
 | Go files over 1,000 lines | #28 |
 | `README.md` and `limits.md` size, duplicate tables | #29 |
 

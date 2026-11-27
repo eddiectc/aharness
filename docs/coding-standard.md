@@ -43,7 +43,8 @@ only with a recorded reason; **MAY** = optional.
 ## 2. Packages and layout
 
 The root facade plus the five component packages, and their dependency
-direction, are defined in [`architecture.md` §3.1](architecture.md); that
+direction, are defined in
+[`architecture.md` §3.1](architecture/packages.md#31-package-layout); that
 document is normative for this repository's package structure. The rules below
 apply to every package.
 
@@ -110,7 +111,7 @@ apply to every package.
   production package.
 - The concrete contracts (`model.OpenAIChat`, `model.OpenAIResponses`,
   `tools.Registry`, `session.Store`, `agent.Project`) are defined in
-  [`architecture.md` §3.2](architecture.md).
+  [`architecture.md` §3.2](architecture/packages.md#32-core-contracts).
 - Avoid package-level mutable state. Wire dependencies in `main`; pass a
   logger, config, and store explicitly.
 - No `init()` for wiring or configuration. Initialization errors are returned
@@ -127,7 +128,8 @@ apply to every package.
   `fmt.Errorf("read %s: %w", path, err)`.
 - Sentinel errors live at package boundaries for caller decisions. Use typed
   errors when the caller needs data. Tool sentinel errors and result codes are
-  defined in [`architecture.md` §3.2 and §5](architecture.md).
+  defined in [`architecture.md` §3.2](architecture/packages.md#32-core-contracts)
+  and [§5](architecture/tools.md#5-tools).
 - Never branch on error message text. Use `errors.Is`/`errors.As`, typed
   errors, or a stable result code supplied by the boundary. Never compare raw
   argument strings.
@@ -166,7 +168,8 @@ apply to every package.
 ### Filesystem and subprocess
 
 Workspace containment, tool limits, and command policy are in
-[`architecture.md` §5](architecture.md). These are the general Go rules:
+[`architecture.md` §5](architecture/tools.md#5-tools). These are the general
+Go rules:
 
 - Read with a limit, never an unbounded `io.ReadAll`. Reject binary or invalid
   UTF-8 at a boundary and sanitize before the bytes reach a transcript or log.
@@ -218,7 +221,8 @@ cmd.WaitDelay = 5 * time.Second
   before marshaling. Cap every payload at capture time and at log-field time;
   mark truncation.
 - Event-log and provider-decoding specifics are in
-  [`architecture.md` §7 and §2.2](architecture.md).
+  [`architecture.md` §7](architecture/session.md#7-session-log) and
+  [§2.2](architecture/provider.md#22-canonical-model-and-dialect-adapters).
 
 ### Logging and secrets
 
@@ -228,7 +232,10 @@ cmd.WaitDelay = 5 * time.Second
   human/progress logs. Keep secrets in memory; redact them from error bodies
   and diagnostic strings, and cap every body before logging.
 - Provider token handling, request logging, HTTP client limits, and retry
-  policy are defined in [`architecture.md` §2, §7, and §8](architecture.md).
+  policy are defined in
+  [`architecture.md` §2](architecture/provider.md#2-provider-and-model),
+  [§7](architecture/session.md#7-session-log), and
+  [§8](architecture/failures.md#8-failure-handling).
 
 ## 7. Testing
 

@@ -256,7 +256,7 @@ no session behind it.
 
 `agent.HistoryItem` is a component type, so the facade defines
 `aharness.TranscriptItem` and `aharness.TranscriptKind` and copies at the
-boundary, per [architecture §3.2.1](../architecture.md#321-public-library-facade).
+boundary, per [architecture §3.2.1](../architecture/facade.md#321-public-library-facade).
 
 This is not a "structured-output/report DTO" in the `AGENTS.md` sense: that
 boundary forbids DTOs describing *model* output. `State`, `SessionInfo`, and
@@ -642,7 +642,7 @@ reversed, only `forward`/`observe` in `agent/spawn.go` and the §4 rows change.
   it needs a session-schema field and a decision about display text versus
   provider-native continuation material; it remains the separate
   durable-reasoning decision named in
-  [architecture §2.4](../architecture.md#24-continuation-for-a-new-dialect).
+  [architecture §2.4](../architecture/provider.md#24-continuation-for-a-new-dialect).
   `ObserveChild` closes the *live* asymmetry only.
 - **A global merge order.** The SDK promises per-child order. Any interleaving
   across children is the host's.
@@ -688,5 +688,5 @@ reversed, only `forward`/`observe` in `agent/spawn.go` and the §4 rows change.
 | Per-child sinks can run concurrently | `docs/architecture.md` §3.3 (read-only fan-out); `agent/spawn.go` `displayMu` |
 | Root-only child events were already an audit finding | `aharness-host-surface-issues.md` issue 6 (gitignored `.issues/` directory; named, not linked) |
 | Recorded child run shape | [subagent-build.md](subagent-build.md) §3.6 table, §3.8 |
-| Facade copies DTOs | [architecture.md](../architecture.md#321-public-library-facade) |
+| Facade copies DTOs | [architecture.md](../architecture/facade.md#321-public-library-facade) |
 | DoD gates | [definition-of-done.md](../definition-of-done.md) |

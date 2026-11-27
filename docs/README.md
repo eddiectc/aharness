@@ -28,8 +28,9 @@ than rewriting its conclusions.
 
 - [coding-standard.md](coding-standard.md) wins on Go practice.
 - The current reference documents win on structure, runtime contracts, numeric
-  limits, and shipped SDK surface: [architecture.md](architecture.md),
-  [limits.md](limits.md), and [testing-strategy.md](testing-strategy.md).
+  limits, and shipped SDK surface: [architecture.md](architecture.md) and its
+  area pages under [architecture/](architecture/), [limits.md](limits.md), and
+  [testing-strategy.md](testing-strategy.md).
 - A dated plan or research document records intent and evidence; it never
   overrides the current reference. Where they disagree, the reference wins.
   Losing precedence is not immutability: a plan is edited while it is being
@@ -44,7 +45,7 @@ than rewriting its conclusions.
 
 | Document | Defines |
 |---|---|
-| [architecture.md](architecture.md) | SDK structure, component packages, loop and tool contracts, session log, and the public facade |
+| [architecture.md](architecture.md) | SDK architecture index: system overview, precedence, recorded boundary, and one page per area under [architecture/](architecture/) |
 | [coding-standard.md](coding-standard.md) | Normative Go practice, dependencies, testing, and §8 review gates |
 | [definition-of-done.md](definition-of-done.md) | Normative completion checklist for every change |
 | [writing-standard.md](writing-standard.md) | Normative prose, comment, commit, issue, and pull-request rules |
@@ -86,7 +87,9 @@ than rewriting its conclusions.
 
 ## Link check
 
-`make docs-check` verifies that relative links and image targets in repository
-Markdown files resolve. Code fences are ignored so examples are not treated as
-links. `make dod` runs this check as part of the full automated
-definition-of-done set.
+`make docs-check` verifies that relative links and image targets in `README.md`,
+`AGENTS.md`, and `docs/**/*.md` resolve, and that a `#fragment` matches a
+heading on the target page using GitHub's slug rules (lowercase, punctuation
+dropped, underscores kept, spaces as hyphens). Only inline links are read, and
+code fences are ignored so examples are not links. `make dod` runs this check
+as part of the full automated definition-of-done set.

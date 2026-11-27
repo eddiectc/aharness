@@ -535,7 +535,7 @@ closed and synced before the result is returned, so a failed child is still
 resumable and inspectable.
 
 Budget rationale. A child has no turn cap of its own by default. Run budgets
-are unlimited unless set ([README](../../README.md#what-aharness-includes),
+are unlimited unless set ([README](../../README.md#quick-start),
 [configuration §4](https://github.com/eddiectc/acode/blob/main/docs/configuration.md#4-which-limits-are-worth-configuring)),
 and a fixed child cap would contradict that rule while adding a constant an
 operator cannot see or tune. Two bounds remain, and they are not symmetric with
@@ -1231,7 +1231,7 @@ currently enumerates every stable code.
   serialization is a data race in the TUI model.
 - **Read-only is a grant, not a sandbox.** `run_command` can write. The bundled
   read-only agents omit it; a user agent that adds it is documented as no
-  longer read-only, consistent with [README isolation](../../README.md#isolation).
+  longer read-only, consistent with [README isolation](../../README.md#tools-and-policy).
 - **A child can run long without converging.** `stuck` catches identical
   repeats only. With no default turn cap, a child that keeps varying its calls
   can run until the human interrupts. The mitigations are forwarded progress,
