@@ -4,9 +4,8 @@
 - **Status:** normative for the aharness SDK after the acode extraction: the
   root facade and the `agent`, `engine`, `model`, `tools`, and `session`
   packages
-- **Related:** [Go coding standard](coding-standard.md),
-  [bare-minimum harness research](research/agent-harness-minimum.md),
-  [limits](limits.md), [testing strategy](testing-strategy.md)
+- **Related:** [Go coding standard](coding-standard.md), [limits](limits.md),
+  [testing strategy](testing-strategy.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 [`coding-standard.md`](coding-standard.md) defines Go practice. This page is the
@@ -70,7 +69,8 @@ and heading anchors in these pages are checked by `make docs-check`.
   owns every cap, timeout, and default value.
 - [definition-of-done.md](definition-of-done.md) gates every change, and
   [testing-strategy.md](testing-strategy.md) owns the test layers.
-- A dated plan or research record never overrides these pages.
+- A plan or research issue records intent and evidence and never overrides
+  these pages.
 
 ## Recorded boundary
 

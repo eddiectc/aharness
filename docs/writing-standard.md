@@ -47,11 +47,10 @@ cost (arXiv 2602.11988); long inputs degrade even simple tasks (Context Rot,
 | Current reference | `docs/*.md` | shipped behavior, contracts, decisions | shipped truth |
 | Work record | GitHub issues and pull requests | intent, progress, review, verification | intent only |
 
-Work in progress lives in GitHub issues; `.issues/` is retired and must not be
-recreated. `docs/plans/` and `docs/research/` are being retired in favor of
-issues (§10); until the [documentation map](README.md) and the
-[definition of done](definition-of-done.md) are updated, an existing dated
-record stays where it is and the map still governs where a new one goes.
+Work in progress lives in GitHub issues; `.issues/`, `docs/plans/`, and
+`docs/research/` are retired and MUST NOT be recreated. A plan is a Task issue
+(§8) and the [documentation map](README.md) governs where a reference document
+goes.
 
 Delete a document when its fact moves or dies. Git keeps the history;
 [`CHANGELOG.md`](../CHANGELOG.md) is the only user-facing history file.
@@ -66,7 +65,7 @@ Delete a document when its fact moves or dies. Git keeps the history;
 | Completion gate | [`definition-of-done.md`](definition-of-done.md) |
 | Branch, CI, tag, release | [`ci-release.md`](ci-release.md) |
 | Bug or feature request | GitHub issue form |
-| Plan with milestones | §8: a plan issue; until the map changes, `docs/plans/` |
+| Plan with milestones | §8: a Task issue with one sub-issue per milestone |
 | Decision for one change | Commit body; durable only if it binds later code |
 | Host-only concern | Link the [acode](https://github.com/eddiectc/acode) repository; do not document the host here |
 | User-visible change | [`CHANGELOG.md`](../CHANGELOG.md) |
@@ -101,8 +100,8 @@ Rules:
   verifies that local targets and heading anchors resolve.
 - A current reference is true at `HEAD`. A `Date:` in its header records the
   last substantive review, not a freshness guarantee; new reference documents
-  omit it. A dated record (issue, plan, research) carries `Date` and `Status`
-  and is never normative.
+  omit it. A work record in an issue carries `Date` and `Status` and is never
+  normative.
 - No screenshots, diagrams, or Mermaid: not greppable, not diffable, not
   readable in a terminal.
 - Delete, do not archive. Do not keep "historical" copies.
@@ -203,9 +202,6 @@ Rules:
 
 ## 8. Plans as issues
 
-This is the target shape; §10 tracks the documentation-map and DoD change that
-makes it normative.
-
 - A plan is one Task issue plus one sub-issue per milestone. Open children with
   `gh issue create --parent N`; keep the count under ten.
 - The body holds goal, non-goals, contract deltas, milestones, and
@@ -232,17 +228,6 @@ asks four questions and links the definition of done instead of restating it:
 
 Keep it under 20 lines. One concern per pull request. Do not paste a passing
 log; paste the command and the one-line result.
-
-## 10. Migration targets
-
-The remaining gaps are tracked as GitHub issues, not restated here. Do not add
-to an oversized artifact while its issue is open.
-
-| Gap | Issue |
-|---|---|
-| Dated plans and research | #25 |
-| Outstanding real-provider and host smokes | #26 |
-| Go files over 1,000 lines | #28 |
 
 ## Sources
 

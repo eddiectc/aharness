@@ -3,7 +3,8 @@
 - **Date:** 2026-11-20
 - **Status:** normative for all Go code in this repository
 - **Toolchain:** Go 1.27.4; stdlib-first, with the approved extractor exception
-- **Related:** [system architecture](architecture.md), [bare-minimum harness research](research/agent-harness-minimum.md)
+- **Related:** [system architecture](architecture.md),
+  [definition of done](definition-of-done.md)
 - **Agent entry point:** [AGENTS.md](../AGENTS.md)
 
 This document defines how the Go code is written. It does not define

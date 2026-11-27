@@ -150,9 +150,7 @@ Image input:
   dialect that does not maps the tool result to its text form and emits one
   adjacent `user` message carrying the caption and the image. Both built-in
   adapters take the second path because image parts inside a tool message are
-  accepted by some gateways and silently dropped by others; the measured
-  behavior is recorded in
-  [plans/read-image-build.md](../plans/read-image-build.md).
+  accepted by some gateways and silently dropped by others.
 - The image bytes are base64 in a `data:` URL, so one image is about 1.37 times
   its declared size on the wire. The 512 KiB delivered cap bounds that.
 

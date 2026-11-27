@@ -3,8 +3,7 @@
 - **Date:** 2026-11-18
 - **Status:** normative for every task, fix, feature, refactor, and
   documentation change
-- **Applies to:** every change in this repository, and every dated record in
-  [docs/plans](plans/) and [docs/research](research/)
+- **Applies to:** every change in this repository
 - **Related:** [Go coding standard](coding-standard.md),
   [SDK architecture](architecture.md),
   [testing strategy](testing-strategy.md), [limits](limits.md), and the
@@ -16,10 +15,11 @@ skip an item: state why it does not apply.
 Precedence: the [coding standard](coding-standard.md) wins on Go practice; the
 current reference documents ([architecture](architecture.md),
 [limits](limits.md), [testing strategy](testing-strategy.md)) win on structure
-and runtime contracts. A dated plan or research document records intent and
-evidence; where one disagrees with the current reference, the reference wins.
-Precedence is not immutability: a plan under implementation is edited as the
-work lands, and a dated record is corrected when it turns out to be wrong.
+and runtime contracts. A work record in an issue carries intent and evidence;
+where one disagrees with the current reference, the reference wins. Precedence
+is not immutability: an issue is edited as the work lands and corrected when it
+turns out to be wrong, and the reference is corrected when the code outgrows
+it.
 
 ## 1. Behavior and scope
 
@@ -77,14 +77,13 @@ work lands, and a dated record is corrected when it turns out to be wrong.
       of truth for each topic: [architecture](architecture.md) for structure,
       protocols, and the public facade; [limits](limits.md) for caps and
       numbers; [testing strategy](testing-strategy.md) for test layers.
-- [ ] **No stale authority.** A plan does not claim to be normative for
-      behavior that ships; it records intent, milestones, deviations, and
-      verification.
-- [ ] **Dated records stay current.** A plan under implementation is updated as
-      the work lands — status, decisions, deviations, and verification — and a
-      claim that the code has outgrown is corrected or marked superseded. The
-      current reference still carries the shipped truth; the plan never becomes
-      the authority.
+- [ ] **No stale authority.** An issue records intent, milestones, deviations,
+      and verification; it never claims to be normative for behavior that
+      ships.
+- [ ] **Work record current.** A plan issue is updated as the work lands —
+      status, milestones, deviations, and verification — and closed only when
+      the shipped truth is in code and the current reference. A claim that the
+      code has outgrown is corrected or withdrawn.
 - [ ] **User-facing surface.** A public API change updates the README feature
       description and examples.
 - [ ] **New interfaces.** New exported types, fields, methods, errors, and
