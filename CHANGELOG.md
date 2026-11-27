@@ -8,6 +8,19 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- `agent.LoadAgentsWithTools` and `agent.ParseAgentDefinitionWithTools` accept
+  the host's registered custom tool names, so a discovered base or
+  `<state-dir>/agents/*.md` definition can grant a custom tool. The programmatic
+  path (`DelegationConfig.Agents`) already accepted one, but discovery validated
+  every grant against the builtin toolset alone and silently dropped a role that
+  named a host tool, while the same definition worked when passed in code. The
+  existing `LoadAgents` and `ParseAgentDefinition` keep their builtin-only
+  behavior. A custom name that fails the tool-name grammar is dropped with a
+  warning, and the definition that names it fails validation with an actionable
+  error.
+
 ### Fixed
 
 - A non-2xx `web_fetch` provider response now carries the provider's own error

@@ -725,7 +725,12 @@ callers should use. The shipped surface, by area:
   the host-facing `agent.LoadAgents(base, stateDir)` helper: it validates the
   host's base entries (`SourceDefault`, empty `Path`) and merges
   `<state>/agents/*.md` (`SourceUser`, file `Path`) in file-name order, with a
-  file replacing a base entry of the same name.
+  file replacing a base entry of the same name. A definition grant may name a
+  builtin tool of the current toolset; `agent.LoadAgentsWithTools` and
+  `agent.ParseAgentDefinitionWithTools` also accept the host's registered custom
+  tool names, so a discovered role can grant a host tool. A rejected custom name
+  is dropped with a warning, and the definition that names it fails validation
+  with an actionable error rather than an empty grant.
   Child grants are intersected with the parent's authority, a child can never
   delegate, and `ConcurrencySafe` extends concurrent child fan-out only.
   `DelegationConfig.ObserveChild` opts into a per-child display stream: it

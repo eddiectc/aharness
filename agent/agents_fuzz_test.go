@@ -77,7 +77,8 @@ func FuzzParseAgentDefinition(f *testing.F) {
 		if !def.Valid() {
 			t.Fatalf("parsed definition carries an error: %+v", def)
 		}
-		if err := validateAgentDefinition(&def); err != nil {
+		known, _ := toolNamesWithCustom(nil)
+		if err := validateAgentDefinition(&def, known); err != nil {
 			t.Fatalf("parsed definition fails validation: %v", err)
 		}
 		if len(def.Prompt) > maxAgentPromptBytes || len(def.Name) > maxAgentNameBytes || len(def.Description) > maxAgentDescriptionSize {

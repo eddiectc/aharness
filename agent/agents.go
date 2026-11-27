@@ -142,8 +142,27 @@ var agentHeaderKeys = [...]string{"name", "description", "model", "thinking_effo
 // ParseAgentDefinition parses one definition file: `key: value` lines, a `---`
 // line, then the prompt body verbatim. The grammar is deliberately smaller
 // than YAML: values are opaque trimmed strings with no quoting, escaping,
-// nesting, or sequence syntax, and the only comma-separated value is tools.
+// nesting, or sequence syntax, and the only comma-separated value is tools. A
+// grant may name a builtin tool of the current toolset; use
+// ParseAgentDefinitionWithTools when a definition grants a host custom tool.
 func ParseAgentDefinition(data []byte) (AgentDefinition, error) {
+	return ParseAgentDefinitionWithTools(data, nil)
+}
+
+// ParseAgentDefinitionWithTools is ParseAgentDefinition with additional
+// accepted tool names, so a definition may grant a custom tool the host
+// registers through ToolsConfig.Extra. A custom name must satisfy the custom
+// tool name grammar; a duplicate or a builtin name is accepted as already
+// known.
+func ParseAgentDefinitionWithTools(data []byte, customTools []string) (AgentDefinition, error) {
+	known, rejected := toolNamesWithCustom(customTools)
+	if len(rejected) > 0 {
+		return AgentDefinition{}, errors.New(rejected[0])
+	}
+	return parseAgentDefinition(data, known)
+}
+
+func parseAgentDefinition(data []byte, known map[string]bool) (AgentDefinition, error) {
 	if len(data) > maxAgentDefinitionBytes {
 		return AgentDefinition{}, fmt.Errorf("definition is %d bytes; the limit is %d", len(data), maxAgentDefinitionBytes)
 	}
@@ -209,7 +228,7 @@ func ParseAgentDefinition(data []byte) (AgentDefinition, error) {
 			def.MaxTurns = n
 		}
 	}
-	if err := validateAgentDefinition(&def); err != nil {
+	if err := validateAgentDefinition(&def, known); err != nil {
 		return AgentDefinition{}, err
 	}
 	return def, nil
@@ -249,8 +268,9 @@ func ValidateAgentName(name string) error {
 
 // validateAgentDefinition enforces the closed contract: a stable name, a
 // description, a non-empty tool grant without delegate, and a non-empty prompt
-// body. A child with no tools cannot act, and depth is one.
-func validateAgentDefinition(def *AgentDefinition) error {
+// body. A child with no tools cannot act, and depth is one. Every granted name
+// must be in known, the tool names this host provides.
+func validateAgentDefinition(def *AgentDefinition, known map[string]bool) error {
 	if err := ValidateAgentName(def.Name); err != nil {
 		return err
 	}
@@ -267,9 +287,9 @@ func validateAgentDefinition(def *AgentDefinition) error {
 		if name == "delegate" {
 			return errors.New("tools must not include delegate: a child cannot delegate")
 		}
-	}
-	if err := tools.ValidateGrant(def.Tools); err != nil {
-		return fmt.Errorf("tools: %w", err)
+		if !known[name] {
+			return fmt.Errorf("tool %q is not defined by toolset %s or declared as a host custom tool", name, tools.Version)
+		}
 	}
 	if strings.TrimSpace(def.Prompt) == "" {
 		return errors.New("prompt body is empty")
@@ -278,6 +298,30 @@ func validateAgentDefinition(def *AgentDefinition) error {
 		return fmt.Errorf("prompt body is %d bytes; the limit is %d", len(def.Prompt), maxAgentPromptBytes)
 	}
 	return nil
+}
+
+// toolNamesWithCustom returns the tool names a discovered definition may grant:
+// the current toolset plus the host's custom tool names. It reports each custom
+// name it rejected, so a loader can warn and a parser can fail. A name that is
+// already known is skipped, so a duplicate or a builtin cannot widen the set.
+func toolNamesWithCustom(customTools []string) (map[string]bool, []string) {
+	names := tools.Names()
+	known := make(map[string]bool, len(names)+len(customTools))
+	for _, name := range names {
+		known[name] = true
+	}
+	var rejected []string
+	for _, name := range customTools {
+		if known[name] {
+			continue
+		}
+		if err := tools.ValidateToolName(name); err != nil {
+			rejected = append(rejected, err.Error())
+			continue
+		}
+		known[name] = true
+	}
+	return known, rejected
 }
 
 // validAgentName reports whether name is a stable identifier for logs and
@@ -309,9 +353,23 @@ func validAgentName(name string) bool {
 // entry of the same name and appending new names. A nil or empty base means no
 // host defaults. Invalid base entries and files are skipped with a warning and
 // never replace a valid entry; a missing agent directory is not an error. The
-// 32-agent cap applies to the combined set.
+// 32-agent cap applies to the combined set. A grant may name a builtin tool of
+// the current toolset.
 func LoadAgents(base []AgentDefinition, stateDir string) *AgentCatalog {
+	return LoadAgentsWithTools(base, stateDir, nil)
+}
+
+// LoadAgentsWithTools is LoadAgents with additional accepted tool names, so a
+// base or discovered definition may grant a custom tool the host registers
+// through ToolsConfig.Extra. A rejected custom name is dropped with a warning,
+// so a definition that names it fails validation with an actionable message
+// instead of silently widening the grant.
+func LoadAgentsWithTools(base []AgentDefinition, stateDir string, customTools []string) *AgentCatalog {
+	known, rejected := toolNamesWithCustom(customTools)
 	catalog := &AgentCatalog{}
+	for _, detail := range rejected {
+		catalog.Warnings = append(catalog.Warnings, "ignore custom tool: "+detail)
+	}
 	seen := make(map[string]bool, len(base))
 	for i, supplied := range base {
 		def := cloneAgentDefinition(supplied)
@@ -322,7 +380,7 @@ func LoadAgents(base []AgentDefinition, stateDir string) *AgentCatalog {
 		if label == "" {
 			label = fmt.Sprintf("base[%d]", i)
 		}
-		if err := validateAgentDefinition(&def); err != nil {
+		if err := validateAgentDefinition(&def, known); err != nil {
 			def.Err = err.Error()
 			catalog.Invalid = append(catalog.Invalid, def)
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: %v", label, err))
@@ -339,7 +397,7 @@ func LoadAgents(base []AgentDefinition, stateDir string) *AgentCatalog {
 		catalog.Agents = catalog.Agents[:maxAgents]
 		catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("only the first %d agents are loaded; later definitions are ignored", maxAgents))
 	}
-	loadAgentDirectory(catalog, stateDir)
+	loadAgentDirectory(catalog, stateDir, known)
 	slices.SortFunc(catalog.Agents, func(a, b AgentDefinition) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -361,7 +419,7 @@ func cloneAgentDefinition(def AgentDefinition) AgentDefinition {
 // catalog, replacing a base entry of the same name. A missing directory is not
 // an error; an invalid entry is recorded in Invalid with a warning and never
 // replaces anything.
-func loadAgentDirectory(catalog *AgentCatalog, stateDir string) {
+func loadAgentDirectory(catalog *AgentCatalog, stateDir string, known map[string]bool) {
 	dir := filepath.Join(stateDir, "agents")
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -390,7 +448,7 @@ func loadAgentDirectory(catalog *AgentCatalog, stateDir string) {
 			catalog.Warnings = append(catalog.Warnings, fmt.Sprintf("skip agent definition %s: not a regular file", path))
 			continue
 		}
-		def, err := readAgentDefinition(root, entry.Name())
+		def, err := readAgentDefinition(root, entry.Name(), known)
 		if err != nil {
 			catalog.Invalid = append(catalog.Invalid, AgentDefinition{
 				Name: entry.Name(), Source: SourceUser, Path: path, Err: err.Error(),
@@ -416,7 +474,7 @@ func loadAgentDirectory(catalog *AgentCatalog, stateDir string) {
 
 // readAgentDefinition reads one definition file through the state-directory
 // root, so no path outside the agent directory is ever read.
-func readAgentDefinition(root *os.Root, name string) (AgentDefinition, error) {
+func readAgentDefinition(root *os.Root, name string, known map[string]bool) (AgentDefinition, error) {
 	file, err := root.Open(name)
 	if err != nil {
 		return AgentDefinition{}, fmt.Errorf("open: %w", err)
@@ -429,7 +487,7 @@ func readAgentDefinition(root *os.Root, name string) (AgentDefinition, error) {
 	if len(data) > maxAgentDefinitionBytes {
 		return AgentDefinition{}, fmt.Errorf("definition exceeds %d bytes", maxAgentDefinitionBytes)
 	}
-	return ParseAgentDefinition(data)
+	return parseAgentDefinition(data, known)
 }
 
 // replaceOrAppendAgent installs def, replacing a base agent of the same name in

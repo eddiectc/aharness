@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/eddiectc/aharness/tools"
 )
 
 const validDefinition = `name: reviewer
@@ -180,6 +182,79 @@ func testAgentDefinitions() []AgentDefinition {
 			Tools:       []string{"read_file"},
 			Prompt:      "Read the assigned test input.\n",
 		},
+	}
+}
+
+func TestLoadAgentsRejectsUnknownTool(t *testing.T) {
+	def := testBaseAgent("reviewer", "A base reviewer.")
+	def.Tools = []string{"read_file", "quote_lookup"}
+	catalog := LoadAgents([]AgentDefinition{def}, t.TempDir())
+	if len(catalog.Agents) != 0 || len(catalog.Invalid) != 1 {
+		t.Fatalf("agents = %d invalid = %d, want 0/1", len(catalog.Agents), len(catalog.Invalid))
+	}
+	want := `tool "quote_lookup" is not defined by toolset ` + tools.Version + " or declared as a host custom tool"
+	if !strings.Contains(catalog.Invalid[0].Err, want) {
+		t.Errorf("error = %q, want %q", catalog.Invalid[0].Err, want)
+	}
+}
+
+func TestLoadAgentsWithToolsAcceptsCustomGrants(t *testing.T) {
+	base := testBaseAgent("analyst", "A base analyst.")
+	base.Tools = []string{"read_file", "quote_lookup"}
+	stateDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(stateDir, "agents"), 0o700); err != nil {
+		t.Fatalf("make agents dir: %v", err)
+	}
+	file := "name: researcher\ndescription: A file researcher.\ntools: read_file, news_search\n---\nFile body.\n"
+	if err := os.WriteFile(filepath.Join(stateDir, "agents", "researcher.md"), []byte(file), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+
+	catalog := LoadAgentsWithTools([]AgentDefinition{base}, stateDir, []string{"quote_lookup", "news_search"})
+	if len(catalog.Invalid) != 0 {
+		t.Fatalf("invalid = %+v, want none", catalog.Invalid)
+	}
+	if len(catalog.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", catalog.Warnings)
+	}
+	got := make(map[string][]string, len(catalog.Agents))
+	for _, def := range catalog.Agents {
+		got[def.Name] = def.Tools
+	}
+	if names := strings.Join([]string{"analyst", "researcher"}, ","); len(got) != 2 || got["analyst"] == nil || got["researcher"] == nil {
+		t.Fatalf("agents = %v, want %s", got, names)
+	}
+	if !slices.Contains(got["analyst"], "quote_lookup") || !slices.Contains(got["researcher"], "news_search") {
+		t.Fatalf("grants = %v, want the custom names preserved", got)
+	}
+}
+
+func TestLoadAgentsWithToolsRejectsInvalidCustomName(t *testing.T) {
+	def := testBaseAgent("analyst", "A base analyst.")
+	def.Tools = []string{"read_file", "Bad Name"}
+	catalog := LoadAgentsWithTools([]AgentDefinition{def}, t.TempDir(), []string{"Bad Name"})
+	if len(catalog.Agents) != 0 || len(catalog.Invalid) != 1 {
+		t.Fatalf("agents = %d invalid = %d, want 0/1", len(catalog.Agents), len(catalog.Invalid))
+	}
+	if !strings.Contains(catalog.Invalid[0].Err, `"Bad Name"`) {
+		t.Errorf("error = %q, want the rejected custom name", catalog.Invalid[0].Err)
+	}
+	if len(catalog.Warnings) == 0 || !strings.Contains(catalog.Warnings[0], "ignore custom tool") {
+		t.Errorf("warnings = %v, want an ignore-custom-tool warning", catalog.Warnings)
+	}
+}
+
+func TestParseAgentDefinitionWithTools(t *testing.T) {
+	data := []byte("name: analyst\ndescription: A base analyst.\ntools: read_file, quote_lookup\n---\nBody.\n")
+	if _, err := ParseAgentDefinition(data); err == nil {
+		t.Fatal("ParseAgentDefinition accepted a host custom tool name")
+	}
+	def, err := ParseAgentDefinitionWithTools(data, []string{"quote_lookup"})
+	if err != nil {
+		t.Fatalf("ParseAgentDefinitionWithTools: %v", err)
+	}
+	if want := []string{"read_file", "quote_lookup"}; !slices.Equal(def.Tools, want) {
+		t.Fatalf("tools = %v, want %v", def.Tools, want)
 	}
 }
 
