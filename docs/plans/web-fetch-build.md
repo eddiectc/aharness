@@ -347,7 +347,7 @@ Crawl4AI error mapping:
 | Condition | Result |
 |---|---|
 | Connection/DNS/TLS failure to the provider | `fetch_failed` with the provider host |
-| Non-2xx provider response | `fetch_failed` with the status; `401`/`403` names a rejected token, `429` names rate limiting, `408`/`504` is `timeout` |
+| Non-2xx provider response | `fetch_failed` with the status and the sanitized provider body detail when present (bounded read); `401`/`403` also names a rejected token, `429` names rate limiting, `408`/`504` is `timeout` |
 | `success: false` or `results[0].success: false` | `fetch_failed` with the sanitized `error_message` |
 | Empty `html` | `content_unavailable` with `empty_extraction` |
 

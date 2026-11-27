@@ -130,6 +130,7 @@ func (f *crawl4AIFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResu
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		detail := providerErrorDetail(resp.Body)
 		drainWebBody(resp.Body)
 		message := fmt.Sprintf("web_fetch: provider %s returned HTTP %s", providerHost(f.endpoint), resp.Status)
 		switch resp.StatusCode {
@@ -137,6 +138,9 @@ func (f *crawl4AIFetcher) Fetch(ctx context.Context, target *url.URL) (fetchResu
 			message += " (the provider rejected the configured key)"
 		case http.StatusTooManyRequests:
 			message += " (the provider is rate limiting)"
+		}
+		if detail != "" {
+			message += ": " + detail
 		}
 		if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusGatewayTimeout {
 			return fetchResult{}, webErrorf(CodeTimeout, "%s", message)
@@ -210,6 +214,44 @@ func providerMessage(message, fallback string) string {
 		return fallback
 	}
 	return truncateRunes(strings.Join(strings.Fields(cleaned), " "), 400)
+}
+
+// maxWebProviderErrorBytes bounds the provider error body read. A refusal body
+// is normally a short JSON object; the cap keeps a large error page from
+// costing more than the refusal that produced it.
+const maxWebProviderErrorBytes = 4 << 10
+
+// providerErrorDetail returns the usable part of a provider error body: the
+// first known string member when the body is a JSON object, otherwise the
+// sanitized text itself. It returns "" when the body carries nothing usable, so
+// a provider that sends no body keeps the status-only message. The detail is
+// provider text, not a classified cause: the SDK cannot tell an address refusal
+// from any other provider-side rejection without matching prose.
+func providerErrorDetail(r io.Reader) string {
+	body, err := io.ReadAll(io.LimitReader(r, maxWebProviderErrorBytes))
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Detail       string `json:"detail"`
+		Error        string `json:"error"`
+		ErrorMessage string `json:"error_message"`
+		Message      string `json:"message"`
+	}
+	if jsonv2.Unmarshal(body, &envelope) == nil {
+		for _, candidate := range []string{envelope.Detail, envelope.Error, envelope.ErrorMessage, envelope.Message} {
+			if detail := providerMessage(candidate, ""); detail != "" {
+				return detail
+			}
+		}
+		return ""
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		// Malformed or truncated JSON has no usable member, and dumping its
+		// punctuation is noise.
+		return ""
+	}
+	return providerMessage(string(body), "")
 }
 
 // firstNonEmpty returns the first non-empty value.
