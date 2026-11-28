@@ -222,7 +222,7 @@ compiles unchanged. Two recorded values moved:
 This is a minor, additive release: a live per-child observation stream and a
 transcript reader for any session. The session schema stays `2`, existing logs
 need no migration, `prompt-v3` and the toolset version are unchanged, no event
-type changed, and the concurrency model is unchanged — delegation is still one
+type changed, and the concurrency model is unchanged - delegation is still one
 blocking tool call at depth one.
 
 The real-provider observation smoke is pending: no provider token was available
@@ -249,7 +249,7 @@ retry. The fake-provider tests cover both paths.
   and leaves its siblings and the run untouched. A task that fails before its
   run starts registers no sink.
 - `Transcript(ctx, stateDir, sessionID) ([]TranscriptItem, error)` reads the
-  display transcript of any session — root, delegated child, or fork — from a
+  display transcript of any session - root, delegated child, or fork - from a
   byte snapshot of the log, without the session lock, so a running session stays
   readable and a torn final line is ignored. A missing log is
   `ErrSessionNotFound` and an unusable ID is `ErrInvalidSessionID`.

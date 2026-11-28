@@ -15,8 +15,8 @@ const (
 )
 
 // ParseWebAllowedOrigins validates and normalizes an operator-supplied origin
-// allowlist. Each entry is an absolute http(s) origin — scheme, host, and an
-// optional port — with no userinfo, path, query, or fragment, for example
+// allowlist. Each entry is an absolute http(s) origin - scheme, host, and an
+// optional port - with no userinfo, path, query, or fragment, for example
 // "http://127.0.0.1:8888". The normalized form is scheme://host:port with the
 // scheme's default port filled, lowercased. A duplicate is collapsed; an empty
 // list stays empty. The values come from host configuration only, so fetched

@@ -80,8 +80,8 @@ it.
 - [ ] **No stale authority.** An issue records intent, milestones, deviations,
       and verification; it never claims to be normative for behavior that
       ships.
-- [ ] **Work record current.** A plan issue is updated as the work lands —
-      status, milestones, deviations, and verification — and closed only when
+- [ ] **Work record current.** A plan issue is updated as the work lands -
+      status, milestones, deviations, and verification - and closed only when
       the shipped truth is in code and the current reference. A claim that the
       code has outgrown is corrected or withdrawn.
 - [ ] **User-facing surface.** A public API change updates the README feature

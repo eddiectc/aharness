@@ -100,6 +100,10 @@ Rules:
 - Repository targets use relative links; external sources use absolute URLs.
   Link the owner directly, not a page that links to it. `make docs-check`
   verifies that local targets and heading anchors resolve.
+- Write `-` (hyphen-minus) for a dash, spaced on both sides when it separates
+  clauses: `contract - the boundary - is fixed`. Never write an em dash
+  (U+2014) in prose or in a table cell; a compound keeps its hyphen
+  (`read-only`).
 - A current reference is true at `HEAD`. A `Date:` in its header records the
   last substantive review, not a freshness guarantee; new reference documents
   omit it. A work record in an issue is never normative.

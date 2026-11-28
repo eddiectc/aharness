@@ -34,8 +34,8 @@ Non-negotiables:
   no provider matrix, graph/workflow orchestration, memory/RAG, session-store
   seam, background or nested delegation, in-run parallel tool execution,
   structured-output/report DTOs, prompt templating, or public TUI package. A
-  change that alters a recorded contract — session schema, prompt, tool grant,
-  projection, or concurrency model — is a different product, not an extension.
+  change that alters a recorded contract - session schema, prompt, tool grant,
+  projection, or concurrency model - is a different product, not an extension.
 - Keep the two API levels honest: the root facade copies DTOs at the boundary;
   component packages are public for first-party hosts and advanced integrations.
   Do not leak root-package types into component packages or make a component

@@ -9,7 +9,7 @@
   documents its own host caps in its own repository.
 
 This is the single reference for caps, limits, and timeouts. Units are bytes,
-tokens, or durations as noted. A value of **—** means the limit does not exist.
+tokens, or durations as noted. A value of **-** means the limit does not exist.
 "No separate cap" means the value is bounded only by an enclosing limit (an
 explicit session deadline, the session line cap, disk, or process memory), not
 by its own constant. A backticked identifier names the Go symbol or constant

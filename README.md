@@ -171,8 +171,8 @@ the durable log, replay, authorization, and stuck-detection order. Independent
 work belongs in one batch tool that fans out internally, or in delegated
 children whose grants are read-only or declare `ConcurrencySafe`.
 
-Host integration patterns — a state directory inside the workspace, large
-child reports, and tool-call context — are in
+Host integration patterns - a state directory inside the workspace, large
+child reports, and tool-call context - are in
 [architecture §3.2.1](docs/architecture/facade.md#321-public-library-facade).
 
 ### Scope of the library
@@ -181,12 +181,12 @@ aharness is a coding-agent SDK, not a general agent development kit. It adds
 no provider matrix, graph or workflow orchestration, memory or RAG, pluggable
 session store, background or nested delegation, structured-output DTOs, prompt
 templating, or public TUI package. A change that alters a recorded
-contract—session schema, prompt, tool grant, projection, or concurrency
-model—is a different product, not an extension. The recorded boundary is in
+contract - session schema, prompt, tool grant, projection, or concurrency
+model - is a different product, not an extension. The recorded boundary is in
 [architecture](docs/architecture.md#recorded-boundary).
 
 The tool surface follows the same rule: a builtin is added only when the SDK
-must understand the tool to keep the loop's guarantees — result pairing,
+must understand the tool to keep the loop's guarantees - result pairing,
 projection, caps, model capability handling, and replay. A tool that needs an
 environment, a browser, a service, approval, or domain knowledge belongs to the
 host through `ToolsConfig.Extra`; rendering and domain tools are host tools.

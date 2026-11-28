@@ -148,7 +148,7 @@ is the contract for hosts that mix levels today.
 
 ## 3.2 Core contracts
 
-- `model.CatalogSource` — the discovery seam. `Load(ctx, provider)` honors the
+- `model.CatalogSource` - the discovery seam. `Load(ctx, provider)` honors the
   24-hour cache TTL and performs a conditional GET when stale;
   `Revalidate(ctx, provider)` bypasses the TTL but still falls back to a stale
   valid cache; `Refresh(ctx, provider)` performs an unconditional GET with no
@@ -159,7 +159,7 @@ is the contract for hosts that mix levels today.
   The host constructs the models.dev implementation with the HTTP client, state
   directory, clock, and TTL; tests inject a fake `CatalogSource` or an
   `httptest` server.
-- `model.OpenAIChat` and `model.OpenAIResponses` — concrete dialect adapters
+- `model.OpenAIChat` and `model.OpenAIResponses` - concrete dialect adapters
   with `Complete(ctx, model.Request) (model.Response, error)`. `model.Request`
   carries the projected messages with the versioned system prompt first, tool
   schemas, an optional `max_output_tokens` (zero omits the wire field), an
@@ -178,11 +178,11 @@ is the contract for hosts that mix levels today.
   product identity or supplies one through `WithUserAgent`. The SDK never
   substitutes its own identity, and a request without one fails with
   `ErrUserAgentRequired`.
-- `model.StreamCompleter` — optional `CompleteStream(ctx, req, StreamHandler)`
+- `model.StreamCompleter` - optional `CompleteStream(ctx, req, StreamHandler)`
   contract. The handler receives display-only text and thinking deltas; the
   returned `Response` is authoritative. The agent falls back to `Complete` when
   an adapter does not implement it.
-- `tools.Registry` — concrete registry with `Schemas() []model.ToolSchema`,
+- `tools.Registry` - concrete registry with `Schemas() []model.ToolSchema`,
   `Execute(ctx, name, args) tools.Result`, and
   `ExecuteCall(ctx, tools.Call, name, args) tools.Result`. The dispatcher
   validates arguments and converts errors into `tools.Result`; a panic is
@@ -197,13 +197,13 @@ is the contract for hosts that mix levels today.
   errors for caller decisions: `ErrOutsideWorkspace`, `ErrGitProtected`,
   `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`, `ErrInvalidImage`,
   `ErrNoImageSupport`, and `ErrTooLarge`.
-- `tools.Spawning` — the `delegate` seam:
+- `tools.Spawning` - the `delegate` seam:
   `Spawn(ctx, Call, []SubagentSpec) SpawnResult` plus `Agents() []AgentInfo`.
   `SpawnResult` carries one report per task in array order plus the call's
   `Execution` mode and, when sequential, a reason. `agent.Spawner` implements it
   and owns the child stores. A nil implementation keeps `delegate` registered
   and returns `unavailable`; `-batch` never wires one.
-- `session.Create(stateDir, id)` — creates a new v2 log with mode 0600 and an
+- `session.Create(stateDir, id)` - creates a new v2 log with mode 0600 and an
   exclusive non-blocking `flock`. `session.Open(stateDir, id)` opens an existing
   log for resume, takes an exclusive `flock`, validates it, truncates only a
   torn final line (recording `session_repair`), and terminates a valid final
@@ -220,7 +220,7 @@ is the contract for hosts that mix levels today.
   replays the log as of a byte length captured before the read, so a focused
   child view can read a log another process still appends to without treating a
   just-completed line as corruption.
-- `agent.Inspect(events) (State, error)` — pure function of the durable log. It
+- `agent.Inspect(events) (State, error)` - pure function of the durable log. It
   reconstructs session metadata, cumulative turns and usage, the last run's
   effective configuration (including the latest recorded thinking effort) and
   terminal status, and every unpaired tool call.
@@ -231,10 +231,10 @@ is the contract for hosts that mix levels today.
   recorded `system_prompt`, so the flag is correct for logs written before it
   existed and a host never matches the truncation marker itself. Unknown event
   types and fields within v2 are ignored.
-- `agent.Summarize(events) (SessionSummary, error)` — decodes only the
+- `agent.Summarize(events) (SessionSummary, error)` - decodes only the
   `session_start` metadata and first user message from a log head for the
   `/resume` picker. It is not a substitute for `Inspect`.
-- `agent.LatestModelExchange(events) (ModelExchange, error)` — component-level
+- `agent.LatestModelExchange(events) (ModelExchange, error)` - component-level
   reader for the newest recorded model attempt: the newest `model_request` or
   `model_response` plus its pair when one exists in the same turn without an
   intervening `run_start` or `session_start`. Payloads are copies of the
@@ -244,12 +244,12 @@ is the contract for hosts that mix levels today.
   host reads with `session.ReadSnapshot` and calls this, so raw payload bytes
   never cross the facade boundary. On a fork the newest attempt may be an event
   copied from the parent, and `Run` counts the parent's runs.
-- `agent.WriteSessionStart(store, cfg, parent)` — writes and syncs the
+- `agent.WriteSessionStart(store, cfg, parent)` - writes and syncs the
   once-per-session `session_start` event for a new, forked, or delegated
   session. It records the resolved `system_prompt`, the optional `agent` name,
   the recorded tool grant (`tools`, nil meaning every tool of the version), and
   `parent_session`/`parent_seq` plus `parent_call_id` for a delegated child.
-- `agent.Project(events []session.Event, limits Limits) (Projection, error)` —
+- `agent.Project(events []session.Event, limits Limits) (Projection, error)` -
   pure function of events plus limits; no hidden state. `Limits` carries the
   per-call input budget and the compaction target; the
   prompt is the `system_prompt` recorded in `session_start` used verbatim, or
@@ -261,17 +261,17 @@ is the contract for hosts that mix levels today.
   canonical messages, the input-token estimate, and the elided-result count; the
   runner logs `compaction` when the count changes.
 
-- `agent.ProjectWithTools(events, limits, availableCustomTools)` — projection
+- `agent.ProjectWithTools(events, limits, availableCustomTools)` - projection
   for a session that records caller tools. It verifies the supplied declarations
   against `session_start.custom_tools` (names, descriptions, canonical JSON
   parameters, and `concurrency_safe`), appends the recorded schemas, and then
   applies the recorded grant. `agent.Project` remains the built-in-only entry
   point and returns `agent.ErrToolMismatch` when the session records custom
   tools.
-- `agent.CustomTool{Schema, ConcurrencySafe}` — the single internal carrier for
+- `agent.CustomTool{Schema, ConcurrencySafe}` - the single internal carrier for
   a caller tool. Registration, projection, `session_start` recording, and the
   spawner read this value so they cannot disagree.
-- `agent.Config.ToolPolicy` — called by the runner after `ToolStarted` and
+- `agent.Config.ToolPolicy` - called by the runner after `ToolStarted` and
   before dispatch. A non-context error becomes a `permission_denied` result and
   continues; a context cancellation follows the operation-interrupt path. The
   engine serializes one policy closure across the parent and delegated children,

@@ -111,9 +111,9 @@ results correlated by ID, one optional request-side control (the
 provider-neutral thinking effort), image parts on a tool result, a normalized
 finish reason, token usage, and normalized errors.
 
-Canonical does not mean lossless. Provider-specific material — encrypted
+Canonical does not mean lossless. Provider-specific material - encrypted
 reasoning items, reasoning identifiers, citations, safety metadata, cache
-controls, opaque options, and streaming events — stays in the adapter and is
+controls, opaque options, and streaming events - stays in the adapter and is
 dropped unless the loop or the dialect's continuation needs it. Thinking text is
 the one exception: it is mapped into the typed display-only
 `model.Response.Reasoning` field so a host can display it, and it is never logged
@@ -192,8 +192,8 @@ Normalization rules:
   `prompt_tokens_details.cached_tokens` and falls back to
   `prompt_cache_hit_tokens`; both dialects map cache-write and reasoning
   details when present. Old v2 logs decode with `reported=false` and zero
-  subsets. Every aggregate — run, cumulative, subagent, reconstructed state,
-  and recorded delegate details — adds all fields, so the subsets survive the
+  subsets. Every aggregate - run, cumulative, subagent, reconstructed state,
+  and recorded delegate details - adds all fields, so the subsets survive the
   fold; an aggregate is `reported` when any folded response reported usage.
 - Canonical errors are typed (`HTTPError`, `TransportError`, `ProtocolError`,
   and context overflow); adapters map HTTP statuses and provider error bodies.
@@ -355,9 +355,9 @@ Reasoning continuation is an adapter obligation, not a loop or log feature.
 When adding a dialect adapter that serves reasoning models, or enabling a
 native provider that already has one, the adapter MUST:
 
-- Retain the provider's exact continuation material — thinking text, raw
+- Retain the provider's exact continuation material - thinking text, raw
   reasoning items, signed thinking blocks, or whatever opaque state the
-  provider requires — never the display summary and never a reconstructed
+  provider requires - never the display summary and never a reconstructed
   string.
 - Request the dialect-specific switch that exposes replayable material:
   Responses sets `include: ["reasoning.encrypted_content"]` for `store: false`;
