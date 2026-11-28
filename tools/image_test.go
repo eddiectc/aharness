@@ -3,15 +3,18 @@ package tools
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	stdimage "image"
 	"image/color"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -21,9 +24,13 @@ func solidPNG(t *testing.T, w, h int) []byte {
 	t.Helper()
 	img := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
+		row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 		for x := 0; x < w; x++ {
 			v := uint8(((x / 17) * 31) ^ ((y / 19) * 13))
-			img.Set(x, y, color.RGBA{R: v, G: v / 2, B: 255 - v, A: 255})
+			row[x*4+0] = v
+			row[x*4+1] = v / 2
+			row[x*4+2] = 255 - v
+			row[x*4+3] = 255
 		}
 	}
 	var buf bytes.Buffer
@@ -33,19 +40,69 @@ func solidPNG(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
+// pngHeader declares a w x h PNG without any image data. DetectContentType
+// sniffs the signature and png.DecodeConfig reads the signature and IHDR, which
+// is all normalizeImageBytes needs to reject a source above the pixel cap.
+func pngHeader(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:4], uint32(w))
+	binary.BigEndian.PutUint32(ihdr[4:8], uint32(h))
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // color type: truecolor
+	chunk := append([]byte("IHDR"), ihdr[:]...)
+	var buf bytes.Buffer
+	buf.WriteString("\x89PNG\r\n\x1a\n")
+	var length [4]byte
+	binary.BigEndian.PutUint32(length[:], uint32(len(ihdr)))
+	buf.Write(length[:])
+	buf.Write(chunk)
+	var sum [4]byte
+	binary.BigEndian.PutUint32(sum[:], crc32.ChecksumIEEE(chunk))
+	buf.Write(sum[:])
+	return buf.Bytes()
+}
+
 func solidJPEG(t *testing.T, w, h int) []byte {
 	t.Helper()
+	src, err := encodeJPEG(w, h)
+	if err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+	return src
+}
+
+func encodeJPEG(w, h int) ([]byte, error) {
 	img := stdimage.NewRGBA(stdimage.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
+		row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 		for x := 0; x < w; x++ {
-			img.Set(x, y, color.RGBA{R: uint8(x % 251), G: uint8(y % 241), B: 128, A: 255})
+			row[x*4+0] = uint8(x % 251)
+			row[x*4+1] = uint8(y % 241)
+			row[x*4+2] = 128
+			row[x*4+3] = 255
 		}
 	}
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
-		t.Fatalf("encode jpeg: %v", err)
+		return nil, err
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
+}
+
+// edgeJPEG is encoded once per test binary. Two tests need a source just over
+// the 2048 px edge, and encoding it once keeps the fixture out of their total.
+var edgeJPEG = sync.OnceValues(func() ([]byte, error) {
+	return encodeJPEG(2100, 600)
+})
+
+func edgeJPEGBytes(t *testing.T) []byte {
+	t.Helper()
+	src, err := edgeJPEG()
+	if err != nil {
+		t.Fatalf("encode jpeg fixture: %v", err)
+	}
+	return src
 }
 
 func TestReadImagePassthrough(t *testing.T) {
@@ -75,7 +132,10 @@ func TestReadImagePassthrough(t *testing.T) {
 
 func TestReadImageDownscalesLargeSource(t *testing.T) {
 	r, dir := newTestRegistry(t)
-	mustWriteFile(t, dir, "big.jpg", solidJPEG(t, 4032, 3024))
+	// 6 MP is over both delivered caps, so this exercises production decode,
+	// boxResize, and JPEG re-encode without paying for pixel work the caps
+	// reject anyway.
+	mustWriteFile(t, dir, "big.jpg", solidJPEG(t, 3000, 2000))
 
 	res := executeArgs(t, r, "read_image", map[string]any{"path": "big.jpg"})
 	if !res.OK {
@@ -94,7 +154,7 @@ func TestReadImageDownscalesLargeSource(t *testing.T) {
 	if len(img.Data) > MaxImageBytes {
 		t.Errorf("delivered %d bytes exceeds the %d byte cap", len(img.Data), MaxImageBytes)
 	}
-	if !strings.Contains(res.Output, "->") || !strings.Contains(res.Output, "4032x3024") {
+	if !strings.Contains(res.Output, "->") || !strings.Contains(res.Output, "3000x2000") {
 		t.Errorf("caption = %q, want source and delivered dimensions", res.Output)
 	}
 	if !strings.Contains(string(res.Details), `"transform":"downscaled"`) {
@@ -104,10 +164,10 @@ func TestReadImageDownscalesLargeSource(t *testing.T) {
 
 func TestReadImageIsDeterministic(t *testing.T) {
 	r, dir := newTestRegistry(t)
-	mustWriteFile(t, dir, "big.jpg", solidJPEG(t, 3000, 2000))
+	mustWriteFile(t, dir, "scaled.jpg", edgeJPEGBytes(t))
 
-	first := executeArgs(t, r, "read_image", map[string]any{"path": "big.jpg"})
-	second := executeArgs(t, r, "read_image", map[string]any{"path": "big.jpg"})
+	first := executeArgs(t, r, "read_image", map[string]any{"path": "scaled.jpg"})
+	second := executeArgs(t, r, "read_image", map[string]any{"path": "scaled.jpg"})
 	if !first.OK || !second.OK {
 		t.Fatalf("read_image failed: %s / %s", first.Error, second.Error)
 	}
@@ -148,8 +208,9 @@ func TestReadImageRejectsUnsupported(t *testing.T) {
 
 func TestReadImageRejectsOversizedSource(t *testing.T) {
 	r, dir := newTestRegistry(t)
-	// 5000x4000 is 20 MP, above the 16 MP source cap.
-	mustWriteFile(t, dir, "huge.png", solidPNG(t, 5000, 4000))
+	// 5000x4000 is 20 MP, above the 16 MP source cap. The header alone is
+	// enough because the rejection happens before any pixel decode.
+	mustWriteFile(t, dir, "huge.png", pngHeader(t, 5000, 4000))
 	res := executeArgs(t, r, "read_image", map[string]any{"path": "huge.png"})
 	if res.OK {
 		t.Fatalf("read_image accepted a 20 MP source")
@@ -277,7 +338,7 @@ func TestNormalizeImageAppliesReadImageCaps(t *testing.T) {
 		wantMedia string
 	}{
 		{"passthrough png", solidPNG(t, 64, 48), nil, "image/png"},
-		{"downscaled jpeg", solidJPEG(t, 3000, 2000), nil, "image/jpeg"},
+		{"downscaled jpeg", edgeJPEGBytes(t), nil, "image/jpeg"},
 		{"gif re-encoded", solidGIF(t, 32, 24), nil, "image/jpeg"},
 		{"text bytes", []byte("hello\n"), ErrInvalidImage, ""},
 		{"corrupt png header", append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 8)...), ErrInvalidImage, ""},
