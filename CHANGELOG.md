@@ -10,6 +10,18 @@ changes are called out under **Changed** and **Removed**.
 
 ### Added
 
+- `ToolResult.Image` lets a caller tool return one image to the model.
+  `tools.NormalizeImage` applies `read_image`'s sniffed type, source caps,
+  downscale, and 512 KiB delivered cap, so a host screenshot tool needs no
+  second `read_image` call and no workspace file. An image the SDK cannot
+  deliver is a failed result with `invalid_image`, `too_large`, or
+  `unavailable` and is never recorded. `tools.MaxImageBytes` is now exported,
+  and the session recorder drops an entry above it instead of writing a payload
+  the provider would reject.
+- `Message.Images` and `ImagePart` carry image parts across the facade's
+  `Request` DTO. The bridge to a caller `Model` dropped them, so a facade host
+  never received a `read_image` result's image and the loop answered about a
+  picture the model had not seen; both directions now copy the parts.
 - `Usage.Add` (facade and `model`) folds one usage value into another. Totals
   and the cached, cache-write, and reasoning subsets add; the result is
   `Reported` when either side reported usage. It is the single fold every

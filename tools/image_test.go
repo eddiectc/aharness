@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	stdimage "image"
 	"image/color"
 	"image/gif"
@@ -89,8 +91,8 @@ func TestReadImageDownscalesLargeSource(t *testing.T) {
 	if int64(img.Width)*int64(img.Height) > maxImagePixels {
 		t.Errorf("delivered %dx%d exceeds the %d px cap", img.Width, img.Height, maxImagePixels)
 	}
-	if len(img.Data) > maxImageBytes {
-		t.Errorf("delivered %d bytes exceeds the %d byte cap", len(img.Data), maxImageBytes)
+	if len(img.Data) > MaxImageBytes {
+		t.Errorf("delivered %d bytes exceeds the %d byte cap", len(img.Data), MaxImageBytes)
 	}
 	if !strings.Contains(res.Output, "->") || !strings.Contains(res.Output, "4032x3024") {
 		t.Errorf("caption = %q, want source and delivered dimensions", res.Output)
@@ -242,14 +244,19 @@ func TestImageInputOptionIsCopied(t *testing.T) {
 	}
 }
 
-func TestReadImageGIFFirstFrame(t *testing.T) {
-	r, dir := newTestRegistry(t)
-	img := stdimage.NewPaletted(stdimage.Rect(0, 0, 32, 24), color.Palette{color.Black, color.White})
+func solidGIF(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := stdimage.NewPaletted(stdimage.Rect(0, 0, w, h), color.Palette{color.Black, color.White})
 	var buf bytes.Buffer
 	if err := gif.Encode(&buf, img, nil); err != nil {
 		t.Fatalf("encode gif: %v", err)
 	}
-	mustWriteFile(t, dir, "anim.gif", buf.Bytes())
+	return buf.Bytes()
+}
+
+func TestReadImageGIFFirstFrame(t *testing.T) {
+	r, dir := newTestRegistry(t)
+	mustWriteFile(t, dir, "anim.gif", solidGIF(t, 32, 24))
 
 	res := executeArgs(t, r, "read_image", map[string]any{"path": "anim.gif"})
 	if !res.OK {
@@ -259,6 +266,61 @@ func TestReadImageGIFFirstFrame(t *testing.T) {
 	// and JPEG.
 	if got := res.Images[0].MediaType; got != "image/jpeg" {
 		t.Errorf("gif delivered as %s, want image/jpeg", got)
+	}
+}
+
+func TestNormalizeImageAppliesReadImageCaps(t *testing.T) {
+	tests := []struct {
+		name      string
+		src       []byte
+		wantErr   error
+		wantMedia string
+	}{
+		{"passthrough png", solidPNG(t, 64, 48), nil, "image/png"},
+		{"downscaled jpeg", solidJPEG(t, 3000, 2000), nil, "image/jpeg"},
+		{"gif re-encoded", solidGIF(t, 32, 24), nil, "image/jpeg"},
+		{"text bytes", []byte("hello\n"), ErrInvalidImage, ""},
+		{"corrupt png header", append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 8)...), ErrInvalidImage, ""},
+		{"empty", nil, ErrInvalidImage, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newTestRegistry(t)
+			img, err := r.NormalizeImage("screenshot", tc.src)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("NormalizeImage error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				if len(img.Data) != 0 {
+					t.Errorf("returned %d bytes with an error", len(img.Data))
+				}
+				return
+			}
+			if img.MediaType != tc.wantMedia {
+				t.Errorf("media type = %s, want %s", img.MediaType, tc.wantMedia)
+			}
+			if img.Width <= 0 || img.Height <= 0 || img.Width > maxImageEdge || img.Height > maxImageEdge {
+				t.Errorf("dimensions = %dx%d, want within the %d px edge", img.Width, img.Height, maxImageEdge)
+			}
+			if int64(img.Width)*int64(img.Height) > maxImagePixels {
+				t.Errorf("%dx%d exceeds the %d px cap", img.Width, img.Height, maxImagePixels)
+			}
+			if len(img.Data) == 0 || len(img.Data) > MaxImageBytes {
+				t.Errorf("delivered %d bytes, want 1..%d", len(img.Data), MaxImageBytes)
+			}
+			if want := fmt.Sprintf("%x", sha256.Sum256(img.Data)); img.SHA256 != want {
+				t.Errorf("SHA256 = %q, want the digest of the delivered bytes", img.SHA256)
+			}
+		})
+	}
+}
+
+func TestNormalizeImageRejectsWhenTheModelTakesNoImages(t *testing.T) {
+	r, _ := newTestRegistry(t)
+	no := false
+	r.SetImageInput(&no)
+	if _, err := r.NormalizeImage("screenshot", solidPNG(t, 8, 8)); !errors.Is(err, ErrNoImageSupport) {
+		t.Fatalf("error = %v, want ErrNoImageSupport", err)
 	}
 }
 

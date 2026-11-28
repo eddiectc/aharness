@@ -86,9 +86,10 @@ type Result struct {
 	Truncated  bool            `json:"truncated,omitempty"`
 	DurationMS int64           `json:"duration_ms,omitempty"`
 	Details    json.RawMessage `json:"details,omitempty"`
-	// Images carries image attachments for the model. Only the built-in
-	// read_image populates it; Output remains the human-readable summary so a
-	// host that does not render images still shows something useful.
+	// Images carries image attachments for the model. The built-in read_image
+	// and a caller tool registered through the facade populate it, at most one
+	// entry per result; Output remains the human-readable summary so a host that
+	// does not render images still shows something useful.
 	Images []Image `json:"-"`
 }
 

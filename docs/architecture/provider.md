@@ -143,9 +143,9 @@ Image input:
 
 - `model.ImagePart` carries `media_type`, the decoded bytes, and the delivered
   dimensions, and `model.Message.Images` holds at most one entry per tool
-  result. Only `image/png` and `image/jpeg` cross this boundary; the built-in
-  tool normalizes anything else. An adapter that is handed another media type
-  returns an error instead of forwarding a mislabeled payload.
+  result. Only `image/png` and `image/jpeg` cross this boundary; the SDK
+  normalizes anything else. An adapter that is handed another media type returns
+  an error instead of forwarding a mislabeled payload.
 - A dialect that accepts image parts inside a tool result maps them in place. A
   dialect that does not maps the tool result to its text form and emits one
   adjacent `user` message carrying the caption and the image. Both built-in

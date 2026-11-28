@@ -25,8 +25,10 @@ const (
 	maxImageSourcePixels = 16_000_000
 	maxImageEdge         = 2048
 	maxImagePixels       = 2_000_000
-	maxImageBytes        = 512 << 10
-	minImageEdge         = 256
+	// MaxImageBytes is the delivered image cap. Every producer normalizes to it
+	// and the session recorder drops an entry above it.
+	MaxImageBytes = 512 << 10
+	minImageEdge  = 256
 )
 
 // Transform names recorded in details.
@@ -76,7 +78,7 @@ func (r *Registry) executeReadImage(ctx context.Context, args json.RawMessage) R
 	if err != nil {
 		return errorResult(err)
 	}
-	img, err := normalizeImage(a.Path, src)
+	img, err := normalizeImageBytes(a.Path, src, "; use read_file for text")
 	if err != nil {
 		return errorResult(err)
 	}
@@ -95,6 +97,32 @@ func (r *Registry) executeReadImage(ctx context.Context, args json.RawMessage) R
 	}
 }
 
+// NormalizeImage prepares one caller-supplied image for the model. It applies
+// the same sniffing, decode, downscale, and delivered caps as read_image, so a
+// caller never hands the model a mislabeled or oversized payload. label names
+// the source in the returned error and is never resolved as a path. The error
+// wraps ErrInvalidImage, ErrTooLarge, or ErrNoImageSupport, and a returned image
+// is always recordable.
+func (r *Registry) NormalizeImage(label string, src []byte) (Image, error) {
+	if r.opts.ImageInput != nil && !*r.opts.ImageInput {
+		return Image{}, ErrNoImageSupport
+	}
+	if len(src) == 0 {
+		return Image{}, fmt.Errorf("%w: %s is empty", ErrInvalidImage, label)
+	}
+	img, err := normalizeImageBytes(label, src, "")
+	if err != nil {
+		return Image{}, err
+	}
+	return Image{
+		MediaType: img.MediaType,
+		Data:      img.Data,
+		Width:     img.Width,
+		Height:    img.Height,
+		SHA256:    img.sha256,
+	}, nil
+}
+
 // normalizedImage is one image ready for the model.
 type normalizedImage struct {
 	MediaType string
@@ -105,9 +133,11 @@ type normalizedImage struct {
 	details   json.RawMessage
 }
 
-// normalizeImage sniffs, decodes, and bounds one image. The extension is never
-// trusted: the media type comes from the bytes.
-func normalizeImage(path string, src []byte) (normalizedImage, error) {
+// normalizeImageBytes sniffs, decodes, and bounds one image. The extension is
+// never trusted: the media type comes from the bytes. label names the source in
+// the error, and textHint is appended when the bytes look like text, which is
+// how read_image points at read_file.
+func normalizeImageBytes(label string, src []byte, textHint string) (normalizedImage, error) {
 	sniffLen := min(len(src), 512)
 	sniff := http.DetectContentType(src[:sniffLen])
 	var mediaType string
@@ -117,35 +147,35 @@ func normalizeImage(path string, src []byte) (normalizedImage, error) {
 	default:
 		hint := ""
 		if strings.HasPrefix(sniff, "text/") {
-			hint = "; use read_file for text"
+			hint = textHint
 		}
-		return normalizedImage{}, fmt.Errorf("%w: %s is %s, read_image supports PNG, JPEG, and GIF%s",
-			ErrInvalidImage, path, displayMediaType(sniff), hint)
+		return normalizedImage{}, fmt.Errorf("%w: %s is %s; supported formats are PNG, JPEG, and GIF%s",
+			ErrInvalidImage, label, displayMediaType(sniff), hint)
 	}
 
 	cfg, _, err := stdimage.DecodeConfig(bytes.NewReader(src))
 	if err != nil {
-		return normalizedImage{}, fmt.Errorf("%w: %s: %w", ErrInvalidImage, path, err)
+		return normalizedImage{}, fmt.Errorf("%w: %s: %w", ErrInvalidImage, label, err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
-		return normalizedImage{}, fmt.Errorf("%w: %s has no dimensions", ErrInvalidImage, path)
+		return normalizedImage{}, fmt.Errorf("%w: %s has no dimensions", ErrInvalidImage, label)
 	}
 	if int64(cfg.Width)*int64(cfg.Height) > maxImageSourcePixels {
 		return normalizedImage{}, fmt.Errorf("%w: %s is %dx%d (%d pixels, limit %d)",
-			ErrTooLarge, path, cfg.Width, cfg.Height, int64(cfg.Width)*int64(cfg.Height), maxImageSourcePixels)
+			ErrTooLarge, label, cfg.Width, cfg.Height, int64(cfg.Width)*int64(cfg.Height), maxImageSourcePixels)
 	}
 
 	// A source that already fits every delivered limit is forwarded byte for
 	// byte, so a screenshot is not recompressed for nothing.
 	if (mediaType == model.MediaTypePNG || mediaType == model.MediaTypeJPEG) &&
 		cfg.Width <= maxImageEdge && cfg.Height <= maxImageEdge &&
-		int64(cfg.Width)*int64(cfg.Height) <= maxImagePixels && len(src) <= maxImageBytes {
-		return newNormalizedImage(path, mediaType, cfg.Width, cfg.Height, len(src), src, mediaType, cfg.Width, cfg.Height, transformPassthrough)
+		int64(cfg.Width)*int64(cfg.Height) <= maxImagePixels && len(src) <= MaxImageBytes {
+		return newNormalizedImage(label, mediaType, cfg.Width, cfg.Height, len(src), src, mediaType, cfg.Width, cfg.Height, transformPassthrough)
 	}
 
 	decoded, _, err := stdimage.Decode(bytes.NewReader(src))
 	if err != nil {
-		return normalizedImage{}, fmt.Errorf("%w: %s: %w", ErrInvalidImage, path, err)
+		return normalizedImage{}, fmt.Errorf("%w: %s: %w", ErrInvalidImage, label, err)
 	}
 
 	w, h := fitImage(decoded.Bounds().Dx(), decoded.Bounds().Dy())
@@ -161,24 +191,24 @@ func normalizeImage(path string, src []byte) (normalizedImage, error) {
 		for _, quality := range []int{85, 75, 65, 55} {
 			var buf bytes.Buffer
 			if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: quality}); err != nil {
-				return normalizedImage{}, fmt.Errorf("encode %s: %w", path, err)
+				return normalizedImage{}, fmt.Errorf("encode %s: %w", label, err)
 			}
-			if buf.Len() <= maxImageBytes {
-				return newNormalizedImage(path, mediaType, cfg.Width, cfg.Height, len(src),
+			if buf.Len() <= MaxImageBytes {
+				return newNormalizedImage(label, mediaType, cfg.Width, cfg.Height, len(src),
 					buf.Bytes(), model.MediaTypeJPEG, w, h, transform)
 			}
 		}
 		nextW, nextH := shrinkStep(w, h)
 		if nextW == w && nextH == h {
 			return normalizedImage{}, fmt.Errorf("%w: %s cannot be reduced below %d bytes without going under %d px",
-				ErrTooLarge, path, maxImageBytes, minImageEdge)
+				ErrTooLarge, label, MaxImageBytes, minImageEdge)
 		}
 		w, h = nextW, nextH
 		transform = transformDownscaled
 	}
 }
 
-func newNormalizedImage(path, srcMedia string, srcW, srcH, srcBytes int, data []byte, media string, w, h int, transform string) (normalizedImage, error) {
+func newNormalizedImage(label, srcMedia string, srcW, srcH, srcBytes int, data []byte, media string, w, h int, transform string) (normalizedImage, error) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	details, err := json.Marshal(imageDetails{

@@ -191,9 +191,12 @@ is the contract for hosts that mix levels today.
   granted declarations and `Execute` rejects an ungranted name with
   `unknown_tool` without running it, so a grant is enforced twice. `Call`
   carries the parent tool-call ID (recorded as a child's `parent_call_id`), the
-  parent turn, and the parent's cumulative usage. The package exports sentinel
+  parent turn, and the parent's cumulative usage. `NormalizeImage` applies the
+  `read_image` sniffing, source caps, downscale, and delivered cap to caller
+  bytes, and `MaxImageBytes` is that delivered cap. The package exports sentinel
   errors for caller decisions: `ErrOutsideWorkspace`, `ErrGitProtected`,
-  `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`, and `ErrTooLarge`.
+  `ErrEditAmbiguous`, `ErrEditNotFound`, `ErrBinaryFile`, `ErrInvalidImage`,
+  `ErrNoImageSupport`, and `ErrTooLarge`.
 - `tools.Spawning` — the `delegate` seam:
   `Spawn(ctx, Call, []SubagentSpec) SpawnResult` plus `Agents() []AgentInfo`.
   `SpawnResult` carries one report per task in array order plus the call's

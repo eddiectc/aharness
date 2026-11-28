@@ -169,7 +169,7 @@ it on every turn. Compaction never mutates the log.
 | `model_request` | debug only | Exact projected messages, capped at 1 MiB; one per distinct projected request; includes `thinking_effort` when one was sent. |
 | `model_response` | per successful call | Text, tool calls (ID, name, arguments), finish reason, usage with cached/cache-write/reasoning subsets and `reported`, optional `cost_micro_usd`, latency, attempt, `streamed`; 1 MiB total canonical content. |
 | `model_retry` | per retried attempt | Attempt number, error class, HTTP status, delay before the next attempt. |
-| `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag, and optional `images` entries (`media_type`, base64 `data`, `width`, `height`, `bytes`, `sha256`). `read_image` is the only producer. The member is additive: a reader that predates it ignores it and projects the caption instead. |
+| `tool_result` | per call | Call ID, tool name, `ok`, stable code, output, error message, exit code, duration, truncated flag, and optional `images` entries (`media_type`, base64 `data`, `width`, `height`, `bytes`, `sha256`). `read_image` and a caller tool's `ToolResult.Image` are the producers, at most one entry per result. The member is additive: a reader that predates it ignores it and projects the caption instead. |
 | `compaction` | as needed | Before/after token estimate, elided result count, policy. |
 | `limit` | as needed | Limit kind, configured value, observed value. |
 | `interrupt` | as needed | Operation (`model`/`tool`), call ID/name for a tool, capped partial text, reason. |
