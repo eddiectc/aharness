@@ -52,6 +52,7 @@ of leaving it to mislead the next reader.
 | [limits.md](limits.md) | The single source for SDK caps, limits, and timeouts |
 | [testing-strategy.md](testing-strategy.md) | Unit, integration, fuzz, and manual smoke layers |
 | [ci-release.md](ci-release.md) | CI triggers, DoD gates, and the tag/release process |
+| [../SECURITY.md](../SECURITY.md) | Security scope, non-goals, supported versions, and how to report |
 | [../CHANGELOG.md](../CHANGELOG.md) | Released versions and the public-surface changes in each |
 
 ## Deleted records
@@ -68,8 +69,8 @@ git show f0e54f3^:docs/plans/subagent-build.md
 ## Link check
 
 `make docs-check` verifies that relative links and image targets in `README.md`,
-`AGENTS.md`, and `docs/**/*.md` resolve, and that a `#fragment` matches a
-heading on the target page using GitHub's slug rules (lowercase, punctuation
-dropped, underscores kept, spaces as hyphens). Only inline links are read, and
-code fences are ignored so examples are not links. `make dod` runs this check
-as part of the full automated definition-of-done set.
+`AGENTS.md`, `SECURITY.md`, and `docs/**/*.md` resolve, and that a `#fragment`
+matches a heading on the target page using GitHub's slug rules (lowercase,
+punctuation dropped, underscores kept, spaces as hyphens). Only inline links are
+read, and code fences are ignored so examples are not links. `make dod` runs this
+check as part of the full automated definition-of-done set.
