@@ -114,9 +114,13 @@ type ContractOverride struct {
 
 // State is the durable session state reconstructed from the log.
 type State struct {
-	ID           string
-	Workspace    string
-	StateDir     string
+	ID        string
+	Workspace string
+	StateDir  string
+	// Model is the effective model identity. Its ContextWindow, InputLimit, and
+	// MaxOutputTokens mirror the recorded per-call limits, so an advertised
+	// output ceiling is not reconstructed here; read it from DiscoverModel or
+	// ListModels before New.
 	Model        ModelSpec
 	AgentName    string
 	SystemPrompt string
@@ -379,9 +383,11 @@ func fromInternalChildren(children []agent.ChildOutcome) []ChildOutcome {
 	return out
 }
 
-// deriveLimits computes the per-call budget from a model spec.
-func deriveLimits(spec ModelSpec) (Limits, error) {
-	limits, err := agent.NewLimits(spec.ContextWindow, spec.MaxOutputTokens, spec.InputLimit)
+// deriveLimits computes the per-call budget from a model spec and the session's
+// explicit output budget. The spec supplies the context window and input limit;
+// its advertised output ceiling is metadata and never a request budget.
+func deriveLimits(spec ModelSpec, output int) (Limits, error) {
+	limits, err := agent.NewLimits(spec.ContextWindow, output, spec.InputLimit)
 	if err != nil {
 		return Limits{}, &ConfigError{Field: "Model.Spec.ContextWindow", Detail: err.Error()}
 	}

@@ -17,6 +17,20 @@ changes are called out under **Changed** and **Removed**.
 
 ### Fixed
 
+- A model's advertised output ceiling no longer becomes the request's
+  `max_tokens`/`max_output_tokens`. `DiscoverModel` copies the catalog
+  `limit.output` into `ModelSpec.MaxOutputTokens` as display metadata, but
+  `Config.Limits.MaxOutputTokens` is now the only source of a request output
+  budget, as [limits.md](docs/limits.md) documents: an unset budget omits the
+  field, a negative value is a `ConfigError` instead of being ignored, and a
+  mid-session model switch or a delegated child keeps the session's explicit
+  budget while the context window follows the model. On `Resume`/`Fork`, a
+  non-zero `Limits` is an explicit override that replaces the recorded per-call
+  limits, so a zero `MaxOutputTokens` clears an inherited budget, while an
+  all-zero `Limits` still inherits the recorded set. A `MaxContextTokens`
+  override below the model's input limit now narrows the input budget instead
+  of returning a configuration error.
+  [#37](https://github.com/eddiectc/aharness/issues/37)
 - Every usage aggregate now carries the cached, cache-write, and reasoning
   counts and the `Reported` flag, not only the input and output totals. A
   one-response run whose model reported all six fields returned zero subsets

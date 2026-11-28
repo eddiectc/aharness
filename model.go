@@ -73,9 +73,11 @@ type ToolSchema struct {
 // Request is one canonical model call. The system prompt, when present, is the
 // first message.
 type Request struct {
-	Model           string
-	Messages        []Message
-	Tools           []ToolSchema
+	Model    string
+	Messages []Message
+	Tools    []ToolSchema
+	// MaxOutputTokens is the per-call output budget. Zero omits the wire field
+	// and leaves the ceiling to the provider/model.
 	MaxOutputTokens int
 	ThinkingEffort  string
 }
@@ -171,11 +173,14 @@ const (
 
 // ModelSpec is the model identity and capabilities recorded in a session.
 type ModelSpec struct {
-	ID              string
-	Provider        string
-	Dialect         Dialect
-	BaseURL         string
-	ContextWindow   int
+	ID            string
+	Provider      string
+	Dialect       Dialect
+	BaseURL       string
+	ContextWindow int
+	// MaxOutputTokens is the model's advertised output ceiling: display and
+	// validation metadata, never a request budget. Set Limits.MaxOutputTokens to
+	// send one.
 	MaxOutputTokens int
 	InputLimit      int
 	ThinkingEfforts []string

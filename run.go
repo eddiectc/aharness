@@ -140,7 +140,11 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 	if err != nil {
 		return nil, err
 	}
-	delegation, err := a.buildDelegation(effective)
+	limits, err := a.runLimits(effective, opts)
+	if err != nil {
+		return nil, err
+	}
+	delegation, err := a.buildDelegation(effective, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -183,10 +187,6 @@ func (a *Agent) start(ctx context.Context, task string, opts RunOptions, stream 
 		},
 	}
 	if opts.Model != nil {
-		limits, err := deriveLimits(effective.Spec)
-		if err != nil {
-			return nil, err
-		}
 		runSpec.Model = effective.Spec.ID
 		runSpec.Dialect = string(effective.Spec.Dialect)
 		runSpec.BaseURL = effective.Spec.BaseURL

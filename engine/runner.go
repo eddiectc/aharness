@@ -146,6 +146,9 @@ func (h *Host) runConfig(run RunSpec, display func(agent.DisplayEvent) error, st
 		if limits.MaxContextTokens <= 0 || limits.MaxInputTokens <= 0 {
 			return agent.Config{}, configError("RunOptions.Model", "requires positive context and input limits")
 		}
+		if limits.MaxOutputTokens < 0 {
+			return agent.Config{}, configError("Limits.MaxOutputTokens", "must not be negative")
+		}
 	}
 	effort := effortValue(h.spec.ThinkingEffort, "")
 	if run.ThinkingEffort != nil {

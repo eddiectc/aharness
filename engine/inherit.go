@@ -32,7 +32,11 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, st
 		resolved.BaseURL = state.BaseURL
 		resolved.Limits = state.Limits
 		if limitsSet(spec.Limits) {
-			resolved.Limits = clampLimits(spec.Limits, state.Limits)
+			clamped, err := clampLimits(spec.Limits, state.Limits)
+			if err != nil {
+				return Spec{}, "", "", err
+			}
+			resolved.Limits = clamped
 		}
 		if resolved.Limits.MaxContextTokens <= 0 {
 			return Spec{}, "", "", configError("Limits", "session does not record a context limit; supply an explicit model")
@@ -49,7 +53,11 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, st
 		if resolved.BaseURL == "" {
 			resolved.BaseURL = state.BaseURL
 		}
-		resolved.Limits = clampLimits(resolved.Limits, agent.Limits{})
+		clamped, err := clampLimits(resolved.Limits, agent.Limits{})
+		if err != nil {
+			return Spec{}, "", "", err
+		}
+		resolved.Limits = clamped
 	}
 	// Thinking effort: nil inherits (or clears on an explicit model switch),
 	// "" clears, a non-empty value sets.
@@ -182,14 +190,18 @@ func resolveInherited(spec Spec, state agent.State, fork bool) (Spec, string, st
 	return resolved, prompt, appended, nil
 }
 
-// limitsSet reports whether any explicit per-call limit was supplied.
+// limitsSet reports whether an explicit per-call limit was supplied. Only the
+// honored fields count: SafetyMargin is always derived, so it cannot make a
+// value explicit on its own.
 func limitsSet(limits agent.Limits) bool {
 	return limits.MaxContextTokens != 0 || limits.MaxOutputTokens != 0 ||
-		limits.SafetyMargin != 0 || limits.MaxInputTokens != 0 ||
-		limits.CompactionTarget != 0
+		limits.MaxInputTokens != 0 || limits.CompactionTarget != 0
 }
 
-func clampLimits(limits, recorded agent.Limits) agent.Limits {
+func clampLimits(limits, recorded agent.Limits) (agent.Limits, error) {
+	if limits.MaxOutputTokens < 0 {
+		return agent.Limits{}, configError("Limits.MaxOutputTokens", "must not be negative")
+	}
 	context := limits.MaxContextTokens
 	if context <= 0 {
 		context = recorded.MaxContextTokens
@@ -198,28 +210,33 @@ func clampLimits(limits, recorded agent.Limits) agent.Limits {
 		context = recorded.MaxContextTokens
 	}
 	if context <= 0 {
-		return limits
+		return agent.Limits{}, configError("Limits.MaxContextTokens", "must be positive")
 	}
+	// The output budget is a host choice, not a model property, so an explicit
+	// override replaces the recorded value instead of inheriting it: 0 clears
+	// an inherited budget.
 	output := limits.MaxOutputTokens
-	if output <= 0 {
-		output = recorded.MaxOutputTokens
-	}
 	inputLimit := limits.MaxInputTokens
 	if inputLimit <= 0 {
 		inputLimit = recorded.MaxInputTokens
 	} else if recorded.MaxInputTokens > 0 && recorded.MaxInputTokens < inputLimit {
 		inputLimit = recorded.MaxInputTokens
 	}
+	// A narrowed context makes the recorded or overridden input limit obsolete;
+	// the remainder is the context minus the safety margin.
+	if inputLimit > context {
+		inputLimit = context
+	}
 	derived, err := agent.NewLimits(context, output, inputLimit)
 	if err != nil {
-		return limits
+		return agent.Limits{}, configError("Limits", "%v", err)
 	}
 	target := derived.CompactionTarget
 	if limits.CompactionTarget > 0 && limits.CompactionTarget < target {
 		target = limits.CompactionTarget
 	}
 	derived.CompactionTarget = target
-	return derived
+	return derived, nil
 }
 
 func effortValue(effort *string, fallback string) string {
