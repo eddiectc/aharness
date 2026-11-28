@@ -112,6 +112,9 @@ func openNew(spec Spec) (*Host, error) {
 	if spec.Limits.MaxContextTokens <= 0 {
 		return nil, configError("Limits.MaxContextTokens", "must be positive")
 	}
+	if spec.Limits.MaxOutputTokens < 0 {
+		return nil, configError("Limits.MaxOutputTokens", "must not be negative")
+	}
 	if spec.Limits.MaxInputTokens <= 0 {
 		return nil, configError("Limits.MaxInputTokens", "must be positive")
 	}

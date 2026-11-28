@@ -826,6 +826,102 @@ func TestDisplayStopsAtRunFinished(t *testing.T) {
 	}
 }
 
+// TestInheritedOutputBudgetOverride covers the published rule for Resume and
+// Fork: the recorded output budget is inherited only when no explicit limits
+// are supplied, an explicit zero clears it, and a negative value is a
+// configuration error.
+func TestInheritedOutputBudgetOverride(t *testing.T) {
+	newHost, err := Open(context.Background(), baseSpec(t, ModeNew))
+	if err != nil {
+		t.Fatalf("Open new: %v", err)
+	}
+	sessionID := newHost.ID()
+	stateDir := newHost.StateDir()
+	workspace := newHost.Workspace()
+	if err := newHost.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	for _, mode := range []struct {
+		name string
+		mode Mode
+	}{
+		{name: "resume", mode: ModeResume},
+		{name: "fork", mode: ModeFork},
+	} {
+		for _, tc := range []struct {
+			name       string
+			limits     agent.Limits
+			wantErr    bool
+			wantOutput int
+			wantInput  int
+		}{
+			{name: "no override inherits", wantOutput: 100, wantInput: 9000},
+			{name: "explicit override clears with zero", limits: agent.Limits{MaxContextTokens: 8_000}, wantInput: 7000},
+			{name: "positive override replaces", limits: agent.Limits{MaxOutputTokens: 250}, wantOutput: 250, wantInput: 9000},
+			{name: "negative override is rejected", limits: agent.Limits{MaxOutputTokens: -1}, wantErr: true},
+		} {
+			t.Run(mode.name+"/"+tc.name, func(t *testing.T) {
+				spec := baseSpec(t, mode.mode)
+				spec.StateDir = stateDir
+				spec.Workspace = workspace
+				spec.SessionID = sessionID
+				spec.Model = ""
+				spec.Limits = tc.limits
+				host, err := Open(context.Background(), spec)
+				if tc.wantErr {
+					if host != nil {
+						_ = host.Close()
+					}
+					var configErr *ConfigError
+					if !errors.As(err, &configErr) || configErr.Field != "Limits.MaxOutputTokens" {
+						t.Fatalf("Open %s error = %v, want ConfigError for Limits.MaxOutputTokens", mode.name, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Open %s: %v", mode.name, err)
+				}
+				defer func() { _ = host.Close() }()
+				got := host.Spec().Limits
+				if got.MaxOutputTokens != tc.wantOutput {
+					t.Errorf("%s MaxOutputTokens = %d, want %d", mode.name, got.MaxOutputTokens, tc.wantOutput)
+				}
+				if got.MaxInputTokens != tc.wantInput {
+					t.Errorf("%s MaxInputTokens = %d, want %d", mode.name, got.MaxInputTokens, tc.wantInput)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenNewRejectsNegativeOutputBudget(t *testing.T) {
+	spec := baseSpec(t, ModeNew)
+	spec.Limits.MaxOutputTokens = -1
+	_, err := Open(context.Background(), spec)
+	var configErr *ConfigError
+	if !errors.As(err, &configErr) || configErr.Field != "Limits.MaxOutputTokens" {
+		t.Fatalf("Open error = %v, want ConfigError for Limits.MaxOutputTokens", err)
+	}
+}
+
+func TestRunConfigRejectsNegativeOutputBudget(t *testing.T) {
+	host, err := Open(context.Background(), baseSpec(t, ModeNew))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = host.Close() }()
+	_, err = host.runConfig(RunSpec{
+		Model:   "other-model",
+		Dialect: "custom",
+		Limits:  agent.Limits{MaxContextTokens: 8_000, MaxInputTokens: 7_000, MaxOutputTokens: -1},
+	}, nil, nil, nil)
+	var configErr *ConfigError
+	if !errors.As(err, &configErr) || configErr.Field != "Limits.MaxOutputTokens" {
+		t.Fatalf("runConfig error = %v, want ConfigError for Limits.MaxOutputTokens", err)
+	}
+}
+
 func TestResumeInheritsModelAndLimits(t *testing.T) {
 	spec := baseSpec(t, ModeNew)
 	host, err := Open(context.Background(), spec)

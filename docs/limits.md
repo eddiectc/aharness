@@ -22,7 +22,7 @@ that owns the value; the package source is authoritative when the two disagree.
 | Max turns | 0 (unlimited) | Opt-in `Config.MaxTurns`. When explicit and positive, checked before each model call; counts successful model responses. Resume reconstructs cumulative turns from the log but does not inherit the budget. |
 | Max total tokens | 0 (unlimited) | Opt-in `Config.MaxTotalTokens`. When explicit and positive, cumulative over the session; a retry that succeeds counts once. Recorded budgets are historical and are not inherited. |
 | Max context tokens | Catalog `limit.context` | Per call. `Limits.MaxContextTokens` defaults to 0 (unset); an explicit positive value is clamped down to the model ceiling. |
-| Max output tokens | Unset (0); catalog `limit.output` is advertised only | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is invalid. Set `Limits.MaxOutputTokens`. The advertised ceiling is display and validation metadata only: never a request budget and never an eligibility gate. |
+| Max output tokens | Unset (0); catalog `limit.output` is advertised only | Per call. No harness cap by default; the request omits `max_tokens` / `max_output_tokens`. An explicit positive value is sent unchanged; `0` clears an inherited budget; a negative value is a configuration error. Set `Limits.MaxOutputTokens`. The advertised ceiling is display and validation metadata only: never a request budget and never an eligibility gate. |
 | Safety margin | `max(5% of context, 1,000)` (`SafetyMargin`) | Reserved from the context window for estimator error. |
 | Max input tokens | `min(model limit.input, context - safety_margin)` | Per call. When the catalog has no positive input limit, `context - safety_margin`. No output budget is subtracted. |
 | Compaction target | max input tokens | Older tool-result bodies are elided to this target. |
@@ -50,12 +50,19 @@ that owns the value; the package source is authoritative when the two disagree.
 | Retained verbatim turns | 4 (`retainedTurns`) | Most recent model-response turns in the projection. |
 | Token estimate | `ceil(bytes/4) + 8/message + 16/tool schema` (`bytesPerTokenBits`, `tokensPerMessage`, `tokensPerTool`) | Conservative; provider usage is authoritative for totals. |
 
-Existing sessions keep their recorded context, output, and base URL values;
-new sessions use the catalog. Recorded `max_turns`, `max_total_tokens`,
-`session_timeout_ms`, and `model_timeout_ms` are historical metadata and are
-not inherited on resume/fork; only an explicit positive flag enforces a run
-budget. When `Config.MaxTotalTokens` is explicit, a 1,000,000-token context can
-consume that cumulative budget quickly.
+Existing sessions keep their recorded context, output, and base URL values; a
+new session takes its context window and input limit from the model spec. On
+Resume or Fork, an all-zero `Limits` is no override and inherits the recorded
+per-call limits; any non-zero context, output, input, or compaction target makes
+it an explicit override that replaces the whole recorded set. A zero
+`MaxOutputTokens` in an override therefore clears the inherited output budget,
+while a zero context or input limit still inherits the recorded value, clamped
+to the new context. A context override below the model's input limit narrows the
+input budget to `context` minus the safety margin instead of failing. Recorded
+`max_turns`, `max_total_tokens`, `session_timeout_ms`, and `model_timeout_ms`
+are historical metadata and are not inherited on resume/fork; only an explicit
+positive flag enforces a run budget. When `Config.MaxTotalTokens` is explicit, a
+1,000,000-token context can consume that cumulative budget quickly.
 
 Thinking effort introduces no run budget. It is bounded only by the model's
 catalog list, the 32-byte per-value cap, and the 16-value normalization cap.

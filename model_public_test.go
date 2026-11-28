@@ -2,10 +2,13 @@ package aharness_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/eddiectc/aharness"
@@ -198,6 +201,88 @@ func TestOpenAIModelRunsAndClassifiesProviderError(t *testing.T) {
 	}
 	if providerErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("provider status = %d", providerErr.StatusCode)
+	}
+}
+
+const outputCeilingFixture = `{
+  "testprovider": {
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://opencode.ai/test/v1",
+    "models": {
+      "m1": {
+        "name": "Model One",
+        "tool_call": true,
+        "limit": {"context": 10000, "output": 500},
+        "modalities": {"output": ["text"]},
+        "provider": {"npm": "@ai-sdk/openai-compatible"}
+      }
+    }
+  }
+}`
+
+// TestDiscoveredOutputCeilingIsNotARequestBudget is the reported bug: a
+// discovered model sent its advertised ceiling as max_tokens even though the
+// catalog ceiling is display metadata.
+func TestDiscoveredOutputCeilingIsNotARequestBudget(t *testing.T) {
+	var chatRequest map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api.json"):
+			_, _ = fmt.Fprint(w, outputCeilingFixture)
+		case strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read chat request: %v", err)
+			}
+			if err := json.Unmarshal(raw, &chatRequest); err != nil {
+				t.Errorf("decode chat request: %v", err)
+			}
+			_, _ = fmt.Fprint(w, `{"id":"chatcmpl","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"discovered hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := aharness.CatalogConfig{
+		URL:        server.URL + "/api.json",
+		StateDir:   t.TempDir(),
+		HTTPClient: server.Client(),
+		UserAgent:  "aharness-test/1.0",
+	}
+	discovered, err := aharness.DiscoverModel(context.Background(), aharness.DiscoverModelOptions{
+		Catalog:    cfg,
+		Provider:   "testprovider",
+		Model:      "m1",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("DiscoverModel: %v", err)
+	}
+	if discovered.Spec.MaxOutputTokens != 500 {
+		t.Errorf("discovered spec MaxOutputTokens = %d, want the advertised ceiling 500", discovered.Spec.MaxOutputTokens)
+	}
+	ag, err := aharness.New(context.Background(), aharness.Config{
+		Workspace: t.TempDir(),
+		StateDir:  t.TempDir(),
+		UserAgent: "aharness-test/1.0",
+		Model:     discovered,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = ag.Close() }()
+	result, err := ag.Run(context.Background(), "hello", aharness.RunOptions{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.FinalText != "discovered hello" {
+		t.Errorf("final text = %q", result.FinalText)
+	}
+	if raw, ok := chatRequest["max_tokens"]; ok {
+		t.Errorf("chat request carried max_tokens = %s, want the field omitted", raw)
 	}
 }
 

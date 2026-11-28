@@ -84,7 +84,7 @@ type delegationSetup struct {
 	resolved map[string]*ModelConfig
 }
 
-func newDelegationSetup(cfg *DelegationConfig, parent *ModelConfig, enabled map[ToolName]bool) (*delegationSetup, error) {
+func newDelegationSetup(cfg *DelegationConfig, parent *ModelConfig, enabled map[ToolName]bool, parentLimits Limits) (*delegationSetup, error) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -96,10 +96,6 @@ func newDelegationSetup(cfg *DelegationConfig, parent *ModelConfig, enabled map[
 	}
 	if parent == nil || parent.Completer == nil {
 		return nil, ErrModelRequired
-	}
-	parentLimits, err := deriveLimits(parent.Spec)
-	if err != nil {
-		return nil, err
 	}
 	setup := &delegationSetup{
 		cfg:          cfg,
@@ -175,7 +171,7 @@ func (d *delegationSetup) resolve(modelID, effort string) (agent.ModelResolution
 	if err != nil {
 		return agent.ModelResolution{}, err
 	}
-	limits, err := deriveLimits(resolved.Spec)
+	limits, err := deriveLimits(resolved.Spec, d.parentLimits.MaxOutputTokens)
 	if err != nil {
 		return agent.ModelResolution{}, err
 	}

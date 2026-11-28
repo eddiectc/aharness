@@ -129,12 +129,15 @@ surface, field-level rules, and compatibility rules are in
   [architecture §2](docs/architecture/provider.md).
 - **Budgets and prompt.** `Config.MaxTurns` and `MaxTotalTokens` bound the
   agent's cumulative turn and token usage; `RunTimeout` and `ModelTimeout`
-  bound one run and one model attempt, and a zero value is unlimited. Prompt
-  composition has three tiers: `Identity` plus the default body, a body built
-  from `agent.LoopRules`, your own policy lines, and `agent.AgentCatalogText`,
-  or `Config.SystemPrompt` wholesale; `Config.Instructions` composes host text
-  into the resolved prompt. The prompt is versioned and recorded, and a
-  wholesale replacement must keep the invariants `agent.LoopRules` returns. See
+  bound one run and one model attempt, and a zero value is unlimited.
+  `Config.Limits` caps one model call, and an unset output budget omits
+  `max_tokens`/`max_output_tokens` so the model's advertised ceiling is never
+  sent. Prompt composition has three tiers: `Identity` plus the default body, a
+  body built from `agent.LoopRules`, your own policy lines, and
+  `agent.AgentCatalogText`, or `Config.SystemPrompt` wholesale;
+  `Config.Instructions` composes host text into the resolved prompt. The prompt
+  is versioned and recorded, and a wholesale replacement must keep the
+  invariants `agent.LoopRules` returns. See
   [architecture §4.3](docs/architecture/loop.md#43-system-prompt) and
   [limits.md](docs/limits.md).
 - **Delegation.** `DelegationConfig.Agents` is required: the SDK ships no role

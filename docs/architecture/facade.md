@@ -105,6 +105,16 @@ Behavioral rules that the field lists do not show:
   and a continued child keeps it through its recorded prompt. The SDK does not
   discover workspace files; the host reads the file and supplies the bytes. A
   nil `Logger` discards.
+- `Config.Limits` caps one model call. The context window, safety margin, input
+  limit, and compaction target derive from `Model.Spec`; the output budget is a
+  host choice, so a model's advertised output ceiling is never sent and a zero
+  `MaxOutputTokens` omits `max_tokens`/`max_output_tokens` from the request
+  entirely. A negative `MaxOutputTokens` is a `ConfigError`. On `Resume`/`Fork`
+  a non-zero `Limits` is an explicit override that replaces the recorded
+  per-call limits, so `MaxOutputTokens` 0 clears an inherited budget, while
+  all-zero `Limits` with an empty `Model.Spec.ID` inherit the recorded limits;
+  an explicit `Model.Spec.ID` supplies the context window and input limit
+  instead.
 - `RunOptions` applies to one run and never rewrites the session; its `Timeout`
   replaces `Config.RunTimeout`. `RunOptions.OnEvent` observes the events the
   blocking `Run` consumes, in order, and never changes the result.

@@ -47,8 +47,11 @@ it on every turn. Compaction never mutates the log.
   tokens) to absorb estimator error. The output budget is not subtracted.
 - There is no harness-imposed per-call output budget by default. The request
   omits `max_tokens` / `max_output_tokens`, leaving the ceiling to the
-  provider/model; an explicit `Limits.MaxOutputTokens` is sent unchanged. The
-  catalog's advertised output limit is display metadata, not a request budget.
+  provider/model; an explicit `Limits.MaxOutputTokens` is sent unchanged. A
+  model spec's `MaxOutputTokens`, whether discovered or host-declared, is
+  display metadata, never a request budget, so a mid-session model switch and a
+  delegated child keep the session's explicit output budget while the context
+  window and input limit follow the model.
 - A `length` finish reason uses the continuation hint; two consecutive
   `length` responses without a tool round stop with `token_limit`. A provider
   context-overflow error rebuilds against 90% of the failed per-call input limit

@@ -57,8 +57,13 @@ type Config struct {
 	// replaces the copied contract.
 	Tools *ToolsConfig
 
-	// Limits overrides the per-call context budget. Zero fields are derived
-	// from Model.Spec.
+	// Limits caps the per-call context budget. The context window, safety
+	// margin, input limit, and compaction target derive from Model.Spec;
+	// MaxOutputTokens is a host choice, never the model's advertised output
+	// ceiling. A negative MaxOutputTokens is a ConfigError, and 0 sends no
+	// max_tokens/max_output_tokens. On Resume/Fork with Model.Spec.ID empty,
+	// all-zero Limits inherit the recorded set and any non-zero value overrides
+	// it, so an override that leaves MaxOutputTokens 0 clears that budget.
 	Limits Limits
 
 	// MaxTurns is the cumulative model-turn budget across this agent's runs.
@@ -380,17 +385,25 @@ func validateEffortValue(effort *string, spec ModelSpec) error {
 }
 
 func mergeLimits(spec ModelSpec, override Limits) (Limits, error) {
+	if override.MaxOutputTokens < 0 {
+		return Limits{}, &ConfigError{Field: "Limits.MaxOutputTokens", Detail: "must not be negative"}
+	}
 	context := spec.ContextWindow
 	if override.MaxContextTokens > 0 && override.MaxContextTokens < context {
 		context = override.MaxContextTokens
 	}
-	output := spec.MaxOutputTokens
-	if override.MaxOutputTokens > 0 {
-		output = override.MaxOutputTokens
-	}
+	// The model's advertised output ceiling is display metadata, never a
+	// request budget: only an explicit Limits.MaxOutputTokens is sent.
+	output := override.MaxOutputTokens
 	inputLimit := spec.InputLimit
 	if override.MaxInputTokens > 0 && (inputLimit <= 0 || override.MaxInputTokens < inputLimit) {
 		inputLimit = override.MaxInputTokens
+	}
+	// A context override below the input limit narrows the input budget rather
+	// than failing: the documented per-call input limit is the smaller of the
+	// model limit and context minus the safety margin.
+	if inputLimit > context {
+		inputLimit = context
 	}
 	internal, err := agent.NewLimits(context, output, inputLimit)
 	if err != nil {
@@ -501,13 +514,25 @@ func (a *Agent) effectiveModelForRun(opts RunOptions) (*ModelConfig, error) {
 	return &effective, nil
 }
 
+// runLimits returns the per-call budget for one run. The session's resolved
+// limits apply unchanged unless RunOptions.Model switches the model, in which
+// case the new spec supplies the context window and input limit while the
+// session keeps its explicit output budget.
+func (a *Agent) runLimits(effective *ModelConfig, opts RunOptions) (Limits, error) {
+	session := fromInternalLimits(a.host.Spec().Limits)
+	if opts.Model == nil {
+		return session, nil
+	}
+	return deriveLimits(effective.Spec, session.MaxOutputTokens)
+}
+
 // buildDelegation constructs the per-run delegation bridge for the effective
-// parent model.
-func (a *Agent) buildDelegation(parent *ModelConfig) (*delegationSetup, error) {
+// parent model and its per-call limits.
+func (a *Agent) buildDelegation(parent *ModelConfig, limits Limits) (*delegationSetup, error) {
 	if a.cfg.Tools == nil || a.cfg.Tools.Delegation == nil {
 		return nil, nil
 	}
-	return newDelegationSetup(a.cfg.Tools.Delegation, parent, a.setup.enabled)
+	return newDelegationSetup(a.cfg.Tools.Delegation, parent, a.setup.enabled, limits)
 }
 
 // internalDefinitions converts validated public definitions for the engine.
