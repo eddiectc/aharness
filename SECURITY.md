@@ -32,8 +32,8 @@ is closed with a pointer to the matching item.
 - **No sandbox and no process confinement.** `run_command` runs with the host
   process's privileges and has no `Path`; `os.Root` containment for the file
   tools is policy, not isolation, so bind mounts, `/proc`, and device files stay
-  reachable. Run without credentials and use external isolation — a container, a
-  VM, or `bwrap` — when the model is untrusted. See
+  reachable. Run without credentials and use external isolation - a container, a
+  VM, or `bwrap` - when the model is untrusted. See
   [facade.md](docs/architecture/facade.md#321-public-library-facade) and
   [tools.md §5.2](docs/architecture/tools.md#52-shared-rules-and-builtin-contracts).
   A write outside the workspace by absolute path or through the shell, a read

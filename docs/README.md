@@ -9,14 +9,14 @@ and configuration docs in its own repository.
 
 ## Where a document belongs
 
-1. **Current reference** — describes behavior that must be true on `main`
+1. **Current reference** - describes behavior that must be true on `main`
    today. Lives in `docs/`. Update it in the same change as the code.
-2. **Work record** — a plan with milestones, its deviations, and its
+2. **Work record** - a plan with milestones, its deviations, and its
    verification, or the evidence behind one decision. Lives in a GitHub issue
    ([writing standard §8](writing-standard.md#8-plans-as-issues)) and is never
    committed. `.issues/`, `docs/plans/`, and `docs/research/` are retired and
    MUST NOT be recreated.
-3. **Research** — dated sources and measured results belong in the issue that
+3. **Research** - dated sources and measured results belong in the issue that
    needed them, or inline where the reference uses the finding.
 
 A work record carries intent; the current reference carries the shipped truth.

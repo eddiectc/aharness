@@ -53,8 +53,8 @@ callers should use. The shipped surface, by area:
   `SchemaVersion`, `Version`, sentinel errors, `ConfigError`, and
   `ProviderError`. `InspectSession` canonicalizes the ID and reads a snapshot
   without the exclusive lock; `Sessions` lists newest first and tolerates a live
-  writer. `Transcript` reads the display transcript of any session — root,
-  delegated child, or fork — from the same lock-free snapshot, and
+  writer. `Transcript` reads the display transcript of any session - root,
+  delegated child, or fork - from the same lock-free snapshot, and
   `Agent.Transcript` is that read for the live root session.
 
 **Field-level contract.** The exported surface is listed here; the `go doc`

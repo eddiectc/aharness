@@ -85,8 +85,8 @@ The SDK does not grow into these, and a change that does is a different
 product, not an extension: no provider matrix, graph/workflow orchestration,
 memory/RAG, session-store seam, background or nested delegation, in-run
 parallel tool execution, structured-output/report DTOs, prompt templating, or
-public TUI package. A change that alters a recorded contract — session schema,
-prompt, tool grant, projection, or concurrency model — is a different product
+public TUI package. A change that alters a recorded contract - session schema,
+prompt, tool grant, projection, or concurrency model - is a different product
 too.
 
 ## Where to start

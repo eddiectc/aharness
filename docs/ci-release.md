@@ -73,7 +73,7 @@ the same change.
 ### 1.5 Branching and protection
 
 `main` is protected: every change lands via a pull request. Do not commit
-directly to `main` — humans and agents alike work on a short-lived feature
+directly to `main` - humans and agents alike work on a short-lived feature
 branch cut from `main`:
 
 1. `git checkout main && git pull && git checkout -b <topic>`.
@@ -172,7 +172,7 @@ Before pushing the tag, dry-run the checks locally:
 
 Recovery: if a tag goes up before its release PR merges, merge the release
 PR with a merge commit (owner bypass with written justification when
-protections block it — the failure is procedural, the code gate is green),
+protections block it - the failure is procedural, the code gate is green),
 then re-run the failed `release` workflow. Never move or delete the tag
 (§2.4).
 
@@ -224,7 +224,7 @@ on `main`. The policy is "latest, but verified":
   (plus `go mod tidy` in `testdata/external`), then `make dod`, then a PR.
 - A dependency change that alters the approved-exception versions in the
   [coding standard](coding-standard.md) §3, the binary-size posture, or the
-  `govulncheck` result updates that section in the same change — the reference
+  `govulncheck` result updates that section in the same change - the reference
   must stay honest about what ships.
 - Security advisories skip the queue: bump the fixed version immediately
   (Go directive for stdlib, `go get pkg@latest` for modules), verify
