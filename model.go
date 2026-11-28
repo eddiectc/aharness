@@ -61,6 +61,18 @@ type Message struct {
 	ToolCalls  []ToolCall
 	ToolCallID string
 	Name       string
+	// Images carries the image parts attached to a tool message, at most one per
+	// tool result. A text-only message leaves it empty.
+	Images []ImagePart
+}
+
+// ImagePart is one image attached to a tool message. MediaType is image/png or
+// image/jpeg, and Data is the delivered bytes recorded in tool_result.images.
+type ImagePart struct {
+	MediaType string
+	Data      []byte
+	Width     int
+	Height    int
 }
 
 // ToolSchema is a tool declaration sent to the provider.
@@ -617,6 +629,7 @@ func toPublicRequest(req model.Request) (Request, error) {
 			ToolCallID: message.ToolCallID,
 			Name:       message.Name,
 			ToolCalls:  make([]ToolCall, 0, len(message.ToolCalls)),
+			Images:     toPublicImages(message.Images),
 		}
 		for _, call := range message.ToolCalls {
 			converted.ToolCalls = append(converted.ToolCalls, ToolCall{
@@ -635,6 +648,40 @@ func toPublicRequest(req model.Request) (Request, error) {
 		})
 	}
 	return out, nil
+}
+
+// toPublicImages copies recorded image parts into the public DTO, bytes
+// included, so a caller model cannot alias a projection buffer.
+func toPublicImages(parts []model.ImagePart) []ImagePart {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]ImagePart, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, ImagePart{
+			MediaType: part.MediaType,
+			Data:      append([]byte(nil), part.Data...),
+			Width:     part.Width,
+			Height:    part.Height,
+		})
+	}
+	return out
+}
+
+func toInternalImages(parts []ImagePart) []model.ImagePart {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]model.ImagePart, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, model.ImagePart{
+			MediaType: part.MediaType,
+			Data:      append([]byte(nil), part.Data...),
+			Width:     part.Width,
+			Height:    part.Height,
+		})
+	}
+	return out
 }
 
 func fromPublicResponse(resp Response) model.Response {
@@ -671,6 +718,7 @@ func toInternalRequest(req Request) model.Request {
 			ToolCallID: message.ToolCallID,
 			Name:       message.Name,
 			ToolCalls:  make([]model.ToolCall, 0, len(message.ToolCalls)),
+			Images:     toInternalImages(message.Images),
 		}
 		for _, call := range message.ToolCalls {
 			converted.ToolCalls = append(converted.ToolCalls, model.ToolCall{

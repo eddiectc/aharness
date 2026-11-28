@@ -51,6 +51,13 @@ type ToolResult struct {
 	TimedOut  bool
 	Truncated bool
 	Details   json.RawMessage
+	// Image is one encoded image to attach to the result: PNG, JPEG, or GIF.
+	// The type comes from the bytes, and the SDK normalizes them exactly as
+	// read_image does, so a full-page capture need not be pre-sized. An image it
+	// cannot deliver fails the result with invalid_image, too_large, or
+	// unavailable and is never recorded. Output is the text the model reads
+	// beside it.
+	Image []byte
 }
 
 // TextResult returns a successful text result.
@@ -322,9 +329,35 @@ func registerPublicTool(registry *tools.Registry, tool Tool) error {
 				return tools.Failure(tools.CodeToolError, capToolText(err.Error(), 2<<10))
 			}
 		}
-		return fromPublicToolResult(result)
+		out := fromPublicToolResult(result)
+		if len(result.Image) > 0 {
+			img, err := registry.NormalizeImage(tool.Name, result.Image)
+			if err != nil {
+				return rejectedImageResult(result, err)
+			}
+			out.Images = []tools.Image{img}
+		}
+		return out
 	}
 	return registry.Register(schema, run, tool.ConcurrencySafe)
+}
+
+// rejectedImageResult maps an image the SDK will not deliver to the failure the
+// model sees. The caller's Output survives so a caption or partial observation
+// is not lost, and the code matches read_image's for the same cause.
+func rejectedImageResult(result ToolResult, err error) tools.Result {
+	code := tools.CodeToolError
+	switch {
+	case errors.Is(err, tools.ErrInvalidImage):
+		code = tools.CodeInvalidImage
+	case errors.Is(err, tools.ErrTooLarge):
+		code = tools.CodeTooLarge
+	case errors.Is(err, tools.ErrNoImageSupport):
+		code = tools.CodeUnavailable
+	}
+	out := tools.Failure(code, capToolText(err.Error(), 2<<10))
+	out.Output = strings.ToValidUTF8(result.Output, "\uFFFD")
+	return out
 }
 
 func fromPublicToolResult(result ToolResult) tools.Result {

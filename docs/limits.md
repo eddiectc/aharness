@@ -90,7 +90,7 @@ when that flag is set and against total usage, and they add no separate cap.
 | Session line | 4 MiB (`maxEventLine`) | Includes the JSON envelope and escaping. |
 | `model_response` payload | 1 MiB total canonical content | The executed response is fully recorded so resume can replay it. |
 | Tool result output/error | 64 KiB per field | Tool-specific caps in §4 are usually smaller. |
-| Tool result image | 512 KiB decoded (~683 KiB base64) per entry, one entry per call | Carried in the additive `tool_result.images` member; the session line cap bounds the envelope. |
+| Tool result image | 512 KiB decoded (~683 KiB base64) per entry, one entry per call (`tools.MaxImageBytes`) | Produced by `read_image` and by a caller tool's `ToolResult.Image`, which is normalized to the same caps; the recorder drops an entry above the cap, and the session line cap bounds the envelope. |
 | Model response usage | totals plus subsets | Input/output totals; cached, cache-write, and reasoning subsets; `reported` distinguishes an absent usage object from a present one. Subsets never change `Total()`. |
 | `Config.RequireUsage` | off | When set, a completed buffered response without provider usage is a `protocol_error` before any tool executes. Streaming already requires usage. Not inherited on resume/fork. |
 | Cost estimate | catalog micro-USD | Observational only. `$0.15` per 1M tokens is stored as `150000` micro-USD; per-response and run totals use integer arithmetic. Unpriced responses make the completeness flags false. |

@@ -23,15 +23,15 @@ func FuzzNormalizeImage(f *testing.F) {
 		if len(data) > 1<<20 {
 			t.Skip("input exceeds the fuzz budget")
 		}
-		img, err := normalizeImage("fuzz", data)
+		img, err := normalizeImageBytes("fuzz", data, "")
 		if err != nil {
 			if len(img.Data) != 0 {
-				t.Fatalf("normalizeImage returned data with an error")
+				t.Fatalf("normalizeImageBytes returned data with an error")
 			}
 			return
 		}
-		if len(img.Data) > maxImageBytes {
-			t.Fatalf("delivered %d bytes, cap %d", len(img.Data), maxImageBytes)
+		if len(img.Data) > MaxImageBytes {
+			t.Fatalf("delivered %d bytes, cap %d", len(img.Data), MaxImageBytes)
 		}
 		if img.Width <= 0 || img.Height <= 0 {
 			t.Fatalf("delivered %dx%d", img.Width, img.Height)

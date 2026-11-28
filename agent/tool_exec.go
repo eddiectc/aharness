@@ -371,15 +371,16 @@ func toolResultEvent(call model.ToolCall, result tools.Result, duration time.Dur
 }
 
 // loggableImages encodes tool images for the session log. An image that cannot
-// be recorded is dropped rather than written as a broken payload: the text
-// caption still tells the model what the tool returned.
+// be recorded is dropped rather than written as a broken payload: an unsupported
+// type, a non-positive dimension, or an entry above tools.MaxImageBytes. The
+// text caption still tells the model what the tool returned.
 func loggableImages(images []tools.Image) []toolImageData {
 	if len(images) == 0 {
 		return nil
 	}
 	out := make([]toolImageData, 0, len(images))
 	for _, img := range images {
-		if len(img.Data) == 0 || img.Width <= 0 || img.Height <= 0 {
+		if len(img.Data) == 0 || len(img.Data) > tools.MaxImageBytes || img.Width <= 0 || img.Height <= 0 {
 			continue
 		}
 		if img.MediaType != model.MediaTypePNG && img.MediaType != model.MediaTypeJPEG {

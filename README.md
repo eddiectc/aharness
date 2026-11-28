@@ -157,7 +157,10 @@ are in [limits.md](docs/limits.md).
 `RootGrant` narrows what the root is offered and may call without changing the
 session grant. `Config.Authorize` runs before every tool execution, including
 delegated children; returning `&aharness.Deny{}` or another non-cancellation
-error produces a model-visible `permission_denied` result.
+error produces a model-visible `permission_denied` result. A caller tool returns
+one image to the model through `ToolResult.Image`; the SDK sniffs, downscales,
+and caps it exactly as `read_image` does, and an image it cannot deliver is a
+failed result rather than a recorded transcript entry.
 
 Authorization is policy, not a sandbox. Caller tools run with the host
 process's privileges, `run_command` is not confined, and OS isolation is the

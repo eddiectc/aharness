@@ -40,7 +40,8 @@ Concrete consequences:
   geometry are host tools. They need a browser or a rendering service, a
   dependency policy, an approval surface, and a host-owned scratch or
   configuration location; `run_command` plus `read_image` already carry the
-  render-and-read path, and a custom tool returns the text measurements.
+  render-and-read path, and a custom tool returns the text measurements or the
+  image itself.
 - Domain tools (a quote lookup, a portfolio query, a report writer) are host
   tools. Their declarations are recorded per session and can appear in a
   delegated child's grant, so shipping them needs no SDK change.
@@ -215,6 +216,15 @@ panic is recovered like a built-in panic; a returned error becomes
 `tool_error`, a returned `*aharness.Deny` becomes `permission_denied`, and a
 returned context error follows the operation-interrupt path. `Details` is capped
 at 64 KiB before recording.
+
+`ToolResult.Image` attaches one image to the result. The facade normalizes it
+exactly as `read_image` does (`tools.NormalizeImage`: the type comes from the
+bytes, the source caps apply, and the delivered image is downscaled to the
+`read_image` limits) and records it in `tool_result.images`. An image the SDK
+cannot deliver fails the result with `invalid_image`, `too_large`, or
+`unavailable` and is never recorded; the caller's `Output` is kept. Display
+events stay image-free, so a host that wants to show the picture uses the bytes
+its own handler produced.
 
 `Config.Authorize` (public) becomes `agent.Config.ToolPolicy` and runs after
 `ToolStarted` and before dispatch, for built-ins and custom tools, parent and
