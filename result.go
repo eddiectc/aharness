@@ -203,10 +203,7 @@ func Sessions(ctx context.Context, stateDir string) ([]SessionInfo, error) {
 // TotalUsage returns the session's own usage plus every folded delegated
 // child's usage.
 func (s State) TotalUsage() Usage {
-	usage := s.Usage
-	usage.InputTokens += s.SubagentUsage.InputTokens
-	usage.OutputTokens += s.SubagentUsage.OutputTokens
-	return usage
+	return s.Usage.Add(s.SubagentUsage)
 }
 
 func stateFromSnapshot(snapshot engine.Snapshot) State {

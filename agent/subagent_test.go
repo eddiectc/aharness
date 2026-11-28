@@ -12,15 +12,19 @@ import (
 )
 
 func delegateToolResult(turns, input, output int, cost int64, complete bool) tools.Result {
+	return delegateToolResultUsage(turns, model.Usage{InputTokens: input, OutputTokens: output}, cost, complete)
+}
+
+func delegateToolResultUsage(turns int, usage model.Usage, cost int64, complete bool) tools.Result {
 	details := tools.DelegateDetails{
 		Tasks: []tools.DelegateTaskDetails{{
 			Agent: "explore", Status: tools.SubagentCompleted, Turns: turns,
-			Usage:        model.Usage{InputTokens: input, OutputTokens: output},
+			Usage:        usage,
 			CostMicroUSD: cost, CostComplete: complete,
 		}},
 		Status:               tools.SubagentCompleted,
 		SubagentTurns:        turns,
-		SubagentUsage:        model.Usage{InputTokens: input, OutputTokens: output},
+		SubagentUsage:        usage,
 		SubagentCostMicroUSD: cost,
 		SubagentCostComplete: complete,
 	}
@@ -97,6 +101,50 @@ func TestRunnerFoldsSubagentAccounting(t *testing.T) {
 	}
 	if state.Usage.Total() != res.CumulativeUsage.Total() {
 		t.Fatalf("Inspect usage = %+v, want the parent's own usage", state.Usage)
+	}
+}
+
+func TestRunnerKeepsEveryChildUsageField(t *testing.T) {
+	childUsage := model.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	parentUsage := model.Usage{InputTokens: 10, OutputTokens: 2, Reported: true}
+	comp := &fakeCompleter{steps: []scriptStep{
+		{resp: model.Response{
+			ToolCalls:    []model.ToolCall{toolCall("d1", "delegate", `{"intent":"go","tasks":[{"agent":"explore","task":"t"}]}`)},
+			FinishReason: model.FinishToolCalls,
+			Usage:        parentUsage,
+		}},
+		completedStep("done", parentUsage),
+	}}
+	ts := &fakeToolset{exec: func(_ context.Context, name string, _ json.RawMessage) tools.Result {
+		if name == "delegate" {
+			return delegateToolResultUsage(3, childUsage, 0, true)
+		}
+		return tools.Success("ok")
+	}}
+	store, res, err := runTask(t, testConfig(), comp, ts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.SubagentUsage != childUsage {
+		t.Fatalf("SubagentUsage = %+v, want %+v", res.SubagentUsage, childUsage)
+	}
+	if len(res.Children) != 1 || res.Children[0].Usage != childUsage {
+		t.Fatalf("Children = %+v, want usage %+v", res.Children, childUsage)
+	}
+	end := decodePayload[runEndData](t, eventsByType(store, session.TypeRunEnd)[0])
+	if end.SubagentUsage != childUsage {
+		t.Fatalf("run_end SubagentUsage = %+v, want %+v", end.SubagentUsage, childUsage)
+	}
+	state, err := Inspect(store.events)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.SubagentUsage != childUsage {
+		t.Fatalf("state SubagentUsage = %+v, want %+v", state.SubagentUsage, childUsage)
 	}
 }
 
@@ -206,18 +254,19 @@ func TestDelegateCallSeesPriorChildSpend(t *testing.T) {
 		startEvent(t, "/workspace"),
 		newTestEvent(t, session.TypeUserMessage, 0, string(model.RoleUser), userMessageData{Text: "task", Source: "-task"}),
 		newTestEvent(t, session.TypeModelResponse, 1, string(model.RoleAssistant), modelResponseData{
-			Text: "prior", FinishReason: model.FinishStop, Usage: model.Usage{InputTokens: 10, OutputTokens: 5},
+			Text: "prior", FinishReason: model.FinishStop,
+			Usage: model.Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 4, ReasoningOutputTokens: 2, Reported: true},
 		}),
 		newTestEvent(t, session.TypeToolResult, 1, string(model.RoleTool), toolResultData{
 			CallID: "d0", Name: "delegate", OK: true, Code: tools.CodeOK,
-			Details: json.RawMessage(`{"tasks":[{"agent":"explore","status":"completed","usage":{"input_tokens":40,"output_tokens":10},"cost_complete":true}],"status":"completed","subagent_turns":1,"subagent_usage":{"input_tokens":40,"output_tokens":10},"subagent_cost_complete":true}`),
+			Details: json.RawMessage(`{"tasks":[{"agent":"explore","status":"completed","usage":{"input_tokens":40,"output_tokens":10},"cost_complete":true}],"status":"completed","subagent_turns":1,"subagent_usage":{"input_tokens":40,"output_tokens":10,"cached_input_tokens":30,"cache_write_input_tokens":5,"reasoning_output_tokens":4,"reported":true},"subagent_cost_complete":true}`),
 		}),
 	}
 	comp := &fakeCompleter{steps: []scriptStep{
 		{resp: model.Response{
 			ToolCalls:    []model.ToolCall{toolCall("d1", "delegate", `{"intent":"go","tasks":[{"agent":"explore","task":"t"}]}`)},
 			FinishReason: model.FinishToolCalls,
-			Usage:        model.Usage{InputTokens: 10, OutputTokens: 5},
+			Usage:        model.Usage{InputTokens: 10, OutputTokens: 5, CachedInputTokens: 8, ReasoningOutputTokens: 1, Reported: true},
 		}},
 		completedStep("done", model.Usage{InputTokens: 10, OutputTokens: 5}),
 	}}
@@ -238,10 +287,15 @@ func TestDelegateCallSeesPriorChildSpend(t *testing.T) {
 	if len(ts.calls) != 1 {
 		t.Fatalf("delegate calls = %d, want 1", len(ts.calls))
 	}
-	// The call sees the parent's own usage (15), the prior child's usage (50),
-	// and this run's new response (15) recorded before the tool executes.
-	if got := ts.calls[0].ParentUsage.Total(); got != 80 {
-		t.Fatalf("ParentUsage = %d, want 80 (parent own + prior child usage)", got)
+	// The call sees the parent's own usage, the prior child's usage, and this
+	// run's new response recorded before the tool executes.
+	wantUsage := model.Usage{
+		InputTokens: 60, OutputTokens: 20,
+		CachedInputTokens: 42, CacheWriteInputTokens: 5,
+		ReasoningOutputTokens: 7, Reported: true,
+	}
+	if got := ts.calls[0].ParentUsage; got != wantUsage {
+		t.Fatalf("ParentUsage = %+v, want %+v (parent own + prior child usage)", got, wantUsage)
 	}
 	if ts.calls[0].ID != "d1" || ts.calls[0].Turn == 0 {
 		t.Fatalf("call meta = %+v", ts.calls[0])

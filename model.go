@@ -102,6 +102,19 @@ func (u Usage) UncachedInputTokens() int {
 	return uncached
 }
 
+// Add returns the sum of u and other. Totals and the cached, cache-write, and
+// reasoning subset counts add independently; Reported is true when either side
+// reported a usage object.
+func (u Usage) Add(other Usage) Usage {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CachedInputTokens += other.CachedInputTokens
+	u.CacheWriteInputTokens += other.CacheWriteInputTokens
+	u.ReasoningOutputTokens += other.ReasoningOutputTokens
+	u.Reported = u.Reported || other.Reported
+	return u
+}
+
 // Response is one canonical model response. The returned response is
 // authoritative; streamed deltas are display-only.
 type Response struct {

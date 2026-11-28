@@ -107,10 +107,7 @@ type State struct {
 // TotalUsage returns the parent's own usage plus every folded delegated
 // child's usage.
 func (s State) TotalUsage() model.Usage {
-	usage := s.Usage
-	usage.InputTokens += s.SubagentUsage.InputTokens
-	usage.OutputTokens += s.SubagentUsage.OutputTokens
-	return usage
+	return s.Usage.Add(s.SubagentUsage)
 }
 
 // Inspect reconstructs the session state used for resume, fork, and the next
@@ -199,8 +196,7 @@ func Inspect(events []session.Event) (State, error) {
 				return State{}, fmt.Errorf("%w: %w", session.ErrCorrupt, err)
 			}
 			state.Turns++
-			state.Usage.InputTokens += data.Usage.InputTokens
-			state.Usage.OutputTokens += data.Usage.OutputTokens
+			state.Usage = state.Usage.Add(data.Usage)
 			// A response that reported no usage leaves the last known context
 			// occupancy in place rather than resetting it to zero.
 			if total := data.Usage.Total(); total > 0 {
@@ -251,8 +247,7 @@ func foldDelegateDetails(state *State, raw json.RawMessage, costComplete *bool) 
 		return
 	}
 	state.SubagentTurns += details.SubagentTurns
-	state.SubagentUsage.InputTokens += details.SubagentUsage.InputTokens
-	state.SubagentUsage.OutputTokens += details.SubagentUsage.OutputTokens
+	state.SubagentUsage = state.SubagentUsage.Add(details.SubagentUsage)
 	state.SubagentCostMicroUSD += details.SubagentCostMicroUSD
 	if !details.SubagentCostComplete {
 		*costComplete = false

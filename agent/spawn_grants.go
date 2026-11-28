@@ -287,6 +287,5 @@ func (s *Spawner) remainingTokens(call tools.Call) (int, bool) {
 func (s *Spawner) addChildUsage(usage model.Usage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.childUse.InputTokens += usage.InputTokens
-	s.childUse.OutputTokens += usage.OutputTokens
+	s.childUse = s.childUse.Add(usage)
 }

@@ -192,7 +192,9 @@ Normalization rules:
   `prompt_tokens_details.cached_tokens` and falls back to
   `prompt_cache_hit_tokens`; both dialects map cache-write and reasoning
   details when present. Old v2 logs decode with `reported=false` and zero
-  subsets.
+  subsets. Every aggregate — run, cumulative, subagent, reconstructed state,
+  and recorded delegate details — adds all fields, so the subsets survive the
+  fold; an aggregate is `reported` when any folded response reported usage.
 - Canonical errors are typed (`HTTPError`, `TransportError`, `ProtocolError`,
   and context overflow); adapters map HTTP statuses and provider error bodies.
 - Both adapters replay the canonical projection; the Responses adapter sets

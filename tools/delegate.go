@@ -327,8 +327,7 @@ func delegateResult(specs []SubagentSpec, outcome SpawnResult, canceled bool) Re
 			details.SubagentCostComplete = false
 		}
 		details.SubagentTurns += report.Turns
-		details.SubagentUsage.InputTokens += report.Usage.InputTokens
-		details.SubagentUsage.OutputTokens += report.Usage.OutputTokens
+		details.SubagentUsage = details.SubagentUsage.Add(report.Usage)
 		details.SubagentCostMicroUSD += report.CostMicroUSD
 		details.Tasks = append(details.Tasks, DelegateTaskDetails{
 			Agent:         sanitizeUTF8(report.Agent),

@@ -94,6 +94,41 @@ func TestDelegateRunsTasksInOrder(t *testing.T) {
 	}
 }
 
+func TestDelegateDetailsCarryEveryUsageField(t *testing.T) {
+	first := delegatedReport("explore", SubagentCompleted)
+	first.Usage = model.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	second := delegatedReport("reviewer", SubagentCompleted)
+	second.Usage = model.Usage{
+		InputTokens: 40, OutputTokens: 10,
+		CachedInputTokens: 10, CacheWriteInputTokens: 4,
+		ReasoningOutputTokens: 2, Reported: true,
+	}
+	spawner := defaultSpawner(first, second)
+	registry := newDelegateRegistry(t, spawner)
+	res := executeRaw(t, registry, "delegate", `{"intent":"delegate","tasks":[
+		{"agent":"explore","task":"first task"},
+		{"agent":"reviewer","task":"second task"}]}`)
+	details, ok := ParseDelegateDetails(res.Details)
+	if !ok {
+		t.Fatalf("details did not decode: %s", res.Details)
+	}
+	want := model.Usage{
+		InputTokens: 1040, OutputTokens: 40,
+		CachedInputTokens: 810, CacheWriteInputTokens: 124,
+		ReasoningOutputTokens: 22, Reported: true,
+	}
+	if details.SubagentUsage != want {
+		t.Fatalf("SubagentUsage = %+v, want %+v", details.SubagentUsage, want)
+	}
+	if len(details.Tasks) != 2 || details.Tasks[0].Usage != first.Usage || details.Tasks[1].Usage != second.Usage {
+		t.Fatalf("task usage = %+v, want %+v and %+v", details.Tasks, first.Usage, second.Usage)
+	}
+}
+
 func TestDelegateRecordsExecutionMode(t *testing.T) {
 	spawner := defaultSpawner(delegatedReport("explore", SubagentCompleted))
 	spawner.execution = ExecutionConcurrent
