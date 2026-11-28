@@ -8,6 +8,19 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-11-28
+
+This is a minor release with three additive public-surface changes and two
+fixes. Nothing is removed or renamed, the session schema stays `2`, the toolset
+stays `toolset-v3` because no builtin is added, the prompt template is
+unchanged, and `go.mod` is unchanged.
+
+The limits fix does change observable behavior. A request carries
+`max_tokens`/`max_output_tokens` only when the host sets
+`Limits.MaxOutputTokens`; the catalog's advertised output ceiling is display
+metadata again. A host that relied on the implicit budget must set the field to
+keep one.
+
 ### Added
 
 - `ToolResult.Image` lets a caller tool return one image to the model.
@@ -53,6 +66,20 @@ changes are called out under **Changed** and **Removed**.
   `Result.Children[i].Usage`, the recorded delegate details, child progress,
   and `run_end` intact.
   [#35](https://github.com/eddiectc/aharness/issues/35)
+
+### Notes
+
+- No model call ran against a hosted endpoint for this release. The
+  `opencode-go` credential available here is a placeholder and the endpoint
+  answers `401 invalid credential`, so the loop, both dialects' wire paths, and
+  the child-usage fold are covered by fakes only. The live catalog fetch and the
+  recorded request budget were checked: no session sent `max_output_tokens`
+  unless the host set `Limits.MaxOutputTokens`, a non-zero context override on
+  `Resume` cleared an inherited budget, an explicit override set one, and a
+  `Fork` inherited the recorded set.
+- Pending against a working credential: a multi-turn tool-use run on both
+  dialects, `interrupt`/`continue`, and a delegated child's usage reaching the
+  parent totals.
 
 ## [v0.8.0] - 2026-11-27
 
@@ -715,7 +742,8 @@ no binary, CLI, or TUI, and `go.mod` is unchanged by the release.
 - Real-provider smokes remain a release prerequisite for a stable release; the
   automated suite runs against fake providers.
 
-[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/eddiectc/aharness/compare/v0.9.0...HEAD
+[v0.9.0]: https://github.com/eddiectc/aharness/compare/v0.8.0...v0.9.0
 [v0.8.0]: https://github.com/eddiectc/aharness/compare/v0.7.2...v0.8.0
 [v0.7.2]: https://github.com/eddiectc/aharness/compare/v0.7.1...v0.7.2
 [v0.7.1]: https://github.com/eddiectc/aharness/compare/v0.7.0...v0.7.1
