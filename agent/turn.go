@@ -235,9 +235,7 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 		res.Err = err
 		return r.finishTerminal(res, st, StopInternalError, "failed to record the model response")
 	}
-	cumulativeUsage := st.usage
-	cumulativeUsage.InputTokens += comp.resp.Usage.InputTokens
-	cumulativeUsage.OutputTokens += comp.resp.Usage.OutputTokens
+	cumulativeUsage := st.usage.Add(comp.resp.Usage)
 	contextTokens := st.contextTokens
 	if total := comp.resp.Usage.Total(); total > 0 {
 		contextTokens = total
@@ -266,13 +264,11 @@ func (r *Runner) processCompletion(ctx context.Context, res *Result, st *runStat
 	}); err != nil {
 		return r.failDisplay(res, st, err, "failed to display the model response")
 	}
-	st.usage.InputTokens += comp.resp.Usage.InputTokens
-	st.usage.OutputTokens += comp.resp.Usage.OutputTokens
+	st.usage = st.usage.Add(comp.resp.Usage)
 	if total := comp.resp.Usage.Total(); total > 0 {
 		st.contextTokens = total
 	}
-	st.runUsage.InputTokens += comp.resp.Usage.InputTokens
-	st.runUsage.OutputTokens += comp.resp.Usage.OutputTokens
+	st.runUsage = st.runUsage.Add(comp.resp.Usage)
 	if priced {
 		st.cost += cost
 		st.runCost += cost

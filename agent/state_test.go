@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -13,15 +14,77 @@ import (
 
 func TestStateTotalUsage(t *testing.T) {
 	state := State{
-		Usage:         model.Usage{InputTokens: 10, OutputTokens: 5},
-		SubagentUsage: model.Usage{InputTokens: 3, OutputTokens: 2},
+		Usage: model.Usage{
+			InputTokens: 10, OutputTokens: 5,
+			CachedInputTokens: 4, CacheWriteInputTokens: 2,
+			ReasoningOutputTokens: 1, Reported: true,
+		},
+		SubagentUsage: model.Usage{
+			InputTokens: 3, OutputTokens: 2,
+			CachedInputTokens: 1, CacheWriteInputTokens: 1,
+			ReasoningOutputTokens: 1, Reported: true,
+		},
 	}
-	total := state.TotalUsage()
-	if total.InputTokens != 13 || total.OutputTokens != 7 {
-		t.Fatalf("TotalUsage = %+v", total)
+	want := model.Usage{
+		InputTokens: 13, OutputTokens: 7,
+		CachedInputTokens: 5, CacheWriteInputTokens: 3,
+		ReasoningOutputTokens: 2, Reported: true,
+	}
+	if total := state.TotalUsage(); total != want {
+		t.Fatalf("TotalUsage = %+v, want %+v", total, want)
 	}
 	if state.Usage.InputTokens != 10 || state.SubagentUsage.InputTokens != 3 {
 		t.Fatal("TotalUsage mutated the state")
+	}
+}
+
+func TestInspectFoldsEveryUsageField(t *testing.T) {
+	first := model.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	second := model.Usage{
+		InputTokens: 40, OutputTokens: 10,
+		CachedInputTokens: 10, CacheWriteInputTokens: 5,
+		ReasoningOutputTokens: 4, Reported: true,
+	}
+	child := model.Usage{
+		InputTokens: 25, OutputTokens: 8,
+		CachedInputTokens: 5, CacheWriteInputTokens: 3,
+		ReasoningOutputTokens: 2, Reported: true,
+	}
+	events := []session.Event{
+		startEvent(t, "/workspace"),
+		newTestEvent(t, session.TypeModelResponse, 1, string(model.RoleAssistant), modelResponseData{Usage: first}),
+		newTestEvent(t, session.TypeModelResponse, 2, string(model.RoleAssistant), modelResponseData{Usage: second}),
+		newTestEvent(t, session.TypeToolResult, 2, string(model.RoleTool), toolResultData{
+			CallID: "d1", Name: "delegate", OK: true, Code: tools.CodeOK,
+			Details: json.RawMessage(`{"tasks":[{"agent":"explore","status":"completed","usage":{"input_tokens":25,"output_tokens":8,"cached_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2,"reported":true}}],"status":"completed","subagent_turns":1,"subagent_usage":{"input_tokens":25,"output_tokens":8,"cached_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2,"reported":true},"subagent_cost_complete":true}`),
+		}),
+	}
+	state, err := Inspect(events)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	wantUsage := model.Usage{
+		InputTokens: 1040, OutputTokens: 40,
+		CachedInputTokens: 810, CacheWriteInputTokens: 125,
+		ReasoningOutputTokens: 24, Reported: true,
+	}
+	if state.Usage != wantUsage {
+		t.Fatalf("Usage = %+v, want %+v", state.Usage, wantUsage)
+	}
+	if state.SubagentUsage != child {
+		t.Fatalf("SubagentUsage = %+v, want %+v", state.SubagentUsage, child)
+	}
+	wantTotal := model.Usage{
+		InputTokens: 1065, OutputTokens: 48,
+		CachedInputTokens: 815, CacheWriteInputTokens: 128,
+		ReasoningOutputTokens: 26, Reported: true,
+	}
+	if total := state.TotalUsage(); total != wantTotal {
+		t.Fatalf("TotalUsage = %+v, want %+v", total, wantTotal)
 	}
 }
 

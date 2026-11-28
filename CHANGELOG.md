@@ -8,6 +8,26 @@ changes are called out under **Changed** and **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- `Usage.Add` (facade and `model`) folds one usage value into another. Totals
+  and the cached, cache-write, and reasoning subsets add; the result is
+  `Reported` when either side reported usage. It is the single fold every
+  aggregate uses, so a future usage field cannot drop out of one.
+
+### Fixed
+
+- Every usage aggregate now carries the cached, cache-write, and reasoning
+  counts and the `Reported` flag, not only the input and output totals. A
+  one-response run whose model reported all six fields returned zero subsets
+  and `Reported=false` in `Result.RunUsage`, `Result.CumulativeUsage`,
+  `State.Usage`, and every folded child total, so `UncachedInputTokens()`
+  reported the full input and a host that gates the token display on `Reported`
+  hid it. A delegated child's usage now reaches `Result.SubagentUsage`,
+  `Result.Children[i].Usage`, the recorded delegate details, child progress,
+  and `run_end` intact.
+  [#35](https://github.com/eddiectc/aharness/issues/35)
+
 ## [v0.8.0] - 2026-11-27
 
 This is a minor release with two additive public-surface changes and one fix.

@@ -110,6 +110,20 @@ type Usage struct {
 // are already included in the totals.
 func (u Usage) Total() int { return u.InputTokens + u.OutputTokens }
 
+// Add returns the sum of u and other. Totals and the cached, cache-write, and
+// reasoning subset counts add independently; Reported is true when either side
+// reported a usage object. Add is the only fold callers should use, so a new
+// usage field cannot silently drop out of an aggregate.
+func (u Usage) Add(other Usage) Usage {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CachedInputTokens += other.CachedInputTokens
+	u.CacheWriteInputTokens += other.CacheWriteInputTokens
+	u.ReasoningOutputTokens += other.ReasoningOutputTokens
+	u.Reported = u.Reported || other.Reported
+	return u
+}
+
 // UncachedInputTokens returns the non-cached, non-cache-write portion of the
 // input. The result is clamped at zero so a malformed provider payload cannot
 // produce a negative billable count.

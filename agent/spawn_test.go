@@ -174,6 +174,40 @@ func TestSpawnerRecordsAChildSession(t *testing.T) {
 	}
 }
 
+func TestSpawnerKeepsEveryChildUsageField(t *testing.T) {
+	f := newSpawnFixture(t, testConfig())
+	usage := model.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	f.completer.steps = []scriptStep{completedStep("the child report", usage)}
+	report := onlyReport(t, f.spawn(t, tools.Call{ID: "call-1", Turn: 3},
+		tools.SubagentSpec{Agent: "explore", Task: "read"}))
+	if report.Usage != usage {
+		t.Fatalf("report usage = %+v, want %+v", report.Usage, usage)
+	}
+	var progress []SubagentProgress
+	var finished []SubagentFinished
+	for _, ev := range f.display {
+		switch ev := ev.(type) {
+		case SubagentProgress:
+			progress = append(progress, ev)
+		case SubagentFinished:
+			finished = append(finished, ev)
+		}
+	}
+	if len(progress) == 0 {
+		t.Fatal("no SubagentProgress events")
+	}
+	if got := progress[len(progress)-1].Usage; got != usage {
+		t.Fatalf("progress usage = %+v, want %+v", got, usage)
+	}
+	if len(finished) != 1 || finished[0].Usage != usage {
+		t.Fatalf("finished usage = %+v, want %+v", finished, usage)
+	}
+}
+
 func TestSpawnerChildPromptFollowsParentVersion(t *testing.T) {
 	frozenTestRule := "Run the relevant tests after changing code"
 	v3TestRule := "Run the relevant tests before reporting the change done"

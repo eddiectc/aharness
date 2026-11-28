@@ -187,6 +187,44 @@ func TestResponseCompletedCarriesCumulativeProgress(t *testing.T) {
 	}
 }
 
+func TestRunKeepsEveryUsageField(t *testing.T) {
+	usage := aharness.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	ag, _, _ := newTestAgent(t, nil, &scriptedModel{responses: []aharness.Response{{
+		Text: "done", FinishReason: aharness.FinishStop, Usage: usage,
+	}}})
+	var completed []aharness.ResponseCompleted
+	result, err := ag.Run(context.Background(), "say done", aharness.RunOptions{
+		OnEvent: func(ev aharness.Event) {
+			if ev, ok := ev.(aharness.ResponseCompleted); ok {
+				completed = append(completed, ev)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.RunUsage != usage || result.CumulativeUsage != usage {
+		t.Fatalf("run usage = %+v, cumulative = %+v, want %+v", result.RunUsage, result.CumulativeUsage, usage)
+	}
+	if got := result.RunUsage.UncachedInputTokens(); got != 80 {
+		t.Fatalf("UncachedInputTokens = %d, want 80", got)
+	}
+	if len(completed) != 1 || completed[0].Usage != usage || completed[0].CumulativeUsage != usage {
+		t.Fatalf("response_completed usage = %+v, want %+v", completed, usage)
+	}
+	state, err := ag.State()
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.Usage != usage || state.TotalUsage() != usage {
+		t.Fatalf("state usage = %+v, total = %+v, want %+v", state.Usage, state.TotalUsage(), usage)
+	}
+}
+
 func TestRunEventsCarryOneRunID(t *testing.T) {
 	ag, _, _ := newTestAgent(t, nil, &scriptedModel{responses: []aharness.Response{{
 		Text: "done", FinishReason: aharness.FinishStop,

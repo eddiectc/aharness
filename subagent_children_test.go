@@ -38,11 +38,16 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 		},
 		{Text: "parent done", FinishReason: aharness.FinishStop, Usage: aharness.Usage{InputTokens: 1, OutputTokens: 1, Reported: true}},
 	}}
+	childUsage := aharness.Usage{
+		InputTokens: 2, OutputTokens: 1,
+		CachedInputTokens: 1, CacheWriteInputTokens: 1,
+		ReasoningOutputTokens: 1, Reported: true,
+	}
 	modelCfg := testModel(parentModel)
 	modelCfg.NewCompleter = func(string) aharness.Model {
 		return &scriptedModel{responses: []aharness.Response{{
 			Text: "child done", FinishReason: aharness.FinishStop,
-			Usage: aharness.Usage{InputTokens: 2, OutputTokens: 1, Reported: true},
+			Usage: childUsage,
 		}}}
 	}
 	ag, err := aharness.New(context.Background(), aharness.Config{
@@ -63,7 +68,7 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 	if len(result.Children) != 3 {
 		t.Fatalf("Children = %+v, want 3 rows", result.Children)
 	}
-	var turns, input, output int
+	var turns int
 	sessions := map[string]bool{}
 	for _, child := range result.Children {
 		if child.CallID != "delegate-1" {
@@ -75,16 +80,20 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 		if child.Error != "" {
 			t.Fatalf("completed child error = %q", child.Error)
 		}
-		if child.Turns != 1 || child.Usage.InputTokens != 2 || child.Usage.OutputTokens != 1 {
-			t.Fatalf("child outcome = %+v", child)
+		if child.Turns != 1 || child.Usage != childUsage {
+			t.Fatalf("child outcome = %+v, want usage %+v", child, childUsage)
 		}
 		turns += child.Turns
-		input += child.Usage.InputTokens
-		output += child.Usage.OutputTokens
 		sessions[child.Session] = true
 	}
-	if turns != result.SubagentTurns || input != result.SubagentUsage.InputTokens || output != result.SubagentUsage.OutputTokens {
-		t.Fatalf("children totals %d/%d/%d do not match subagent %d/%+v", turns, input, output, result.SubagentTurns, result.SubagentUsage)
+	wantSubagentUsage := aharness.Usage{
+		InputTokens: 6, OutputTokens: 3,
+		CachedInputTokens: 3, CacheWriteInputTokens: 3,
+		ReasoningOutputTokens: 3, Reported: true,
+	}
+	if turns != result.SubagentTurns || result.SubagentUsage != wantSubagentUsage {
+		t.Fatalf("children turns %d and subagent usage %+v do not match %d/%+v",
+			turns, result.SubagentUsage, result.SubagentTurns, wantSubagentUsage)
 	}
 	if len(sessions) != 3 {
 		t.Fatalf("child sessions = %v, want 3 distinct", sessions)
@@ -93,15 +102,18 @@ func TestCompletedDelegateCallFoldsChildOutcomes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("State: %v", err)
 	}
-	wantUsage := aharness.Usage{
-		InputTokens:  state.Usage.InputTokens + state.SubagentUsage.InputTokens,
-		OutputTokens: state.Usage.OutputTokens + state.SubagentUsage.OutputTokens,
+	wantOwnUsage := aharness.Usage{InputTokens: 2, OutputTokens: 2, Reported: true}
+	wantTotalUsage := aharness.Usage{
+		InputTokens: 8, OutputTokens: 5,
+		CachedInputTokens: 3, CacheWriteInputTokens: 3,
+		ReasoningOutputTokens: 3, Reported: true,
 	}
-	if state.TotalUsage() != wantUsage {
-		t.Fatalf("TotalUsage = %+v from %+v + %+v", state.TotalUsage(), state.Usage, state.SubagentUsage)
+	if state.Usage != wantOwnUsage || state.SubagentUsage != wantSubagentUsage {
+		t.Fatalf("state usage = %+v + %+v, want %+v + %+v",
+			state.Usage, state.SubagentUsage, wantOwnUsage, wantSubagentUsage)
 	}
-	if state.SubagentUsage.Total() == 0 {
-		t.Fatal("delegated session recorded no subagent usage")
+	if got := state.TotalUsage(); got != wantTotalUsage {
+		t.Fatalf("TotalUsage = %+v, want %+v", got, wantTotalUsage)
 	}
 }
 

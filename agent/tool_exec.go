@@ -240,10 +240,7 @@ func (st *runState) totalTokens() int {
 // usage. It is what a new child subtracts from the budget, so children from
 // earlier runs in the same session are not forgotten.
 func (st *runState) cumulativeUsage() model.Usage {
-	usage := st.usage
-	usage.InputTokens += st.subagentUsage.InputTokens
-	usage.OutputTokens += st.subagentUsage.OutputTokens
-	return usage
+	return st.usage.Add(st.subagentUsage)
 }
 
 // foldSubagent adds one delegate result to the run's subagent totals. A
@@ -258,8 +255,7 @@ func (r *Runner) foldSubagent(st *runState, call model.ToolCall, result tools.Re
 		return
 	}
 	st.subagentTurns += details.SubagentTurns
-	st.subagentUsage.InputTokens += details.SubagentUsage.InputTokens
-	st.subagentUsage.OutputTokens += details.SubagentUsage.OutputTokens
+	st.subagentUsage = st.subagentUsage.Add(details.SubagentUsage)
 	st.subagentCost += details.SubagentCostMicroUSD
 	if !details.SubagentCostComplete {
 		st.subagentCostComplete = false

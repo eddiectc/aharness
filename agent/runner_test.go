@@ -153,6 +153,46 @@ func TestRunCompleted(t *testing.T) {
 	}
 }
 
+func TestRunnerKeepsEveryUsageField(t *testing.T) {
+	usage := model.Usage{
+		InputTokens: 1000, OutputTokens: 30,
+		CachedInputTokens: 800, CacheWriteInputTokens: 120,
+		ReasoningOutputTokens: 20, Reported: true,
+	}
+	store := &fakeStore{}
+	comp := &fakeCompleter{steps: []scriptStep{completedStep("done", usage)}}
+	runner := newRunner(testConfig(), comp, &fakeToolset{}, store)
+	var completed []ResponseCompleted
+	runner.cfg.Display = func(ev DisplayEvent) error {
+		if ev, ok := ev.(ResponseCompleted); ok {
+			completed = append(completed, ev)
+		}
+		return nil
+	}
+	startTestSession(t, runner)
+	res, err := runner.Run(t.Context(), defaultRunOptions())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.RunUsage != usage || res.CumulativeUsage != usage {
+		t.Fatalf("run usage = %+v, cumulative = %+v, want %+v", res.RunUsage, res.CumulativeUsage, usage)
+	}
+	if len(completed) != 1 || completed[0].Usage != usage || completed[0].CumulativeUsage != usage {
+		t.Fatalf("response_completed usage = %+v, want %+v", completed, usage)
+	}
+	end := decodePayload[runEndData](t, eventsByType(store, session.TypeRunEnd)[0])
+	if end.RunUsage != usage || end.Usage != usage {
+		t.Fatalf("run_end usage = %+v/%+v, want %+v", end.RunUsage, end.Usage, usage)
+	}
+	state, err := Inspect(store.events)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if state.Usage != usage {
+		t.Fatalf("state usage = %+v, want %+v", state.Usage, usage)
+	}
+}
+
 func TestWriteSessionStartRecordsAppendedPrompt(t *testing.T) {
 	cfg := testConfig()
 	cfg.AppendedPrompt = "Workspace rules:\n- Read AGENTS.md before editing."

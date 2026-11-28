@@ -31,6 +31,59 @@ func TestUsageUncachedClampsNegative(t *testing.T) {
 	}
 }
 
+func TestUsageAddCarriesEveryField(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  Usage
+		right Usage
+		want  Usage
+	}{
+		{
+			name: "totals and subsets add",
+			left: Usage{
+				InputTokens: 1000, OutputTokens: 30,
+				CachedInputTokens: 800, CacheWriteInputTokens: 120,
+				ReasoningOutputTokens: 20, Reported: true,
+			},
+			right: Usage{
+				InputTokens: 10, OutputTokens: 5,
+				CachedInputTokens: 2, CacheWriteInputTokens: 3,
+				ReasoningOutputTokens: 1, Reported: true,
+			},
+			want: Usage{
+				InputTokens: 1010, OutputTokens: 35,
+				CachedInputTokens: 802, CacheWriteInputTokens: 123,
+				ReasoningOutputTokens: 21, Reported: true,
+			},
+		},
+		{
+			name:  "reported on the left only",
+			left:  Usage{InputTokens: 2, Reported: true},
+			right: Usage{OutputTokens: 3},
+			want:  Usage{InputTokens: 2, OutputTokens: 3, Reported: true},
+		},
+		{
+			name:  "reported on the right only",
+			left:  Usage{InputTokens: 2},
+			right: Usage{OutputTokens: 3, Reported: true},
+			want:  Usage{InputTokens: 2, OutputTokens: 3, Reported: true},
+		},
+		{
+			name:  "absent on both sides",
+			left:  Usage{InputTokens: 2},
+			right: Usage{OutputTokens: 3},
+			want:  Usage{InputTokens: 2, OutputTokens: 3},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.left.Add(tc.right); got != tc.want {
+				t.Fatalf("%+v + %+v = %+v, want %+v", tc.left, tc.right, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateUsage(t *testing.T) {
 	tests := []struct {
 		name    string

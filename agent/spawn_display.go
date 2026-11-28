@@ -185,8 +185,7 @@ func (d *childDisplay) display(ev DisplayEvent) error {
 		if total := ev.Usage.Total(); total > 0 {
 			d.contextTokens = total
 		}
-		d.usage.InputTokens += ev.Usage.InputTokens
-		d.usage.OutputTokens += ev.Usage.OutputTokens
+		d.usage = d.usage.Add(ev.Usage)
 		if cost, priced := d.pricing.Cost(ev.Usage); priced {
 			d.cost += cost
 		}
